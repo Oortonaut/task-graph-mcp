@@ -30,21 +30,21 @@ pub struct ServerConfig {
     #[serde(default = "default_db_path")]
     pub db_path: PathBuf,
 
-    /// Default maximum claims per agent.
+    /// Maximum claims per agent.
     #[serde(default = "default_claim_limit")]
-    pub default_claim_limit: i32,
+    pub claim_limit: i32,
 
-    /// Default timeout for stale claims in seconds.
+    /// Timeout for stale claims in seconds.
     #[serde(default = "default_stale_timeout")]
-    pub default_stale_timeout_seconds: i64,
+    pub stale_timeout_seconds: i64,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             db_path: default_db_path(),
-            default_claim_limit: default_claim_limit(),
-            default_stale_timeout_seconds: default_stale_timeout(),
+            claim_limit: default_claim_limit(),
+            stale_timeout_seconds: default_stale_timeout(),
         }
     }
 }
@@ -97,14 +97,14 @@ impl Config {
     /// Load configuration from file.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
+        let config: Config = serde_yaml::from_str(&content)?;
         Ok(config)
     }
 
     /// Load configuration from default locations or return defaults.
     pub fn load_or_default() -> Self {
-        // Try .task-graph/config.toml
-        if let Ok(config) = Self::load(".task-graph/config.toml") {
+        // Try .task-graph/config.yaml
+        if let Ok(config) = Self::load(".task-graph/config.yaml") {
             return config;
         }
 
@@ -117,13 +117,13 @@ impl Config {
 
         if let Ok(limit) = std::env::var("TASK_GRAPH_CLAIM_LIMIT") {
             if let Ok(limit) = limit.parse() {
-                config.server.default_claim_limit = limit;
+                config.server.claim_limit = limit;
             }
         }
 
         if let Ok(timeout) = std::env::var("TASK_GRAPH_STALE_TIMEOUT") {
             if let Ok(timeout) = timeout.parse() {
-                config.server.default_stale_timeout_seconds = timeout;
+                config.server.stale_timeout_seconds = timeout;
             }
         }
 

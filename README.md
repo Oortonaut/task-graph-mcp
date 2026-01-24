@@ -51,16 +51,16 @@ Options:
 
 ## Configuration
 
-Create `.task-graph/config.toml`:
+Create `.task-graph/config.yaml`:
 
-```toml
-[server]
-db_path = ".task-graph/tasks.db"
-default_claim_limit = 5
-default_stale_timeout_seconds = 900
+```yaml
+server:
+  db_path: .task-graph/tasks.db
+  claim_limit: 5
+  stale_timeout_seconds: 900
 
-[paths]
-style = "relative"  # or "project_prefixed"
+paths:
+  style: relative  # or project_prefixed
 ```
 
 Environment variables:
