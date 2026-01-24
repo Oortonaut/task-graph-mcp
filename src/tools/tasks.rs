@@ -3,6 +3,7 @@
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
+use crate::error::ToolError;
 use crate::format::{format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
 use crate::types::{Priority, TaskTreeInput};
 use anyhow::Result;
@@ -212,7 +213,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
 
 pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let title = get_string(&args, "title")
-        .ok_or_else(|| anyhow::anyhow!("title is required"))?;
+        .ok_or_else(|| ToolError::missing_field("title"))?;
     let description = get_string(&args, "description");
     let parent_id = get_string(&args, "parent");
     let priority = get_string(&args, "priority").and_then(|s| Priority::from_str(&s));
@@ -249,7 +250,7 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
     let tree: TaskTreeInput = serde_json::from_value(
         args.get("tree")
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("tree is required"))?,
+            .ok_or_else(|| ToolError::missing_field("tree"))?,
     )?;
     let parent_id = get_string(&args, "parent");
 
@@ -263,7 +264,7 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
 
 pub fn get(db: &Database, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let include_children = get_bool(&args, "children").unwrap_or(false);
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::from_str(&s))
@@ -271,11 +272,11 @@ pub fn get(db: &Database, args: Value) -> Result<Value> {
 
     if include_children {
         let tree = db.get_task_tree(&task_id)?
-            .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
+            .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
         Ok(serde_json::to_value(tree)?)
     } else {
         let task = db.get_task(&task_id)?
-            .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
+            .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
 
         let blocked_by = db.get_blockers(&task_id)?;
 
@@ -370,7 +371,7 @@ pub fn list_tasks(db: &Database, states_config: &StatesConfig, args: Value) -> R
 
 pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let title = get_string(&args, "title");
     let description = if args.get("description").is_some() {
         Some(get_string(&args, "description"))
@@ -392,7 +393,7 @@ pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
 
 pub fn delete(db: &Database, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let cascade = get_bool(&args, "cascade").unwrap_or(false);
 
     db.delete_task(&task_id, cascade)?;

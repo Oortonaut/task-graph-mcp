@@ -3,6 +3,7 @@
 use super::{get_f64, get_i64, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
+use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -96,7 +97,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 
 pub fn thinking(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let thought = get_string(&args, "thought");
     let task_ids = get_string_array(&args, "tasks");
 
@@ -113,7 +114,7 @@ pub fn thinking(db: &Database, args: Value) -> Result<Value> {
 
 pub fn get_state_history(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
 
     let history = db.get_task_state_history(&task_id)?;
     let current_duration = db.get_current_state_duration(&task_id, states_config)?;
@@ -126,7 +127,7 @@ pub fn get_state_history(db: &Database, states_config: &StatesConfig, args: Valu
 
 pub fn log_cost(db: &Database, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
 
     let tokens_in = get_i64(&args, "tokens_in");
     let tokens_cached = get_i64(&args, "tokens_cached");

@@ -30,6 +30,7 @@ pub enum ErrorCode {
     // Internal errors
     DatabaseError,
     InternalError,
+    UnknownTool,
 }
 
 /// Structured error for tool responses.
@@ -142,6 +143,10 @@ impl ToolError {
 
     pub fn internal(err: impl fmt::Display) -> Self {
         Self::new(ErrorCode::InternalError, err.to_string())
+    }
+
+    pub fn unknown_tool(name: &str) -> Self {
+        Self::new(ErrorCode::UnknownTool, format!("Unknown tool: {}", name))
     }
 }
 

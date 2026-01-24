@@ -3,6 +3,7 @@
 use super::{get_string, get_string_array, make_tool_with_prompts};
 use crate::config::Prompts;
 use crate::db::Database;
+use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -88,9 +89,9 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 
 pub fn claim_file(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let file_path = get_string(&args, "file")
-        .ok_or_else(|| anyhow::anyhow!("file is required"))?;
+        .ok_or_else(|| ToolError::missing_field("file"))?;
     let reason = get_string(&args, "reason");
 
     // Lock the file
@@ -111,9 +112,9 @@ pub fn claim_file(db: &Database, args: Value) -> Result<Value> {
 
 pub fn release_file(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let file_path = get_string(&args, "file")
-        .ok_or_else(|| anyhow::anyhow!("file is required"))?;
+        .ok_or_else(|| ToolError::missing_field("file"))?;
     let reason = get_string(&args, "reason");
 
     // Unlock the file
@@ -142,7 +143,7 @@ pub fn list_files(db: &Database, args: Value) -> Result<Value> {
 
 pub fn claim_updates(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let files = get_string_array(&args, "files");
 
     let updates = db.claim_updates(&agent_id, files)?;

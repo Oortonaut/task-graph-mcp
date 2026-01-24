@@ -3,6 +3,7 @@
 use super::{get_bool, get_string, make_tool_with_prompts};
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
+use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -85,9 +86,9 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
 
 pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let force = get_bool(&args, "force").unwrap_or(false);
 
     let task = if force {
@@ -110,9 +111,9 @@ pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result
 
 pub fn release(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let state = get_string(&args, "state").unwrap_or_else(|| states_config.initial.clone());
 
     db.release_task_with_state(&task_id, &agent_id, &state, states_config)?;
@@ -124,9 +125,9 @@ pub fn release(db: &Database, states_config: &StatesConfig, args: Value) -> Resu
 
 pub fn complete(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
 
     let task = db.complete_task(&task_id, &agent_id, states_config)?;
 

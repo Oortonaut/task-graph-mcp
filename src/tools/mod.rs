@@ -10,6 +10,7 @@ pub mod tracking;
 
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
+use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::Value;
@@ -98,7 +99,7 @@ impl ToolHandler {
             "attachments" => attachments::attachments(&self.db, &self.media_dir, arguments),
             "detach" => attachments::detach(&self.db, &self.media_dir, arguments),
 
-            _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
+            _ => Err(ToolError::unknown_tool(name).into()),
         }
     }
 }

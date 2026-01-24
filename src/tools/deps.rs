@@ -3,6 +3,7 @@
 use super::{get_string, make_tool_with_prompts};
 use crate::config::Prompts;
 use crate::db::Database;
+use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -46,9 +47,9 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 
 pub fn block(db: &Database, args: Value) -> Result<Value> {
     let blocker = get_string(&args, "blocker")
-        .ok_or_else(|| anyhow::anyhow!("blocker is required"))?;
+        .ok_or_else(|| ToolError::missing_field("blocker"))?;
     let blocked = get_string(&args, "blocked")
-        .ok_or_else(|| anyhow::anyhow!("blocked is required"))?;
+        .ok_or_else(|| ToolError::missing_field("blocked"))?;
 
     db.add_dependency(&blocker, &blocked)?;
 
@@ -59,9 +60,9 @@ pub fn block(db: &Database, args: Value) -> Result<Value> {
 
 pub fn unblock(db: &Database, args: Value) -> Result<Value> {
     let blocker = get_string(&args, "blocker")
-        .ok_or_else(|| anyhow::anyhow!("blocker is required"))?;
+        .ok_or_else(|| ToolError::missing_field("blocker"))?;
     let blocked = get_string(&args, "blocked")
-        .ok_or_else(|| anyhow::anyhow!("blocked is required"))?;
+        .ok_or_else(|| ToolError::missing_field("blocked"))?;
 
     db.remove_dependency(&blocker, &blocked)?;
 

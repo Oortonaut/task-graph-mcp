@@ -3,7 +3,8 @@
 use super::{get_bool, get_i32, get_string, make_tool_with_prompts};
 use crate::config::Prompts;
 use crate::db::Database;
-use anyhow::{anyhow, Result};
+use crate::error::{ErrorCode, ToolError};
+use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -125,9 +126,9 @@ fn is_in_media_dir(file_path: &str, media_dir: &Path) -> bool {
 
 pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let name = get_string(&args, "name")
-        .ok_or_else(|| anyhow!("name is required"))?;
+        .ok_or_else(|| ToolError::missing_field("name"))?;
     let content = get_string(&args, "content");
     let mime_type = get_string(&args, "mime").unwrap_or_else(|| "text/plain".to_string());
     let file_path = get_string(&args, "file");
@@ -135,7 +136,7 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
 
     // Validate: need either content or file
     if content.is_none() && file_path.is_none() {
-        return Err(anyhow!("Either 'content' or 'file' must be provided"));
+        return Err(ToolError::new(ErrorCode::InvalidFieldValue, "Either 'content' or 'file' must be provided").into());
     }
 
     // Handle different attachment modes
@@ -143,7 +144,7 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
         // File reference mode: verify file exists
         let path = Path::new(fp);
         if !path.exists() {
-            return Err(anyhow!("File not found: {}", fp));
+            return Err(ToolError::new(ErrorCode::FileNotFound, format!("File not found: {}", fp)).into());
         }
         (String::new(), Some(fp.clone()))
     } else if store_as_file {
@@ -181,7 +182,7 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
 
 pub fn attachments(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let include_content = get_bool(&args, "content").unwrap_or(false);
 
     // Suppress unused warning - media_dir may be used for relative path resolution in the future
@@ -254,9 +255,9 @@ pub fn attachments(db: &Database, media_dir: &Path, args: Value) -> Result<Value
 
 pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
-        .ok_or_else(|| anyhow!("task is required"))?;
+        .ok_or_else(|| ToolError::missing_field("task"))?;
     let order_index = get_i32(&args, "index")
-        .ok_or_else(|| anyhow!("index is required"))?;
+        .ok_or_else(|| ToolError::missing_field("index"))?;
 
     // Get file path before deletion (to clean up media files)
     let file_path = db.get_attachment_file_path(&task_id, order_index)?;

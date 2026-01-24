@@ -3,6 +3,7 @@
 use super::{get_i32, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::Prompts;
 use crate::db::Database;
+use crate::error::ToolError;
 use crate::format::{format_agents_markdown, markdown_to_json, OutputFormat};
 use anyhow::Result;
 use rmcp::model::Tool;
@@ -82,7 +83,7 @@ pub fn connect(db: &Database, args: Value) -> Result<Value> {
 
 pub fn disconnect(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
 
     // Release agent locks before unregistering
     let _ = db.release_agent_locks(&agent_id);
