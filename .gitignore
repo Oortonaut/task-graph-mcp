@@ -1,0 +1,8 @@
+/target
+.claude/
+.serena/
+.task-graph/
+nul
+*.db
+*.db-shm
+*.db-wal

@@ -1,0 +1,47 @@
+[package]
+name = "task-graph-mcp"
+version = "0.1.0"
+edition = "2024"
+description = "MCP server for atomic, token-efficient task management for multi-agent coordination"
+license = "MIT"
+
+[dependencies]
+# MCP protocol
+rmcp = { version = "0.14", features = ["server", "transport-io"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+refinery = { version = "0.8", features = ["rusqlite"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Config
+toml = "0.8"
+
+# Async traits
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "task-graph-mcp"
+path = "src/main.rs"
