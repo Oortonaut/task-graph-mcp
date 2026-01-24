@@ -20,6 +20,7 @@ use rmcp::{
     transport::io::stdio,
 };
 use serde_json::{json, Value};
+use std::fs::OpenOptions;
 use std::sync::Arc;
 use task_graph_mcp::tools::ToolHandler;
 use tracing::{info, Level};
@@ -40,6 +41,10 @@ struct Args {
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
+
+    /// Logging output: 0/off, 1/stdout, 2/stderr (default), or filename
+    #[arg(short, long, default_value = "2")]
+    log: String,
 }
 
 /// MCP server handler.
@@ -199,13 +204,40 @@ impl ServerHandler for TaskGraphServer {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Initialize logging
+    // Initialize logging based on --log option
     let level = if args.verbose { Level::DEBUG } else { Level::INFO };
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .with_writer(std::io::stderr)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+    match args.log.as_str() {
+        "0" | "off" => {
+            // No logging
+        }
+        "1" | "stdout" => {
+            let subscriber = FmtSubscriber::builder()
+                .with_max_level(level)
+                .with_writer(std::io::stdout)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)?;
+        }
+        "2" | "stderr" => {
+            let subscriber = FmtSubscriber::builder()
+                .with_max_level(level)
+                .with_writer(std::io::stderr)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)?;
+        }
+        filename => {
+            // Log to file (append mode)
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(filename)?;
+            let subscriber = FmtSubscriber::builder()
+                .with_max_level(level)
+                .with_writer(file)
+                .with_ansi(false)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)?;
+        }
+    }
 
     // Load configuration
     let mut config = if let Some(config_path) = &args.config {
