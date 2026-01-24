@@ -4,7 +4,7 @@ use super::{now_ms, Database};
 use crate::types::{ClaimEvent, ClaimEventType, ClaimUpdates, FileLock};
 use anyhow::Result;
 use rusqlite::params;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl Database {
     /// Lock a file (advisory).
@@ -61,6 +61,14 @@ impl Database {
             )?;
 
             if deleted > 0 {
+                // Find the claim_id for this file+agent (most recent claim)
+                let claim_id: Option<i64> = conn.query_row(
+                    "SELECT MAX(id) FROM claim_sequence
+                     WHERE file_path = ?1 AND agent_id = ?2 AND event = 'claimed'",
+                    params![file_path, agent_id],
+                    |row| row.get(0),
+                ).ok().flatten();
+
                 // Close any open claim for this file+agent
                 conn.execute(
                     "UPDATE claim_sequence SET end_timestamp = ?1
@@ -68,10 +76,11 @@ impl Database {
                     params![now, file_path, agent_id],
                 )?;
 
-                // Record release event for tracking
+                // Record release event with claim_id reference
                 conn.execute(
-                    "INSERT INTO claim_sequence (file_path, agent_id, event, reason, timestamp) VALUES (?1, ?2, 'released', ?3, ?4)",
-                    params![file_path, agent_id, &reason, now],
+                    "INSERT INTO claim_sequence (file_path, agent_id, event, reason, timestamp, claim_id)
+                     VALUES (?1, ?2, 'released', ?3, ?4, ?5)",
+                    params![file_path, agent_id, &reason, now, claim_id],
                 )?;
             }
 
@@ -98,8 +107,8 @@ impl Database {
                 } else {
                     let placeholders: Vec<String> = paths.iter().map(|_| "?".to_string()).collect();
                     let sql = format!(
-                        "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp 
-                         FROM claim_sequence 
+                        "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp, claim_id
+                         FROM claim_sequence
                          WHERE id > ?1 AND file_path IN ({})
                          ORDER BY id",
                         placeholders.join(", ")
@@ -116,21 +125,15 @@ impl Database {
 
                     let mut stmt = conn.prepare(&sql)?;
                     stmt.query_map(params_refs.as_slice(), |row| {
-                        let id: i64 = row.get(0)?;
-                        let file_path: String = row.get(1)?;
-                        let agent_id: String = row.get(2)?;
-                        let event_str: String = row.get(3)?;
-                        let reason: Option<String> = row.get(4)?;
-                        let timestamp: i64 = row.get(5)?;
-                        let end_timestamp: Option<i64> = row.get(6)?;
                         Ok(ClaimEvent {
-                            id,
-                            file_path,
-                            agent_id,
-                            event: ClaimEventType::from_str(&event_str).unwrap_or(ClaimEventType::Claimed),
-                            reason,
-                            timestamp,
-                            end_timestamp,
+                            id: row.get(0)?,
+                            file_path: row.get(1)?,
+                            agent_id: row.get(2)?,
+                            event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
+                            reason: row.get(4)?,
+                            timestamp: row.get(5)?,
+                            end_timestamp: row.get(6)?,
+                            claim_id: row.get(7)?,
                         })
                     })?
                     .filter_map(|r| r.ok())
@@ -138,27 +141,21 @@ impl Database {
                 }
             } else {
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp 
-                     FROM claim_sequence 
+                    "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp, claim_id
+                     FROM claim_sequence
                      WHERE id > ?1
                      ORDER BY id"
                 )?;
                 stmt.query_map(params![last_seq], |row| {
-                    let id: i64 = row.get(0)?;
-                    let file_path: String = row.get(1)?;
-                    let agent_id: String = row.get(2)?;
-                    let event_str: String = row.get(3)?;
-                    let reason: Option<String> = row.get(4)?;
-                    let timestamp: i64 = row.get(5)?;
-                    let end_timestamp: Option<i64> = row.get(6)?;
                     Ok(ClaimEvent {
-                        id,
-                        file_path,
-                        agent_id,
-                        event: ClaimEventType::from_str(&event_str).unwrap_or(ClaimEventType::Claimed),
-                        reason,
-                        timestamp,
-                        end_timestamp,
+                        id: row.get(0)?,
+                        file_path: row.get(1)?,
+                        agent_id: row.get(2)?,
+                        event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
+                        reason: row.get(4)?,
+                        timestamp: row.get(5)?,
+                        end_timestamp: row.get(6)?,
+                        claim_id: row.get(7)?,
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -181,8 +178,21 @@ impl Database {
                 .filter(|e| e.event == ClaimEventType::Claimed)
                 .cloned()
                 .collect();
+
+            // For releases, only include if agent saw the original claim.
+            // Use claim_id: include if claim_id <= last_seq OR claim_id is in current batch.
+            let new_claim_ids: HashSet<i64> = new_claims.iter()
+                .map(|c| c.id)
+                .collect();
+
             let dropped_claims: Vec<ClaimEvent> = events.iter()
                 .filter(|e| e.event == ClaimEventType::Released)
+                .filter(|release| {
+                    match release.claim_id {
+                        Some(cid) => cid <= last_seq || new_claim_ids.contains(&cid),
+                        None => true, // Legacy releases without claim_id - include them
+                    }
+                })
                 .cloned()
                 .collect();
 

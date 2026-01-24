@@ -173,6 +173,8 @@ pub struct ClaimEvent {
     pub reason: Option<String>,
     pub timestamp: i64,
     pub end_timestamp: Option<i64>,
+    /// For release events: the ID of the corresponding claim event.
+    pub claim_id: Option<i64>,
 }
 
 /// A task state transition event for time tracking.
