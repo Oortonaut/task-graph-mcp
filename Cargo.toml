@@ -13,8 +13,8 @@ rmcp = { version = "0.14", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["full"] }
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled"] }
-refinery = { version = "0.8", features = ["rusqlite"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+refinery = { version = "0.9", features = ["rusqlite"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
