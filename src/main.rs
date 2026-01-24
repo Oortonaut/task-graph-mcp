@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 use clap::Parser;
-use task_graph_mcp::config::{Config, Prompts, StatesConfig};
+use task_graph_mcp::config::{Config, DependenciesConfig, Prompts, StatesConfig};
+use task_graph_mcp::format::OutputFormat;
 use task_graph_mcp::error::ToolError;
 use task_graph_mcp::db::Database;
 use task_graph_mcp::resources::ResourceHandler;
@@ -57,10 +58,28 @@ struct TaskGraphServer {
 }
 
 impl TaskGraphServer {
-    fn new(db: Arc<Database>, media_dir: std::path::PathBuf, prompts: Arc<Prompts>, states_config: Arc<StatesConfig>) -> Self {
+    fn new(
+        db: Arc<Database>,
+        media_dir: std::path::PathBuf,
+        skills_dir: std::path::PathBuf,
+        prompts: Arc<Prompts>,
+        states_config: Arc<StatesConfig>,
+        deps_config: Arc<DependenciesConfig>,
+        default_format: OutputFormat,
+    ) -> Self {
         Self {
-            tool_handler: Arc::new(ToolHandler::new(Arc::clone(&db), media_dir, Arc::clone(&prompts), Arc::clone(&states_config))),
-            resource_handler: Arc::new(ResourceHandler::new(db, states_config)),
+            tool_handler: Arc::new(ToolHandler::new(
+                Arc::clone(&db),
+                media_dir,
+                skills_dir.clone(),
+                Arc::clone(&prompts),
+                Arc::clone(&states_config),
+                Arc::clone(&deps_config),
+                default_format,
+            )),
+            resource_handler: Arc::new(
+                ResourceHandler::new(db, states_config, deps_config).with_skills_dir(skills_dir),
+            ),
             prompts,
         }
     }
@@ -282,7 +301,16 @@ async fn main() -> Result<()> {
 
     // Create server handler
     let states_config = Arc::new(config.states.clone());
-    let server = TaskGraphServer::new(db, config.server.media_dir.clone(), prompts, states_config);
+    let deps_config = Arc::new(config.dependencies.clone());
+    let server = TaskGraphServer::new(
+        db,
+        config.server.media_dir.clone(),
+        config.server.skills_dir.clone(),
+        prompts,
+        states_config,
+        deps_config,
+        config.server.default_format,
+    );
 
     // Run the stdio server
     info!("Server ready, listening on stdio");

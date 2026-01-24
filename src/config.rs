@@ -1,5 +1,6 @@
 //! Configuration loading and management.
 
+use crate::format::OutputFormat;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,6 +17,9 @@ pub struct Config {
 
     #[serde(default)]
     pub states: StatesConfig,
+
+    #[serde(default)]
+    pub dependencies: DependenciesConfig,
 }
 
 impl Default for Config {
@@ -24,6 +28,7 @@ impl Default for Config {
             server: ServerConfig::default(),
             paths: PathsConfig::default(),
             states: StatesConfig::default(),
+            dependencies: DependenciesConfig::default(),
         }
     }
 }
@@ -46,6 +51,14 @@ pub struct ServerConfig {
     /// Timeout for stale claims in seconds.
     #[serde(default = "default_stale_timeout")]
     pub stale_timeout_seconds: i64,
+
+    /// Default output format for query results (json or markdown).
+    #[serde(default)]
+    pub default_format: OutputFormat,
+
+    /// Path to the skills directory for skill overrides.
+    #[serde(default = "default_skills_dir")]
+    pub skills_dir: PathBuf,
 }
 
 impl Default for ServerConfig {
@@ -55,6 +68,8 @@ impl Default for ServerConfig {
             media_dir: default_media_dir(),
             claim_limit: default_claim_limit(),
             stale_timeout_seconds: default_stale_timeout(),
+            default_format: OutputFormat::default(),
+            skills_dir: default_skills_dir(),
         }
     }
 }
@@ -65,6 +80,10 @@ fn default_db_path() -> PathBuf {
 
 fn default_media_dir() -> PathBuf {
     PathBuf::from(".task-graph/media")
+}
+
+fn default_skills_dir() -> PathBuf {
+    PathBuf::from(".task-graph/skills")
 }
 
 fn default_claim_limit() -> i32 {
@@ -201,6 +220,146 @@ pub struct StateDefinition {
     /// Whether time spent in this state should be tracked (accumulated to time_actual_ms).
     #[serde(default)]
     pub timed: bool,
+}
+
+
+/// Dependency type configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependenciesConfig {
+    /// Dependency type definitions.
+    #[serde(default = "default_dependency_definitions")]
+    pub definitions: HashMap<String, DependencyDefinition>,
+}
+
+impl Default for DependenciesConfig {
+    fn default() -> Self {
+        Self {
+            definitions: default_dependency_definitions(),
+        }
+    }
+}
+
+/// Definition of a dependency type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyDefinition {
+    /// Display orientation: "horizontal" (same level) or "vertical" (parent-child).
+    pub display: DependencyDisplay,
+
+    /// What this dependency blocks: "start" (blocks claiming) or "completion" (blocks completing).
+    pub blocks: BlockTarget,
+}
+
+/// Display orientation for dependency visualization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyDisplay {
+    /// Same level dependencies (blocks, follows).
+    Horizontal,
+    /// Parent-child relationships (contains).
+    Vertical,
+}
+
+/// What a dependency blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockTarget {
+    /// Blocks the task from being started/claimed.
+    Start,
+    /// Blocks the task from being completed.
+    Completion,
+}
+
+fn default_dependency_definitions() -> HashMap<String, DependencyDefinition> {
+    let mut defs = HashMap::new();
+
+    defs.insert(
+        "blocks".to_string(),
+        DependencyDefinition {
+            display: DependencyDisplay::Horizontal,
+            blocks: BlockTarget::Start,
+        },
+    );
+
+    defs.insert(
+        "follows".to_string(),
+        DependencyDefinition {
+            display: DependencyDisplay::Horizontal,
+            blocks: BlockTarget::Start,
+        },
+    );
+
+    defs.insert(
+        "contains".to_string(),
+        DependencyDefinition {
+            display: DependencyDisplay::Vertical,
+            blocks: BlockTarget::Completion,
+        },
+    );
+
+    defs
+}
+
+impl DependenciesConfig {
+    /// Check if a dependency type is valid.
+    pub fn is_valid_dep_type(&self, dep_type: &str) -> bool {
+        self.definitions.contains_key(dep_type)
+    }
+
+    /// Get the definition for a dependency type.
+    pub fn get_definition(&self, dep_type: &str) -> Option<&DependencyDefinition> {
+        self.definitions.get(dep_type)
+    }
+
+    /// Get all dependency types that block start.
+    pub fn start_blocking_types(&self) -> Vec<&str> {
+        self.definitions
+            .iter()
+            .filter(|(_, def)| def.blocks == BlockTarget::Start)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
+    /// Get all dependency types that block completion.
+    pub fn completion_blocking_types(&self) -> Vec<&str> {
+        self.definitions
+            .iter()
+            .filter(|(_, def)| def.blocks == BlockTarget::Completion)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
+    /// Get all vertical (parent-child) dependency types.
+    pub fn vertical_types(&self) -> Vec<&str> {
+        self.definitions
+            .iter()
+            .filter(|(_, def)| def.display == DependencyDisplay::Vertical)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
+    /// Get all dependency type names.
+    pub fn dep_type_names(&self) -> Vec<&str> {
+        self.definitions.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Validate the dependencies configuration.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.definitions.is_empty() {
+            return Err(anyhow::anyhow!(
+                "At least one dependency type must be defined"
+            ));
+        }
+
+        // Check for at least one start-blocking type (for task sequencing)
+        let has_start_blocking = self.definitions.values().any(|d| d.blocks == BlockTarget::Start);
+        if !has_start_blocking {
+            return Err(anyhow::anyhow!(
+                "At least one dependency type with blocks: start must be defined"
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 impl StatesConfig {

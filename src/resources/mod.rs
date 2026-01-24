@@ -2,10 +2,11 @@
 
 pub mod agents;
 pub mod files;
+pub mod skills;
 pub mod stats;
 pub mod tasks;
 
-use crate::config::StatesConfig;
+use crate::config::{DependenciesConfig, StatesConfig};
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::{Annotated, RawResourceTemplate, ResourceTemplate};
@@ -16,11 +17,29 @@ use std::sync::Arc;
 pub struct ResourceHandler {
     pub db: Arc<Database>,
     pub states_config: Arc<StatesConfig>,
+    pub deps_config: Arc<DependenciesConfig>,
+    /// Directory for skill overrides (e.g., `.task-graph/skills/`)
+    pub skills_dir: Option<std::path::PathBuf>,
 }
 
 impl ResourceHandler {
-    pub fn new(db: Arc<Database>, states_config: Arc<StatesConfig>) -> Self {
-        Self { db, states_config }
+    pub fn new(
+        db: Arc<Database>,
+        states_config: Arc<StatesConfig>,
+        deps_config: Arc<DependenciesConfig>,
+    ) -> Self {
+        Self {
+            db,
+            states_config,
+            deps_config,
+            skills_dir: None,
+        }
+    }
+
+    /// Set the skills override directory.
+    pub fn with_skills_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.skills_dir = Some(dir);
+        self
     }
 
     /// Get all available resource templates.
@@ -136,6 +155,29 @@ impl ResourceHandler {
                 },
                 None,
             ),
+            // Skills resources
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "skills://list".into(),
+                    name: "Available Skills".into(),
+                    title: None,
+                    description: Some("List all bundled task-graph skills".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "skills://{name}".into(),
+                    name: "Skill Content".into(),
+                    title: None,
+                    description: Some("Get a specific skill (basics, coordinator, worker, reporting, migration, repair)".into()),
+                    mime_type: Some("text/markdown".into()),
+                    icons: None,
+                },
+                None,
+            ),
         ]
     }
 
@@ -152,6 +194,8 @@ impl ResourceHandler {
             self.read_plan_resource(uri).await
         } else if uri.starts_with("stats://") {
             self.read_stats_resource(uri).await
+        } else if uri.starts_with("skills://") {
+            self.read_skills_resource(uri).await
         } else {
             Err(anyhow::anyhow!("Unknown resource URI: {}", uri))
         }
@@ -162,8 +206,8 @@ impl ResourceHandler {
 
         match path {
             "all" => tasks::get_all_tasks(&self.db),
-            "ready" => tasks::get_ready_tasks(&self.db, &self.states_config),
-            "blocked" => tasks::get_blocked_tasks(&self.db, &self.states_config),
+            "ready" => tasks::get_ready_tasks(&self.db, &self.states_config, &self.deps_config),
+            "blocked" => tasks::get_blocked_tasks(&self.db, &self.states_config, &self.deps_config),
             "claimed" => tasks::get_claimed_tasks(&self.db, None),
             _ if path.starts_with("agent/") => {
                 let agent_id = path.strip_prefix("agent/").unwrap();
@@ -210,6 +254,16 @@ impl ResourceHandler {
         match path {
             "summary" => stats::get_stats_summary(&self.db, &self.states_config),
             _ => Err(anyhow::anyhow!("Unknown stats resource: {}", path)),
+        }
+    }
+
+    async fn read_skills_resource(&self, uri: &str) -> Result<Value> {
+        let path = uri.strip_prefix("skills://").unwrap_or("");
+        let skills_dir = self.skills_dir.as_deref();
+
+        match path {
+            "list" => skills::list_skills(skills_dir),
+            name => skills::get_skill_resource(skills_dir, name),
         }
     }
 }

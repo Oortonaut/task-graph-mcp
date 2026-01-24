@@ -5,12 +5,14 @@ pub mod attachments;
 pub mod claiming;
 pub mod deps;
 pub mod files;
+pub mod skills;
 pub mod tasks;
 pub mod tracking;
 
-use crate::config::{Prompts, StatesConfig};
+use crate::config::{DependenciesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
+use crate::format::OutputFormat;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::Value;
@@ -21,13 +23,32 @@ use std::sync::Arc;
 pub struct ToolHandler {
     pub db: Arc<Database>,
     pub media_dir: PathBuf,
+    pub skills_dir: PathBuf,
     pub prompts: Arc<Prompts>,
     pub states_config: Arc<StatesConfig>,
+    pub deps_config: Arc<DependenciesConfig>,
+    pub default_format: OutputFormat,
 }
 
 impl ToolHandler {
-    pub fn new(db: Arc<Database>, media_dir: PathBuf, prompts: Arc<Prompts>, states_config: Arc<StatesConfig>) -> Self {
-        Self { db, media_dir, prompts, states_config }
+    pub fn new(
+        db: Arc<Database>,
+        media_dir: PathBuf,
+        skills_dir: PathBuf,
+        prompts: Arc<Prompts>,
+        states_config: Arc<StatesConfig>,
+        deps_config: Arc<DependenciesConfig>,
+        default_format: OutputFormat,
+    ) -> Self {
+        Self {
+            db,
+            media_dir,
+            skills_dir,
+            prompts,
+            states_config,
+            deps_config,
+            default_format,
+        }
     }
 
     /// Get all available tools.
@@ -44,7 +65,7 @@ impl ToolHandler {
         tools.extend(tracking::get_tools(&self.prompts));
 
         // Dependency tools
-        tools.extend(deps::get_tools(&self.prompts));
+        tools.extend(deps::get_tools(&self.prompts, &self.deps_config));
 
         // Claiming tools (with dynamic state schema)
         tools.extend(claiming::get_tools(&self.prompts, &self.states_config));
@@ -55,6 +76,9 @@ impl ToolHandler {
         // Attachment tools
         tools.extend(attachments::get_tools(&self.prompts));
 
+        // Skill tools (no prompts needed, always available)
+        tools.extend(skills::get_tools());
+
         tools
     }
 
@@ -64,23 +88,27 @@ impl ToolHandler {
             // Agent tools
             "connect" => agents::connect(&self.db, arguments),
             "disconnect" => agents::disconnect(&self.db, arguments),
-            "list_agents" => agents::list_agents(&self.db, arguments),
+            "list_agents" => agents::list_agents(&self.db, self.default_format, arguments),
 
             // Task tools
             "create" => tasks::create(&self.db, &self.states_config, arguments),
             "create_tree" => tasks::create_tree(&self.db, &self.states_config, arguments),
-            "get" => tasks::get(&self.db, arguments),
-            "list_tasks" => tasks::list_tasks(&self.db, &self.states_config, arguments),
+            "get" => tasks::get(&self.db, self.default_format, arguments),
+            "list_tasks" => {
+                tasks::list_tasks(&self.db, &self.states_config, &self.deps_config, self.default_format, arguments)
+            }
             "update" => tasks::update(&self.db, &self.states_config, arguments),
             "delete" => tasks::delete(&self.db, arguments),
 
             // Tracking tools
             "thinking" => tracking::thinking(&self.db, arguments),
-            "get_state_history" => tracking::get_state_history(&self.db, &self.states_config, arguments),
+            "get_state_history" => {
+                tracking::get_state_history(&self.db, &self.states_config, arguments)
+            }
             "log_cost" => tracking::log_cost(&self.db, arguments),
 
             // Dependency tools
-            "block" => deps::block(&self.db, arguments),
+            "block" => deps::block(&self.db, &self.deps_config, arguments),
             "unblock" => deps::unblock(&self.db, arguments),
 
             // Claiming tools
@@ -98,6 +126,11 @@ impl ToolHandler {
             "attach" => attachments::attach(&self.db, &self.media_dir, arguments),
             "attachments" => attachments::attachments(&self.db, &self.media_dir, arguments),
             "detach" => attachments::detach(&self.db, &self.media_dir, arguments),
+
+            // Skill tools
+            name if skills::is_skill_tool(name) => {
+                skills::call_tool(&self.skills_dir, name, &arguments)
+            }
 
             _ => Err(ToolError::unknown_tool(name).into()),
         }
