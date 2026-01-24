@@ -1,92 +1,97 @@
 //! Task claiming and release tools.
 
-use super::{get_i64, get_string, get_uuid, make_tool};
+use super::{get_bool, get_string, make_tool_with_prompts};
+use crate::config::Prompts;
 use crate::db::Database;
-use crate::types::{EventType, TargetType};
+use crate::types::TaskStatus;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 
-pub fn get_tools() -> Vec<Tool> {
+pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     vec![
-        make_tool(
-            "claim_task",
-            "Claim a task before working on it. Fails if: already claimed, dependencies unsatisfied, agent at max_claims limit, or agent lacks required tags. Sets status to in_progress.",
+        make_tool_with_prompts(
+            "claim",
+            "Commit to working on a task (like adding to a changelist). Fails if: already claimed, deps unsatisfied, agent at max_claims limit, or agent lacks required tags. Sets status to in_progress.",
             json!({
-                "task_id": {
-                    "type": "string",
-                    "description": "Task UUID to claim"
-                },
-                "agent_id": {
+                "agent": {
                     "type": "string",
                     "description": "Agent ID claiming the task"
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Task ID to claim"
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress"],
+                    "description": "Optional state to set (default: in_progress)"
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "Force claim even if owned by another agent (default: false)"
                 }
             }),
-            vec!["task_id", "agent_id"],
+            vec!["agent", "task"],
+            prompts,
         ),
-        make_tool(
-            "release_task",
-            "Release a claimed task without completing it. Resets status to pending so another agent can claim it. Must be the current owner.",
+        make_tool_with_prompts(
+            "release",
+            "Release a claimed task. Use state='pending' for handoff to another agent, or state='failed'/'cancelled' to end the task.",
             json!({
-                "task_id": {
-                    "type": "string",
-                    "description": "Task UUID to release"
-                },
-                "agent_id": {
+                "agent": {
                     "type": "string",
                     "description": "Agent ID releasing the task"
-                }
-            }),
-            vec!["task_id", "agent_id"],
-        ),
-        make_tool(
-            "force_release",
-            "Force release a task regardless of owner.",
-            json!({
-                "task_id": {
+                },
+                "task": {
                     "type": "string",
-                    "description": "Task UUID to force release"
+                    "description": "Task ID to release"
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["pending", "failed", "cancelled"],
+                    "description": "State to set after release (default: pending)"
                 }
             }),
-            vec!["task_id"],
+            vec!["agent", "task"],
+            prompts,
         ),
-        make_tool(
-            "force_release_stale",
-            "Release all claims older than the timeout.",
+        make_tool_with_prompts(
+            "complete",
+            "Mark a task as completed. Shorthand for release with state=completed.",
             json!({
-                "timeout_seconds": {
-                    "type": "integer",
-                    "description": "Timeout in seconds (default: 900 = 15 min)"
+                "agent": {
+                    "type": "string",
+                    "description": "Agent ID completing the task"
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Task ID to complete"
                 }
             }),
-            vec![],
+            vec!["agent", "task"],
+            prompts,
         ),
     ]
 }
 
-pub fn claim_task(db: &Database, args: Value) -> Result<Value> {
-    let task_id = get_uuid(&args, "task_id")
-        .ok_or_else(|| anyhow::anyhow!("task_id is required"))?;
-    let agent_id = get_string(&args, "agent_id")
-        .ok_or_else(|| anyhow::anyhow!("agent_id is required"))?;
+pub fn claim(db: &Database, args: Value) -> Result<Value> {
+    let agent_id = get_string(&args, "agent")
+        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+    let task_id = get_string(&args, "task")
+        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+    let force = get_bool(&args, "force").unwrap_or(false);
 
-    let task = db.claim_task(task_id, &agent_id)?;
-
-    // Publish event for subscribers
-    let _ = db.publish_event(
-        TargetType::Task,
-        &task.id.to_string(),
-        EventType::TaskClaimed,
-        json!({
-            "task_id": task.id.to_string(),
-            "agent_id": &agent_id
-        }),
-    );
+    let task = if force {
+        db.force_claim_task(&task_id, &agent_id)?
+    } else {
+        db.claim_task(&task_id, &agent_id)?
+    };
 
     Ok(json!({
         "success": true,
         "task": {
-            "id": task.id.to_string(),
+            "id": &task.id,
             "title": task.title,
             "status": task.status.as_str(),
             "owner_agent": task.owner_agent,
@@ -95,59 +100,37 @@ pub fn claim_task(db: &Database, args: Value) -> Result<Value> {
     }))
 }
 
-pub fn release_task(db: &Database, args: Value) -> Result<Value> {
-    let task_id = get_uuid(&args, "task_id")
-        .ok_or_else(|| anyhow::anyhow!("task_id is required"))?;
-    let agent_id = get_string(&args, "agent_id")
-        .ok_or_else(|| anyhow::anyhow!("agent_id is required"))?;
+pub fn release(db: &Database, args: Value) -> Result<Value> {
+    let agent_id = get_string(&args, "agent")
+        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+    let task_id = get_string(&args, "task")
+        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
+    let state = get_string(&args, "state")
+        .and_then(|s| TaskStatus::from_str(&s))
+        .unwrap_or(TaskStatus::Pending);
 
-    db.release_task(task_id, &agent_id)?;
-
-    // Publish event for subscribers
-    let _ = db.publish_event(
-        TargetType::Task,
-        &task_id.to_string(),
-        EventType::TaskReleased,
-        json!({
-            "task_id": task_id.to_string(),
-            "agent_id": &agent_id
-        }),
-    );
+    db.release_task_with_state(&task_id, &agent_id, state)?;
 
     Ok(json!({
         "success": true
     }))
 }
 
-pub fn force_release(db: &Database, args: Value) -> Result<Value> {
-    let task_id = get_uuid(&args, "task_id")
-        .ok_or_else(|| anyhow::anyhow!("task_id is required"))?;
+pub fn complete(db: &Database, args: Value) -> Result<Value> {
+    let agent_id = get_string(&args, "agent")
+        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
+    let task_id = get_string(&args, "task")
+        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
 
-    db.force_release(task_id)?;
-
-    // Publish event for subscribers
-    let _ = db.publish_event(
-        TargetType::Task,
-        &task_id.to_string(),
-        EventType::TaskReleased,
-        json!({
-            "task_id": task_id.to_string(),
-            "forced": true
-        }),
-    );
-
-    Ok(json!({
-        "success": true
-    }))
-}
-
-pub fn force_release_stale(db: &Database, args: Value) -> Result<Value> {
-    let timeout_seconds = get_i64(&args, "timeout_seconds").unwrap_or(900);
-
-    let released = db.force_release_stale(timeout_seconds)?;
+    let task = db.complete_task(&task_id, &agent_id)?;
 
     Ok(json!({
         "success": true,
-        "released_count": released
+        "task": {
+            "id": &task.id,
+            "title": task.title,
+            "status": task.status.as_str(),
+            "completed_at": task.completed_at
+        }
     }))
 }

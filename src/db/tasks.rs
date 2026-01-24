@@ -5,7 +5,7 @@ use crate::types::{JoinMode, Priority, Task, TaskStatus, TaskSummary, TaskTree, 
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use std::collections::HashMap;
-use uuid::Uuid;
+use uuid::Uuid; // Still needed for generating new IDs
 
 pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let id: String = row.get("id")?;
@@ -39,13 +39,12 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let cost_usd: f64 = row.get("cost_usd")?;
     let user_metrics_json: Option<String> = row.get("user_metrics")?;
 
-    let metadata_json: Option<String> = row.get("metadata")?;
     let created_at: i64 = row.get("created_at")?;
     let updated_at: i64 = row.get("updated_at")?;
 
     Ok(Task {
-        id: Uuid::parse_str(&id).unwrap(),
-        parent_id: parent_id.map(|s| Uuid::parse_str(&s).unwrap()),
+        id,
+        parent_id,
         title,
         description,
         status: TaskStatus::from_str(&status).unwrap_or(TaskStatus::Pending),
@@ -75,17 +74,16 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         cost_usd,
         user_metrics: user_metrics_json
             .map(|s| serde_json::from_str(&s).unwrap_or_default()),
-        metadata: metadata_json.map(|s| serde_json::from_str(&s).unwrap_or_default()),
         created_at,
         updated_at,
     })
 }
 
 /// Internal helper to get a task using an existing connection (avoids deadlock).
-fn get_task_internal(conn: &Connection, task_id: Uuid) -> Result<Option<Task>> {
+fn get_task_internal(conn: &Connection, task_id: &str) -> Result<Option<Task>> {
     let mut stmt = conn.prepare("SELECT * FROM tasks WHERE id = ?1")?;
 
-    let result = stmt.query_row(params![task_id.to_string()], parse_task_row);
+    let result = stmt.query_row(params![task_id], parse_task_row);
 
     match result {
         Ok(task) => Ok(Some(task)),
@@ -147,36 +145,37 @@ impl Database {
         &self,
         title: String,
         description: Option<String>,
-        parent_id: Option<Uuid>,
+        parent_id: Option<String>,
         priority: Option<Priority>,
         points: Option<i32>,
         time_estimate_ms: Option<i64>,
         needed_tags: Option<Vec<String>>,
         wanted_tags: Option<Vec<String>>,
-        metadata: Option<serde_json::Value>,
+        blocked_by: Option<Vec<String>>,
     ) -> Result<Task> {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7().to_string();
         let now = now_ms();
         let priority = priority.unwrap_or(Priority::Medium);
 
         // Calculate sibling order
-        let sibling_order = self.get_next_sibling_order(parent_id)?;
+        let sibling_order = self.get_next_sibling_order(parent_id.as_deref())?;
 
         let needed_tags = needed_tags.unwrap_or_default();
         let wanted_tags = wanted_tags.unwrap_or_default();
         let needed_tags_json = serde_json::to_string(&needed_tags)?;
         let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
-        let metadata_json = metadata.as_ref().map(|m| serde_json::to_string(m).unwrap());
 
-        self.with_conn(|conn| {
-            conn.execute(
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
+            tx.execute(
                 "INSERT INTO tasks (
                     id, parent_id, title, description, status, priority, join_mode, sibling_order,
-                    needed_tags, wanted_tags, points, time_estimate_ms, metadata, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    needed_tags, wanted_tags, points, time_estimate_ms, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
-                    id.to_string(),
-                    parent_id.map(|p| p.to_string()),
+                    &id,
+                    &parent_id,
                     title,
                     description,
                     TaskStatus::Pending.as_str(),
@@ -187,11 +186,22 @@ impl Database {
                     wanted_tags_json,
                     points,
                     time_estimate_ms,
-                    metadata_json,
                     now,
                     now,
                 ],
             )?;
+
+            // Add dependencies if specified
+            if let Some(blockers) = &blocked_by {
+                for blocker_id in blockers {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO dependencies (from_task_id, to_task_id) VALUES (?1, ?2)",
+                        params![blocker_id, &id],
+                    )?;
+                }
+            }
+
+            tx.commit()?;
 
             Ok(Task {
                 id,
@@ -220,7 +230,6 @@ impl Database {
                 tokens_audio: 0,
                 cost_usd: 0.0,
                 user_metrics: None,
-                metadata,
                 created_at: now,
                 updated_at: now,
             })
@@ -228,12 +237,12 @@ impl Database {
     }
 
     /// Get the next sibling order for a given parent.
-    fn get_next_sibling_order(&self, parent_id: Option<Uuid>) -> Result<i32> {
+    fn get_next_sibling_order(&self, parent_id: Option<&str>) -> Result<i32> {
         self.with_conn(|conn| {
             let max_order: Option<i32> = if let Some(pid) = parent_id {
                 conn.query_row(
                     "SELECT MAX(sibling_order) FROM tasks WHERE parent_id = ?1",
-                    params![pid.to_string()],
+                    params![pid],
                     |row| row.get(0),
                 )?
             } else {
@@ -252,26 +261,26 @@ impl Database {
     pub fn create_task_tree(
         &self,
         input: TaskTreeInput,
-        parent_id: Option<Uuid>,
-    ) -> Result<(Uuid, Vec<Uuid>)> {
+        parent_id: Option<String>,
+    ) -> Result<(String, Vec<String>)> {
         let mut all_ids = Vec::new();
 
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
-            let root_id = create_tree_recursive(&tx, &input, parent_id, 0, &mut all_ids)?;
+            let root_id = create_tree_recursive(&tx, &input, parent_id.as_deref(), 0, &mut all_ids)?;
             tx.commit()?;
             Ok((root_id, all_ids))
         })
     }
 
     /// Get a task by ID.
-    pub fn get_task(&self, task_id: Uuid) -> Result<Option<Task>> {
+    pub fn get_task(&self, task_id: &str) -> Result<Option<Task>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT * FROM tasks WHERE id = ?1",
             )?;
 
-            let result = stmt.query_row(params![task_id.to_string()], parse_task_row);
+            let result = stmt.query_row(params![task_id], parse_task_row);
 
             match result {
                 Ok(task) => Ok(Some(task)),
@@ -282,24 +291,24 @@ impl Database {
     }
 
     /// Get a task with all its children (tree).
-    pub fn get_task_tree(&self, task_id: Uuid) -> Result<Option<TaskTree>> {
+    pub fn get_task_tree(&self, task_id: &str) -> Result<Option<TaskTree>> {
         let task = self.get_task(task_id)?;
         match task {
             None => Ok(None),
             Some(task) => {
-                let children = self.get_children_recursive(task_id)?;
+                let children = self.get_children_recursive(&task.id)?;
                 Ok(Some(TaskTree { task, children }))
             }
         }
     }
 
     /// Get children recursively.
-    fn get_children_recursive(&self, parent_id: Uuid) -> Result<Vec<TaskTree>> {
+    fn get_children_recursive(&self, parent_id: &str) -> Result<Vec<TaskTree>> {
         let children = self.get_children(parent_id)?;
         let mut result = Vec::new();
 
         for child in children {
-            let child_children = self.get_children_recursive(child.id)?;
+            let child_children = self.get_children_recursive(&child.id)?;
             result.push(TaskTree {
                 task: child,
                 children: child_children,
@@ -310,13 +319,13 @@ impl Database {
     }
 
     /// Get direct children of a task.
-    pub fn get_children(&self, parent_id: Uuid) -> Result<Vec<Task>> {
+    pub fn get_children(&self, parent_id: &str) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT * FROM tasks WHERE parent_id = ?1 ORDER BY sibling_order",
             )?;
 
-            let tasks = stmt.query_map(params![parent_id.to_string()], parse_task_row)?
+            let tasks = stmt.query_map(params![parent_id], parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();
 
@@ -327,13 +336,12 @@ impl Database {
     /// Update a task.
     pub fn update_task(
         &self,
-        task_id: Uuid,
+        task_id: &str,
         title: Option<String>,
         description: Option<Option<String>>,
         status: Option<TaskStatus>,
         priority: Option<Priority>,
         points: Option<Option<i32>>,
-        metadata: Option<Option<serde_json::Value>>,
     ) -> Result<Task> {
         let now = now_ms();
 
@@ -346,8 +354,6 @@ impl Database {
             let new_status = status.unwrap_or(task.status);
             let new_priority = priority.unwrap_or(task.priority);
             let new_points = points.unwrap_or(task.points);
-            let new_metadata = metadata.unwrap_or(task.metadata.clone());
-            let metadata_json = new_metadata.as_ref().map(|m| serde_json::to_string(m).unwrap());
 
             // Handle status transitions
             let (started_at, completed_at) = match (task.status, new_status) {
@@ -361,30 +367,28 @@ impl Database {
             conn.execute(
                 "UPDATE tasks SET
                     title = ?1, description = ?2, status = ?3, priority = ?4,
-                    points = ?5, metadata = ?6, started_at = ?7, completed_at = ?8, updated_at = ?9
-                WHERE id = ?10",
+                    points = ?5, started_at = ?6, completed_at = ?7, updated_at = ?8
+                WHERE id = ?9",
                 params![
                     new_title,
                     new_description,
                     new_status.as_str(),
                     new_priority.as_str(),
                     new_points,
-                    metadata_json,
                     started_at,
                     completed_at,
                     now,
-                    task_id.to_string(),
+                    task_id,
                 ],
             )?;
 
             Ok(Task {
-                id: task_id,
+                id: task_id.to_string(),
                 title: new_title,
                 description: new_description,
                 status: new_status,
                 priority: new_priority,
                 points: new_points,
-                metadata: new_metadata,
                 started_at,
                 completed_at,
                 updated_at: now,
@@ -394,18 +398,18 @@ impl Database {
     }
 
     /// Delete a task.
-    pub fn delete_task(&self, task_id: Uuid, cascade: bool) -> Result<()> {
+    pub fn delete_task(&self, task_id: &str, cascade: bool) -> Result<()> {
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
 
             if cascade {
                 // Delete all descendants (CASCADE in foreign key handles this)
-                tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id.to_string()])?;
+                tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
             } else {
                 // Check for children
                 let child_count: i32 = tx.query_row(
                     "SELECT COUNT(*) FROM tasks WHERE parent_id = ?1",
-                    params![task_id.to_string()],
+                    params![task_id],
                     |row| row.get(0),
                 )?;
 
@@ -413,7 +417,7 @@ impl Database {
                     return Err(anyhow!("Task has children; use cascade=true to delete"));
                 }
 
-                tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id.to_string()])?;
+                tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
             }
 
             tx.commit()?;
@@ -425,8 +429,8 @@ impl Database {
     pub fn list_tasks(
         &self,
         status: Option<TaskStatus>,
-        owner: Option<Uuid>,
-        parent_id: Option<Option<Uuid>>,
+        owner: Option<&str>,
+        parent_id: Option<Option<&str>>,
         limit: Option<i32>,
     ) -> Result<Vec<TaskSummary>> {
         self.with_conn(|conn| {
@@ -478,8 +482,8 @@ impl Database {
                 let current_thought: Option<String> = row.get(7)?;
 
                 Ok(TaskSummary {
-                    id: Uuid::parse_str(&id).unwrap(),
-                    parent_id: parent_id.map(|s| Uuid::parse_str(&s).unwrap()),
+                    id,
+                    parent_id,
                     title,
                     status: TaskStatus::from_str(&status).unwrap_or(TaskStatus::Pending),
                     priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
@@ -500,7 +504,7 @@ impl Database {
         &self,
         agent_id: &str,
         thought: Option<String>,
-        task_ids: Option<Vec<Uuid>>,
+        task_ids: Option<Vec<String>>,
     ) -> Result<i32> {
         let now = now_ms();
 
@@ -518,7 +522,7 @@ impl Database {
                 params_vec.push(Box::new(now));
                 params_vec.push(Box::new(agent_id.to_string()));
                 for id in &ids {
-                    params_vec.push(Box::new(id.to_string()));
+                    params_vec.push(Box::new(id.clone()));
                 }
 
                 let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
@@ -535,19 +539,19 @@ impl Database {
     }
 
     /// Log time for a task.
-    pub fn log_time(&self, task_id: Uuid, duration_ms: i64) -> Result<i64> {
+    pub fn log_time(&self, task_id: &str, duration_ms: i64) -> Result<i64> {
         let now = now_ms();
 
         self.with_conn(|conn| {
             conn.execute(
                 "UPDATE tasks SET time_actual_ms = COALESCE(time_actual_ms, 0) + ?1, updated_at = ?2
                  WHERE id = ?3",
-                params![duration_ms, now, task_id.to_string()],
+                params![duration_ms, now, task_id],
             )?;
 
             let total: i64 = conn.query_row(
                 "SELECT COALESCE(time_actual_ms, 0) FROM tasks WHERE id = ?1",
-                params![task_id.to_string()],
+                params![task_id],
                 |row| row.get(0),
             )?;
 
@@ -558,7 +562,7 @@ impl Database {
     /// Log cost and token usage for a task.
     pub fn log_cost(
         &self,
-        task_id: Uuid,
+        task_id: &str,
         tokens_in: Option<i64>,
         tokens_cached: Option<i64>,
         tokens_out: Option<i64>,
@@ -611,7 +615,7 @@ impl Database {
                     new_cost_usd,
                     user_metrics_json,
                     now,
-                    task_id.to_string(),
+                    task_id,
                 ],
             )?;
 
@@ -631,7 +635,7 @@ impl Database {
     }
 
     /// Claim a task for an agent.
-    pub fn claim_task(&self, task_id: Uuid, agent_id: &str) -> Result<Task> {
+    pub fn claim_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
         let now = now_ms();
 
         self.with_conn(|conn| {
@@ -680,8 +684,14 @@ impl Database {
                     TaskStatus::InProgress.as_str(),
                     now,
                     now,
-                    task_id.to_string(),
+                    task_id,
                 ],
+            )?;
+
+            // Refresh agent heartbeat
+            conn.execute(
+                "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                params![now, agent_id],
             )?;
 
             Ok(Task {
@@ -696,7 +706,7 @@ impl Database {
     }
 
     /// Release a task claim.
-    pub fn release_task(&self, task_id: Uuid, agent_id: &str) -> Result<()> {
+    pub fn release_task(&self, task_id: &str, agent_id: &str) -> Result<()> {
         let now = now_ms();
 
         self.with_conn(|conn| {
@@ -710,7 +720,7 @@ impl Database {
             conn.execute(
                 "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
                  WHERE id = ?3",
-                params![TaskStatus::Pending.as_str(), now, task_id.to_string()],
+                params![TaskStatus::Pending.as_str(), now, task_id],
             )?;
 
             Ok(())
@@ -718,14 +728,108 @@ impl Database {
     }
 
     /// Force release a task regardless of owner.
-    pub fn force_release(&self, task_id: Uuid) -> Result<()> {
+    pub fn force_release(&self, task_id: &str) -> Result<()> {
         let now = now_ms();
 
         self.with_conn(|conn| {
             conn.execute(
                 "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
                  WHERE id = ?3",
-                params![TaskStatus::Pending.as_str(), now, task_id.to_string()],
+                params![TaskStatus::Pending.as_str(), now, task_id],
+            )?;
+
+            Ok(())
+        })
+    }
+
+    /// Force claim a task even if owned by another agent.
+    pub fn force_claim_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
+        let now = now_ms();
+
+        self.with_conn(|conn| {
+            // Get the task
+            let task = get_task_internal(conn, task_id)?
+                .ok_or_else(|| anyhow!("Task not found"))?;
+
+            // Get the agent
+            let agent = get_agent_internal(conn, agent_id)?
+                .ok_or_else(|| anyhow!("Agent not found"))?;
+
+            // Check claim limit
+            let current_claims = get_claim_count_internal(conn, agent_id)?;
+            if current_claims >= agent.max_claims {
+                return Err(anyhow!("Agent has reached claim limit"));
+            }
+
+            // Check tag affinity - needed_tags (AND)
+            if !task.needed_tags.is_empty() {
+                for needed in &task.needed_tags {
+                    if !agent.tags.contains(needed) {
+                        return Err(anyhow!("Agent missing required tag: {}", needed));
+                    }
+                }
+            }
+
+            // Check tag affinity - wanted_tags (OR)
+            if !task.wanted_tags.is_empty() {
+                let has_any = task.wanted_tags.iter().any(|wanted| agent.tags.contains(wanted));
+                if !has_any {
+                    return Err(anyhow!("Agent has none of the wanted tags"));
+                }
+            }
+
+            conn.execute(
+                "UPDATE tasks SET owner_agent = ?1, claimed_at = ?2, status = ?3, started_at = COALESCE(started_at, ?4), updated_at = ?5
+                 WHERE id = ?6",
+                params![
+                    agent_id,
+                    now,
+                    TaskStatus::InProgress.as_str(),
+                    now,
+                    now,
+                    task_id,
+                ],
+            )?;
+
+            // Refresh agent heartbeat
+            conn.execute(
+                "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                params![now, agent_id],
+            )?;
+
+            Ok(Task {
+                owner_agent: Some(agent_id.to_string()),
+                claimed_at: Some(now),
+                status: TaskStatus::InProgress,
+                started_at: task.started_at.or(Some(now)),
+                updated_at: now,
+                ..task
+            })
+        })
+    }
+
+    /// Release a task claim with a specified state.
+    pub fn release_task_with_state(&self, task_id: &str, agent_id: &str, state: TaskStatus) -> Result<()> {
+        let now = now_ms();
+
+        self.with_conn(|conn| {
+            let task = get_task_internal(conn, task_id)?
+                .ok_or_else(|| anyhow!("Task not found"))?;
+
+            if task.owner_agent.as_deref() != Some(agent_id) {
+                return Err(anyhow!("Task is not owned by this agent"));
+            }
+
+            // Set completed_at only for terminal states
+            let completed_at = match state {
+                TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled => Some(now),
+                _ => None,
+            };
+
+            conn.execute(
+                "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, completed_at = COALESCE(?2, completed_at), updated_at = ?3
+                 WHERE id = ?4",
+                params![state.as_str(), completed_at, now, task_id],
             )?;
 
             Ok(())
@@ -745,6 +849,63 @@ impl Database {
             )?;
 
             Ok(updated as i32)
+        })
+    }
+
+
+    /// Complete a task and release file locks held by the agent.
+    pub fn complete_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
+        let now = now_ms();
+
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
+            // Get the task
+            let mut stmt = tx.prepare("SELECT * FROM tasks WHERE id = ?1")?;
+            let task = stmt.query_row(params![task_id], parse_task_row)
+                .map_err(|_| anyhow!("Task not found"))?;
+            drop(stmt);
+
+            // Verify ownership
+            if task.owner_agent.as_deref() != Some(agent_id) {
+                return Err(anyhow!("Task is not owned by this agent"));
+            }
+
+            // Update task to completed
+            tx.execute(
+                "UPDATE tasks SET status = ?1, completed_at = ?2, updated_at = ?3,
+                 owner_agent = NULL, claimed_at = NULL
+                 WHERE id = ?4",
+                params![
+                    TaskStatus::Completed.as_str(),
+                    now,
+                    now,
+                    task_id,
+                ],
+            )?;
+
+            // Release all file locks held by this agent
+            tx.execute(
+                "DELETE FROM file_locks WHERE agent_id = ?1",
+                params![agent_id],
+            )?;
+
+            // Refresh agent heartbeat
+            tx.execute(
+                "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                params![now, agent_id],
+            )?;
+
+            tx.commit()?;
+
+            Ok(Task {
+                status: TaskStatus::Completed,
+                completed_at: Some(now),
+                updated_at: now,
+                owner_agent: None,
+                claimed_at: None,
+                ..task
+            })
         })
     }
 
@@ -799,11 +960,11 @@ impl Database {
 fn create_tree_recursive(
     conn: &Connection,
     input: &TaskTreeInput,
-    parent_id: Option<Uuid>,
+    parent_id: Option<&str>,
     sibling_order: i32,
-    all_ids: &mut Vec<Uuid>,
-) -> Result<Uuid> {
-    let id = Uuid::new_v4();
+    all_ids: &mut Vec<String>,
+) -> Result<String> {
+    let id = Uuid::now_v7().to_string();
     let now = now_ms();
     let priority = input.priority.unwrap_or(Priority::Medium);
     let join_mode = input.join_mode.unwrap_or(JoinMode::Then);
@@ -812,16 +973,15 @@ fn create_tree_recursive(
     let wanted_tags = input.wanted_tags.clone().unwrap_or_default();
     let needed_tags_json = serde_json::to_string(&needed_tags)?;
     let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
-    let metadata_json = input.metadata.as_ref().map(|m| serde_json::to_string(m).unwrap());
 
     conn.execute(
         "INSERT INTO tasks (
             id, parent_id, title, description, status, priority, join_mode, sibling_order,
-            needed_tags, wanted_tags, points, time_estimate_ms, metadata, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            needed_tags, wanted_tags, points, time_estimate_ms, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
-            id.to_string(),
-            parent_id.map(|p| p.to_string()),
+            &id,
+            parent_id,
             input.title,
             input.description,
             TaskStatus::Pending.as_str(),
@@ -832,17 +992,16 @@ fn create_tree_recursive(
             wanted_tags_json,
             input.points,
             input.time_estimate_ms,
-            metadata_json,
             now,
             now,
         ],
     )?;
 
-    all_ids.push(id);
+    all_ids.push(id.clone());
 
     // Create children
     for (i, child) in input.children.iter().enumerate() {
-        create_tree_recursive(conn, child, Some(id), i as i32, all_ids)?;
+        create_tree_recursive(conn, child, Some(&id), i as i32, all_ids)?;
     }
 
     Ok(id)

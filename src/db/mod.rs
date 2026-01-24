@@ -3,7 +3,6 @@
 pub mod agents;
 pub mod attachments;
 pub mod deps;
-pub mod inbox;
 pub mod locks;
 pub mod stats;
 pub mod tasks;

@@ -7,8 +7,7 @@ A Rust MCP (Model Context Protocol) server providing atomic, token-efficient tas
 - **Task Hierarchy**: Unlimited nesting with parent/child relationships
 - **Dependencies**: DAG-based dependencies with cycle detection
 - **Task Claiming**: Strict locking with configurable limits and tag-based affinity
-- **File Locking**: Advisory locks for coordinating file edits
-- **Pub/Sub**: Event subscriptions with polling-based inbox
+- **File Coordination**: Advisory locks with claim tracking for coordinating file edits
 - **Cost Tracking**: Token usage and cost accounting per task
 - **Time Tracking**: Estimation and actual time logging
 - **Live Status**: Real-time "current thought" for claimed tasks
@@ -56,6 +55,7 @@ Create `.task-graph/config.yaml`:
 ```yaml
 server:
   db_path: .task-graph/tasks.db
+  media_dir: .task-graph/media  # Directory for file attachments
   claim_limit: 5
   stale_timeout_seconds: 900
 
@@ -65,6 +65,7 @@ paths:
 
 Environment variables:
 - `TASK_GRAPH_DB_PATH`: Database file path
+- `TASK_GRAPH_MEDIA_DIR`: Media directory for file attachments
 - `TASK_GRAPH_CLAIM_LIMIT`: Default claim limit
 - `TASK_GRAPH_STALE_TIMEOUT`: Stale timeout in seconds
 
@@ -72,75 +73,67 @@ Environment variables:
 
 ### Agent Management
 
-| Tool | Description |
-|------|-------------|
-| `register_agent` | Register a new agent session |
-| `update_agent` | Update agent properties |
-| `heartbeat` | Refresh agent heartbeat |
-| `unregister_agent` | Unregister and release all claims |
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `connect` | `agent?`, `name?`, `tags?`, `max_claims?` | Register a new agent session. Returns `agent_id`. |
+| `disconnect` | `agent` | Unregister agent and release all claims/locks. |
+| `list_agents` | `format?` | List all connected agents. |
 
 ### Task CRUD
 
-| Tool | Description |
-|------|-------------|
-| `create_task` | Create a new task |
-| `create_task_tree` | Create a nested task tree |
-| `get_task` | Get a task by ID |
-| `update_task` | Update task properties |
-| `delete_task` | Delete a task |
-| `list_tasks` | List tasks with filters |
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `create` | `title`, `description?`, `parent?`, `priority?`, `points?`, `time_estimate_ms?`, `needed_tags?`, `wanted_tags?`, `blocked_by?` | Create a new task. |
+| `create_tree` | `tree`, `parent?` | Create a nested task tree with `then`/`also` join modes. |
+| `get` | `task`, `children?`, `format?` | Get a task by ID with optional descendants. |
+| `list_tasks` | `status?`, `ready?`, `blocked?`, `owner?`, `parent?`, `agent?`, `limit?`, `format?` | Query tasks with filters. |
+| `update` | `agent`, `task`, `state`, `title?`, `description?`, `priority?`, `points?` | Update task properties. |
+| `delete` | `task`, `cascade?` | Delete a task. Use `cascade=true` to delete children. |
 
 ### Task Claiming
 
-| Tool | Description |
-|------|-------------|
-| `claim_task` | Claim a task for an agent |
-| `release_task` | Release a task claim |
-| `force_release` | Force release regardless of owner |
-| `force_release_stale` | Release stale claims |
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `claim` | `agent`, `task`, `state?`, `force?` | Claim a task. Use `force=true` to steal from another agent. |
+| `release` | `agent`, `task`, `state?` | Release a task. Use `state` to set status (default: pending). |
+| `complete` | `agent`, `task` | Shorthand for release with `state=completed`. |
 
 ### Dependencies
 
-| Tool | Description |
-|------|-------------|
-| `add_dependency` | Add a dependency (from blocks to) |
-| `remove_dependency` | Remove a dependency |
-| `get_blocked_tasks` | Get blocked tasks |
-| `get_ready_tasks` | Get tasks ready to claim |
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `block` | `blocker`, `blocked` | Add dependency: `blocker` must complete before `blocked` can be claimed. |
+| `unblock` | `blocker`, `blocked` | Remove a dependency. |
 
 ### Tracking
 
-| Tool | Description |
-|------|-------------|
-| `set_thought` | Set current thought for claimed tasks |
-| `log_time` | Log time spent on a task |
-| `log_cost` | Log token usage and cost |
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `thinking` | `agent`, `thought?`, `tasks?` | Update current activity (visible to other agents). Refreshes heartbeat. |
+| `log_time` | `agent`, `task`, `duration_ms` | Log time spent on a task. |
+| `log_cost` | `agent`, `task`, `tokens_in?`, `tokens_cached?`, `tokens_out?`, `tokens_thinking?`, `tokens_image?`, `tokens_audio?`, `cost_usd?`, `user_metrics?` | Log token usage and cost. |
 
-### File Locking
+### File Coordination
 
-| Tool | Description |
-|------|-------------|
-| `lock_file` | Declare intent to work on a file |
-| `unlock_file` | Release a file lock |
-| `get_file_locks` | Get current file locks |
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `claim_file` | `agent`, `file`, `reason?` | Claim advisory lock on a file. |
+| `release_file` | `agent`, `file`, `reason?` | Release file lock. Use `reason` to leave notes. |
+| `list_files` | `files?`, `agent?` | Get current file locks. |
+| `claim_updates` | `agent`, `files?` | Poll for file claim changes since last call. |
 
 ### Attachments
 
-| Tool | Description |
-|------|-------------|
-| `add_attachment` | Add an attachment to a task |
-| `get_attachments` | Get attachment metadata |
-| `get_attachment` | Get full attachment with content |
-| `delete_attachment` | Delete an attachment |
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `attach` | `task`, `name`, `content?`, `mime?`, `file?`, `store_as_file?` | Add an attachment. |
+| `attachments` | `task`, `content?` | Get attachment metadata. Use `content=true` for full content. |
+| `detach` | `task`, `index` | Delete an attachment by task and index. |
 
-### Pub/Sub
-
-| Tool | Description |
-|------|-------------|
-| `subscribe` | Subscribe to events |
-| `unsubscribe` | Unsubscribe from events |
-| `poll_inbox` | Poll for new messages |
-| `clear_inbox` | Clear inbox |
+Attachment modes:
+- **Inline**: Content stored in database (`content` parameter)
+- **File reference**: Reference an existing file (`file` parameter)
+- **Media storage**: Store to `.task-graph/media/` (`content` + `store_as_file=true`)
 
 ## MCP Resources
 
@@ -153,7 +146,6 @@ Environment variables:
 | `tasks://agent/{id}` | Tasks owned by an agent |
 | `tasks://tree/{id}` | Task with all descendants |
 | `files://locks` | All file locks |
-| `inbox://{agent_id}` | Unread messages |
 | `agents://all` | Registered agents |
 | `plan://acp` | ACP-compatible plan export |
 | `stats://summary` | Aggregate statistics |
@@ -183,7 +175,7 @@ Create hierarchical tasks with `then`/`also` join modes:
 
 ## Tag-Based Affinity
 
-Tasks can specify required capabilities:
+Tasks can specify required capabilities with a non-empty list. Use either for one tag:
 
 - `needed_tags`: Agent must have ALL of these (AND)
 - `wanted_tags`: Agent must have AT LEAST ONE (OR)
@@ -196,6 +188,20 @@ Tasks can specify required capabilities:
 }
 ```
 
+## File Coordination
+
+Agents can coordinate file edits using advisory locks with change tracking:
+
+```
+Agent A: connect() -> "agent-a"
+Agent A: claim_file("agent-a", "src/main.rs", "refactoring")
+Agent B: connect() -> "agent-b"
+Agent B: claim_updates("agent-b", ["src/main.rs"]) -> sees agent-a's claim
+Agent A: release_file("agent-a", "src/main.rs", "ready for review")
+Agent B: claim_updates("agent-b") -> sees release with reason
+Agent B: claim_file("agent-b", "src/main.rs", "adding tests")
+```
+
 ## Architecture
 
 - **Transport**: Stdio (each agent spawns own server process)
@@ -204,4 +210,4 @@ Tasks can specify required capabilities:
 
 ## License
 
-MIT
+Apache 2.0

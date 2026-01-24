@@ -3,7 +3,7 @@ name = "task-graph-mcp"
 version = "0.1.0"
 edition = "2024"
 description = "MCP server for atomic, token-efficient task management for multi-agent coordination"
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 # MCP protocol
@@ -25,6 +25,7 @@ uuid = { version = "1", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 anyhow = "1"
+base64 = "0.22"
 
 # Logging
 tracing = "0.1"

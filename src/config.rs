@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Server configuration.
@@ -30,6 +31,10 @@ pub struct ServerConfig {
     #[serde(default = "default_db_path")]
     pub db_path: PathBuf,
 
+    /// Path to the media directory for file attachments.
+    #[serde(default = "default_media_dir")]
+    pub media_dir: PathBuf,
+
     /// Maximum claims per agent.
     #[serde(default = "default_claim_limit")]
     pub claim_limit: i32,
@@ -43,6 +48,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             db_path: default_db_path(),
+            media_dir: default_media_dir(),
             claim_limit: default_claim_limit(),
             stale_timeout_seconds: default_stale_timeout(),
         }
@@ -51,6 +57,10 @@ impl Default for ServerConfig {
 
 fn default_db_path() -> PathBuf {
     PathBuf::from(".task-graph/tasks.db")
+}
+
+fn default_media_dir() -> PathBuf {
+    PathBuf::from(".task-graph/media")
 }
 
 fn default_claim_limit() -> i32 {
@@ -115,6 +125,10 @@ impl Config {
             config.server.db_path = PathBuf::from(db_path);
         }
 
+        if let Ok(media_dir) = std::env::var("TASK_GRAPH_MEDIA_DIR") {
+            config.server.media_dir = PathBuf::from(media_dir);
+        }
+
         if let Ok(limit) = std::env::var("TASK_GRAPH_CLAIM_LIMIT") {
             if let Ok(limit) = limit.parse() {
                 config.server.claim_limit = limit;
@@ -136,5 +150,58 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
         Ok(())
+    }
+
+    /// Ensure the media directory exists.
+    pub fn ensure_media_dir(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.server.media_dir)?;
+        Ok(())
+    }
+
+    /// Get the media directory path.
+    pub fn media_dir(&self) -> &Path {
+        &self.server.media_dir
+    }
+}
+
+/// Tool description override.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolPrompt {
+    pub description: String,
+}
+
+/// LLM-facing prompts configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Prompts {
+    /// Server instructions shown to the LLM.
+    pub instructions: Option<String>,
+
+    /// Tool description overrides by tool name.
+    #[serde(default)]
+    pub tools: HashMap<String, ToolPrompt>,
+}
+
+impl Prompts {
+    /// Load prompts from file.
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        // Handle empty or comment-only YAML files (which parse as null)
+        let prompts: Option<Prompts> = serde_yaml::from_str(&content)?;
+        Ok(prompts.unwrap_or_default())
+    }
+
+    /// Load prompts from default location or return defaults.
+    pub fn load_or_default() -> Self {
+        // Try .task-graph/prompts.yaml
+        if let Ok(prompts) = Self::load(".task-graph/prompts.yaml") {
+            return prompts;
+        }
+
+        Self::default()
+    }
+
+    /// Get a tool description override if available.
+    pub fn get_tool_description(&self, name: &str) -> Option<&str> {
+        self.tools.get(name).map(|t| t.description.as_str())
     }
 }

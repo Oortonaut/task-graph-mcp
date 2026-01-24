@@ -5,24 +5,27 @@ pub mod attachments;
 pub mod claiming;
 pub mod deps;
 pub mod files;
-pub mod pubsub;
 pub mod tasks;
 pub mod tracking;
 
+use crate::config::Prompts;
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Tool handler that processes MCP tool calls.
 pub struct ToolHandler {
     pub db: Arc<Database>,
+    pub media_dir: PathBuf,
+    pub prompts: Arc<Prompts>,
 }
 
 impl ToolHandler {
-    pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<Database>, media_dir: PathBuf, prompts: Arc<Prompts>) -> Self {
+        Self { db, media_dir, prompts }
     }
 
     /// Get all available tools.
@@ -30,28 +33,25 @@ impl ToolHandler {
         let mut tools = Vec::new();
 
         // Agent tools
-        tools.extend(agents::get_tools());
+        tools.extend(agents::get_tools(&self.prompts));
 
         // Task tools
-        tools.extend(tasks::get_tools());
+        tools.extend(tasks::get_tools(&self.prompts));
 
         // Tracking tools
-        tools.extend(tracking::get_tools());
+        tools.extend(tracking::get_tools(&self.prompts));
 
         // Dependency tools
-        tools.extend(deps::get_tools());
+        tools.extend(deps::get_tools(&self.prompts));
 
         // Claiming tools
-        tools.extend(claiming::get_tools());
+        tools.extend(claiming::get_tools(&self.prompts));
 
-        // File lock tools
-        tools.extend(files::get_tools());
+        // File coordination tools
+        tools.extend(files::get_tools(&self.prompts));
 
         // Attachment tools
-        tools.extend(attachments::get_tools());
-
-        // Pub/sub tools
-        tools.extend(pubsub::get_tools());
+        tools.extend(attachments::get_tools(&self.prompts));
 
         tools
     }
@@ -60,53 +60,42 @@ impl ToolHandler {
     pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value> {
         match name {
             // Agent tools
-            "register_agent" => agents::register_agent(&self.db, arguments),
-            "update_agent" => agents::update_agent(&self.db, arguments),
-            "heartbeat" => agents::heartbeat(&self.db, arguments),
-            "unregister_agent" => agents::unregister_agent(&self.db, arguments),
+            "connect" => agents::connect(&self.db, arguments),
+            "disconnect" => agents::disconnect(&self.db, arguments),
+            "list_agents" => agents::list_agents(&self.db, arguments),
 
             // Task tools
-            "create_task" => tasks::create_task(&self.db, arguments),
-            "create_task_tree" => tasks::create_task_tree(&self.db, arguments),
-            "get_task" => tasks::get_task(&self.db, arguments),
-            "update_task" => tasks::update_task(&self.db, arguments),
-            "delete_task" => tasks::delete_task(&self.db, arguments),
+            "create" => tasks::create(&self.db, arguments),
+            "create_tree" => tasks::create_tree(&self.db, arguments),
+            "get" => tasks::get(&self.db, arguments),
             "list_tasks" => tasks::list_tasks(&self.db, arguments),
+            "update" => tasks::update(&self.db, arguments),
+            "delete" => tasks::delete(&self.db, arguments),
 
             // Tracking tools
-            "set_thought" => tracking::set_thought(&self.db, arguments),
+            "thinking" => tracking::thinking(&self.db, arguments),
             "log_time" => tracking::log_time(&self.db, arguments),
             "log_cost" => tracking::log_cost(&self.db, arguments),
 
             // Dependency tools
-            "add_dependency" => deps::add_dependency(&self.db, arguments),
-            "remove_dependency" => deps::remove_dependency(&self.db, arguments),
-            "get_blocked_tasks" => deps::get_blocked_tasks(&self.db, arguments),
-            "get_ready_tasks" => deps::get_ready_tasks(&self.db, arguments),
+            "block" => deps::block(&self.db, arguments),
+            "unblock" => deps::unblock(&self.db, arguments),
 
             // Claiming tools
-            "claim_task" => claiming::claim_task(&self.db, arguments),
-            "release_task" => claiming::release_task(&self.db, arguments),
-            "force_release" => claiming::force_release(&self.db, arguments),
-            "force_release_stale" => claiming::force_release_stale(&self.db, arguments),
+            "claim" => claiming::claim(&self.db, arguments),
+            "release" => claiming::release(&self.db, arguments),
+            "complete" => claiming::complete(&self.db, arguments),
 
-            // File lock tools
-            "lock_file" => files::lock_file(&self.db, arguments),
-            "unlock_file" => files::unlock_file(&self.db, arguments),
-            "get_file_locks" => files::get_file_locks(&self.db, arguments),
+            // File coordination tools
+            "claim_file" => files::claim_file(&self.db, arguments),
+            "release_file" => files::release_file(&self.db, arguments),
+            "list_files" => files::list_files(&self.db, arguments),
+            "claim_updates" => files::claim_updates(&self.db, arguments),
 
             // Attachment tools
-            "add_attachment" => attachments::add_attachment(&self.db, arguments),
-            "get_attachments" => attachments::get_attachments(&self.db, arguments),
-            "get_attachment" => attachments::get_attachment(&self.db, arguments),
-            "delete_attachment" => attachments::delete_attachment(&self.db, arguments),
-
-            // Pub/sub tools
-            "subscribe" => pubsub::subscribe(&self.db, arguments),
-            "unsubscribe" => pubsub::unsubscribe(&self.db, arguments),
-            "poll_inbox" => pubsub::poll_inbox(&self.db, arguments),
-            "clear_inbox" => pubsub::clear_inbox(&self.db, arguments),
-            "get_subscriptions" => pubsub::get_subscriptions(&self.db, arguments),
+            "attach" => attachments::attach(&self.db, &self.media_dir, arguments),
+            "attachments" => attachments::attachments(&self.db, &self.media_dir, arguments),
+            "detach" => attachments::detach(&self.db, &self.media_dir, arguments),
 
             _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
         }
@@ -127,14 +116,24 @@ pub fn make_tool(name: &str, description: &str, properties: Value, required: Vec
     Tool::new(name.to_string(), description.to_string(), input_schema)
 }
 
+/// Helper to create a tool definition with prompt overrides.
+/// Looks up the tool description in prompts, falls back to default_description.
+pub fn make_tool_with_prompts(
+    name: &str,
+    default_description: &str,
+    properties: Value,
+    required: Vec<&str>,
+    prompts: &Prompts,
+) -> Tool {
+    let description = prompts
+        .get_tool_description(name)
+        .unwrap_or(default_description);
+    make_tool(name, description, properties, required)
+}
+
 /// Helper to get a string from arguments.
 pub fn get_string(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str().map(String::from))
-}
-
-/// Helper to get a UUID from arguments.
-pub fn get_uuid(args: &Value, key: &str) -> Option<uuid::Uuid> {
-    get_string(args, key).and_then(|s| uuid::Uuid::parse_str(&s).ok())
 }
 
 /// Helper to get an i32 from arguments.
@@ -163,17 +162,6 @@ pub fn get_string_array(args: &Value, key: &str) -> Option<Vec<String>> {
         v.as_array().map(|arr| {
             arr.iter()
                 .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-    })
-}
-
-/// Helper to get a UUID array from arguments.
-pub fn get_uuid_array(args: &Value, key: &str) -> Option<Vec<uuid::Uuid>> {
-    args.get(key).and_then(|v| {
-        v.as_array().map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok()))
                 .collect()
         })
     })

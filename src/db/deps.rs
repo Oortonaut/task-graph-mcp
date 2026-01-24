@@ -5,11 +5,10 @@ use crate::types::{Dependency, Task};
 use anyhow::{anyhow, Result};
 use rusqlite::params;
 use std::collections::{HashSet, VecDeque};
-use uuid::Uuid;
 
 impl Database {
     /// Add a dependency (from blocks to).
-    pub fn add_dependency(&self, from_task_id: Uuid, to_task_id: Uuid) -> Result<()> {
+    pub fn add_dependency(&self, from_task_id: &str, to_task_id: &str) -> Result<()> {
         // Check for cycle
         if self.would_create_cycle(from_task_id, to_task_id)? {
             return Err(anyhow!("Adding this dependency would create a cycle"));
@@ -18,22 +17,22 @@ impl Database {
         self.with_conn(|conn| {
             conn.execute(
                 "INSERT OR IGNORE INTO dependencies (from_task_id, to_task_id) VALUES (?1, ?2)",
-                params![from_task_id.to_string(), to_task_id.to_string()],
+                params![from_task_id, to_task_id],
             )?;
             Ok(())
         })
     }
 
     /// Check if adding a dependency would create a cycle.
-    fn would_create_cycle(&self, from_task_id: Uuid, to_task_id: Uuid) -> Result<bool> {
+    fn would_create_cycle(&self, from_task_id: &str, to_task_id: &str) -> Result<bool> {
         // If from can reach to already, adding to -> from would create a cycle
         // Actually, we're adding from -> to (from blocks to)
         // A cycle would occur if to can already reach from
 
         self.with_conn(|conn| {
-            let mut visited = HashSet::new();
-            let mut queue = VecDeque::new();
-            queue.push_back(to_task_id);
+            let mut visited: HashSet<String> = HashSet::new();
+            let mut queue: VecDeque<String> = VecDeque::new();
+            queue.push_back(to_task_id.to_string());
 
             while let Some(current) = queue.pop_front() {
                 if current == from_task_id {
@@ -43,16 +42,16 @@ impl Database {
                 if visited.contains(&current) {
                     continue;
                 }
-                visited.insert(current);
+                visited.insert(current.clone());
 
                 // Get all tasks that current blocks
                 let mut stmt = conn.prepare(
                     "SELECT to_task_id FROM dependencies WHERE from_task_id = ?1"
                 )?;
 
-                let deps: Vec<Uuid> = stmt.query_map(params![current.to_string()], |row| {
+                let deps: Vec<String> = stmt.query_map(params![&current], |row| {
                     let id: String = row.get(0)?;
-                    Ok(Uuid::parse_str(&id).unwrap())
+                    Ok(id)
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
@@ -69,11 +68,11 @@ impl Database {
     }
 
     /// Remove a dependency.
-    pub fn remove_dependency(&self, from_task_id: Uuid, to_task_id: Uuid) -> Result<()> {
+    pub fn remove_dependency(&self, from_task_id: &str, to_task_id: &str) -> Result<()> {
         self.with_conn(|conn| {
             conn.execute(
                 "DELETE FROM dependencies WHERE from_task_id = ?1 AND to_task_id = ?2",
-                params![from_task_id.to_string(), to_task_id.to_string()],
+                params![from_task_id, to_task_id],
             )?;
             Ok(())
         })
@@ -88,8 +87,8 @@ impl Database {
                 let from: String = row.get(0)?;
                 let to: String = row.get(1)?;
                 Ok(Dependency {
-                    from_task_id: Uuid::parse_str(&from).unwrap(),
-                    to_task_id: Uuid::parse_str(&to).unwrap(),
+                    from_task_id: from,
+                    to_task_id: to,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -100,15 +99,15 @@ impl Database {
     }
 
     /// Get tasks that block a given task.
-    pub fn get_blockers(&self, task_id: Uuid) -> Result<Vec<Uuid>> {
+    pub fn get_blockers(&self, task_id: &str) -> Result<Vec<String>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT from_task_id FROM dependencies WHERE to_task_id = ?1"
             )?;
 
-            let blockers = stmt.query_map(params![task_id.to_string()], |row| {
+            let blockers = stmt.query_map(params![task_id], |row| {
                 let id: String = row.get(0)?;
-                Ok(Uuid::parse_str(&id).unwrap())
+                Ok(id)
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -119,15 +118,15 @@ impl Database {
 
     /// Get tasks that a given task blocks.
     #[allow(dead_code)]
-    pub fn get_blocking(&self, task_id: Uuid) -> Result<Vec<Uuid>> {
+    pub fn get_blocking(&self, task_id: &str) -> Result<Vec<String>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT to_task_id FROM dependencies WHERE from_task_id = ?1"
             )?;
 
-            let blocking = stmt.query_map(params![task_id.to_string()], |row| {
+            let blocking = stmt.query_map(params![task_id], |row| {
                 let id: String = row.get(0)?;
-                Ok(Uuid::parse_str(&id).unwrap())
+                Ok(id)
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -159,7 +158,7 @@ impl Database {
     }
 
     /// Get tasks that are ready to be claimed (all dependencies satisfied).
-    pub fn get_ready_tasks(&self, exclude_agent: Option<Uuid>) -> Result<Vec<Task>> {
+    pub fn get_ready_tasks(&self, exclude_agent: Option<&str>) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             // A task is ready if:
             // 1. It's pending
@@ -213,7 +212,7 @@ impl Database {
             let mut stmt = conn.prepare(sql)?;
 
             let tasks = if let Some(aid) = exclude_agent {
-                stmt.query_map(params![aid.to_string()], super::tasks::parse_task_row)?
+                stmt.query_map(params![aid], super::tasks::parse_task_row)?
                     .filter_map(|r| r.ok())
                     .collect()
             } else {
@@ -228,13 +227,13 @@ impl Database {
 
     /// Check if a task has unmet dependencies.
     #[allow(dead_code)]
-    pub fn has_unmet_dependencies(&self, task_id: Uuid) -> Result<bool> {
+    pub fn has_unmet_dependencies(&self, task_id: &str) -> Result<bool> {
         self.with_conn(|conn| {
             let count: i32 = conn.query_row(
                 "SELECT COUNT(*) FROM dependencies d
                  INNER JOIN tasks blocker ON d.from_task_id = blocker.id
                  WHERE d.to_task_id = ?1 AND blocker.status != 'completed'",
-                params![task_id.to_string()],
+                params![task_id],
                 |row| row.get(0),
             )?;
 

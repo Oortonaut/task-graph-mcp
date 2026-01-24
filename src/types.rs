@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
 
 /// Agent (session-based) - represents a connected agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,6 +10,19 @@ pub struct Agent {
     pub name: Option<String>,
     pub tags: Vec<String>,
     pub max_claims: i32,
+    pub registered_at: i64,
+    pub last_heartbeat: i64,
+}
+
+/// Agent info with additional runtime details for list_agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub tags: Vec<String>,
+    pub max_claims: i32,
+    pub claim_count: i32,
+    pub current_thought: Option<String>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
 }
@@ -107,8 +119,8 @@ impl JoinMode {
 /// A task in the task graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
-    pub id: Uuid,
-    pub parent_id: Option<Uuid>,
+    pub id: String,
+    pub parent_id: Option<String>,
     pub title: String,
     pub description: Option<String>,
     pub status: TaskStatus,
@@ -142,7 +154,6 @@ pub struct Task {
     pub cost_usd: f64,
     pub user_metrics: Option<HashMap<String, serde_json::Value>>,
 
-    pub metadata: Option<serde_json::Value>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -166,7 +177,6 @@ pub struct TaskTreeInput {
     pub time_estimate_ms: Option<i64>,
     pub needed_tags: Option<Vec<String>>,
     pub wanted_tags: Option<Vec<String>>,
-    pub metadata: Option<serde_json::Value>,
     #[serde(default)]
     pub children: Vec<TaskTreeInput>,
 }
@@ -174,8 +184,8 @@ pub struct TaskTreeInput {
 /// A dependency between tasks (from blocks to).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dependency {
-    pub from_task_id: Uuid,
-    pub to_task_id: Uuid,
+    pub from_task_id: String,
+    pub to_task_id: String,
 }
 
 /// An advisory file lock.
@@ -183,122 +193,82 @@ pub struct Dependency {
 pub struct FileLock {
     pub file_path: String,
     pub agent_id: String,
+    pub reason: Option<String>,
     pub locked_at: i64,
 }
 
-/// A subscription to events.
+/// A claim event for file coordination tracking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Subscription {
-    pub id: Uuid,
+pub struct ClaimEvent {
+    pub id: i64,
+    pub file_path: String,
     pub agent_id: String,
-    pub target_type: TargetType,
-    pub target_id: String,
-    pub created_at: i64,
+    pub event: ClaimEventType,
+    pub reason: Option<String>,
+    pub timestamp: i64,
 }
 
-/// Target type for subscriptions.
+/// Type of claim event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TargetType {
-    Task,
-    File,
-    Agent,
+pub enum ClaimEventType {
+    Claimed,
+    Released,
 }
 
-impl TargetType {
+impl ClaimEventType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            TargetType::Task => "task",
-            TargetType::File => "file",
-            TargetType::Agent => "agent",
+            ClaimEventType::Claimed => "claimed",
+            ClaimEventType::Released => "released",
         }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "task" => Some(TargetType::Task),
-            "file" => Some(TargetType::File),
-            "agent" => Some(TargetType::Agent),
+            "claimed" => Some(ClaimEventType::Claimed),
+            "released" => Some(ClaimEventType::Released),
             _ => None,
         }
     }
 }
 
-/// An inbox message for pub/sub.
+/// Result of polling claim updates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InboxMessage {
-    pub id: Uuid,
-    pub agent_id: String,
-    pub event_type: EventType,
-    pub payload: serde_json::Value,
-    pub created_at: i64,
-    pub read: bool,
-}
-
-/// Event types for pub/sub.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EventType {
-    TaskCreated,
-    TaskUpdated,
-    TaskDeleted,
-    TaskClaimed,
-    TaskReleased,
-    FileLocked,
-    FileUnlocked,
-    AgentRegistered,
-    AgentTimeout,
-}
-
-impl EventType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            EventType::TaskCreated => "task_created",
-            EventType::TaskUpdated => "task_updated",
-            EventType::TaskDeleted => "task_deleted",
-            EventType::TaskClaimed => "task_claimed",
-            EventType::TaskReleased => "task_released",
-            EventType::FileLocked => "file_locked",
-            EventType::FileUnlocked => "file_unlocked",
-            EventType::AgentRegistered => "agent_registered",
-            EventType::AgentTimeout => "agent_timeout",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "task_created" => Some(EventType::TaskCreated),
-            "task_updated" => Some(EventType::TaskUpdated),
-            "task_deleted" => Some(EventType::TaskDeleted),
-            "task_claimed" => Some(EventType::TaskClaimed),
-            "task_released" => Some(EventType::TaskReleased),
-            "file_locked" => Some(EventType::FileLocked),
-            "file_unlocked" => Some(EventType::FileUnlocked),
-            "agent_registered" => Some(EventType::AgentRegistered),
-            "agent_timeout" => Some(EventType::AgentTimeout),
-            _ => None,
-        }
-    }
+pub struct ClaimUpdates {
+    pub new_claims: Vec<ClaimEvent>,
+    pub dropped_claims: Vec<ClaimEvent>,
+    pub sequence: i64,
 }
 
 /// An attachment on a task.
+/// Primary key is (task_id, order_index).
+/// If file_path is set, content is stored in the referenced file; otherwise content is inline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attachment {
-    pub id: Uuid,
-    pub task_id: Uuid,
+    pub task_id: String,
+    pub order_index: i32,
     pub name: String,
     pub mime_type: String,
     pub content: String,
+    /// Path to the file containing the content (relative to media dir or absolute).
+    /// If set, content is read from this file; if None, content is stored inline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
     pub created_at: i64,
 }
 
 /// Attachment metadata (without content).
+/// Primary key is (task_id, order_index).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttachmentMeta {
-    pub id: Uuid,
-    pub task_id: Uuid,
+    pub task_id: String,
+    pub order_index: i32,
     pub name: String,
     pub mime_type: String,
+    /// Path to the file containing the content (if stored as file).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
     pub created_at: i64,
 }
 
@@ -327,8 +297,8 @@ pub struct Stats {
 /// Compact task representation for list views.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
-    pub id: Uuid,
-    pub parent_id: Option<Uuid>,
+    pub id: String,
+    pub parent_id: Option<String>,
     pub title: String,
     pub status: TaskStatus,
     pub priority: Priority,
@@ -446,87 +416,4 @@ mod tests {
         }
     }
 
-    mod target_type_tests {
-        use super::*;
-
-        #[test]
-        fn as_str_returns_correct_string_for_all_variants() {
-            assert_eq!(TargetType::Task.as_str(), "task");
-            assert_eq!(TargetType::File.as_str(), "file");
-            assert_eq!(TargetType::Agent.as_str(), "agent");
-        }
-
-        #[test]
-        fn from_str_parses_valid_strings() {
-            assert_eq!(TargetType::from_str("task"), Some(TargetType::Task));
-            assert_eq!(TargetType::from_str("file"), Some(TargetType::File));
-            assert_eq!(TargetType::from_str("agent"), Some(TargetType::Agent));
-        }
-
-        #[test]
-        fn from_str_returns_none_for_invalid_strings() {
-            assert_eq!(TargetType::from_str("invalid"), None);
-            assert_eq!(TargetType::from_str("TASK"), None);
-        }
-
-        #[test]
-        fn roundtrip_conversion_is_lossless() {
-            for target in [TargetType::Task, TargetType::File, TargetType::Agent] {
-                assert_eq!(TargetType::from_str(target.as_str()), Some(target));
-            }
-        }
-    }
-
-    mod event_type_tests {
-        use super::*;
-
-        #[test]
-        fn as_str_returns_correct_string_for_all_variants() {
-            assert_eq!(EventType::TaskCreated.as_str(), "task_created");
-            assert_eq!(EventType::TaskUpdated.as_str(), "task_updated");
-            assert_eq!(EventType::TaskDeleted.as_str(), "task_deleted");
-            assert_eq!(EventType::TaskClaimed.as_str(), "task_claimed");
-            assert_eq!(EventType::TaskReleased.as_str(), "task_released");
-            assert_eq!(EventType::FileLocked.as_str(), "file_locked");
-            assert_eq!(EventType::FileUnlocked.as_str(), "file_unlocked");
-            assert_eq!(EventType::AgentRegistered.as_str(), "agent_registered");
-            assert_eq!(EventType::AgentTimeout.as_str(), "agent_timeout");
-        }
-
-        #[test]
-        fn from_str_parses_valid_strings() {
-            assert_eq!(EventType::from_str("task_created"), Some(EventType::TaskCreated));
-            assert_eq!(EventType::from_str("task_updated"), Some(EventType::TaskUpdated));
-            assert_eq!(EventType::from_str("task_deleted"), Some(EventType::TaskDeleted));
-            assert_eq!(EventType::from_str("task_claimed"), Some(EventType::TaskClaimed));
-            assert_eq!(EventType::from_str("task_released"), Some(EventType::TaskReleased));
-            assert_eq!(EventType::from_str("file_locked"), Some(EventType::FileLocked));
-            assert_eq!(EventType::from_str("file_unlocked"), Some(EventType::FileUnlocked));
-            assert_eq!(EventType::from_str("agent_registered"), Some(EventType::AgentRegistered));
-            assert_eq!(EventType::from_str("agent_timeout"), Some(EventType::AgentTimeout));
-        }
-
-        #[test]
-        fn from_str_returns_none_for_invalid_strings() {
-            assert_eq!(EventType::from_str("invalid"), None);
-            assert_eq!(EventType::from_str("TASK_CREATED"), None);
-        }
-
-        #[test]
-        fn roundtrip_conversion_is_lossless() {
-            for event in [
-                EventType::TaskCreated,
-                EventType::TaskUpdated,
-                EventType::TaskDeleted,
-                EventType::TaskClaimed,
-                EventType::TaskReleased,
-                EventType::FileLocked,
-                EventType::FileUnlocked,
-                EventType::AgentRegistered,
-                EventType::AgentTimeout,
-            ] {
-                assert_eq!(EventType::from_str(event.as_str()), Some(event));
-            }
-        }
-    }
 }

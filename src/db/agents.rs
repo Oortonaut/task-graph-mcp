@@ -77,6 +77,15 @@ impl Database {
         let tags_json = serde_json::to_string(&tags)?;
 
         self.with_conn(|conn| {
+            // Check if agent ID already exists
+            let exists: bool = conn
+                .query_row("SELECT 1 FROM agents WHERE id = ?1", params![&id], |_| Ok(true))
+                .unwrap_or(false);
+
+            if exists {
+                return Err(anyhow!("Agent ID '{}' already registered", id));
+            }
+
             conn.execute(
                 "INSERT INTO agents (id, name, tags, max_claims, registered_at, last_heartbeat)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -213,18 +222,6 @@ impl Database {
                 params![agent_id],
             )?;
 
-            // Remove all subscriptions
-            tx.execute(
-                "DELETE FROM subscriptions WHERE agent_id = ?1",
-                params![agent_id],
-            )?;
-
-            // Clear inbox
-            tx.execute(
-                "DELETE FROM inbox WHERE agent_id = ?1",
-                params![agent_id],
-            )?;
-
             // Remove agent
             tx.execute(
                 "DELETE FROM agents WHERE id = ?1",
@@ -262,6 +259,48 @@ impl Database {
                     name,
                     tags,
                     max_claims,
+                    registered_at,
+                    last_heartbeat,
+                }
+            })
+            .collect();
+
+            Ok(agents)
+        })
+    }
+
+    /// List all agents with extended info (claim count, current thought).
+    pub fn list_agents_info(&self) -> Result<Vec<crate::types::AgentInfo>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT a.id, a.name, a.tags, a.max_claims, a.registered_at, a.last_heartbeat,
+                        (SELECT COUNT(*) FROM tasks WHERE owner_agent = a.id AND status = 'in_progress') as claim_count,
+                        (SELECT current_thought FROM tasks WHERE owner_agent = a.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
+                 FROM agents a ORDER BY a.registered_at DESC",
+            )?;
+
+            let agents = stmt.query_map([], |row| {
+                let id: String = row.get(0)?;
+                let name: Option<String> = row.get(1)?;
+                let tags_json: String = row.get(2)?;
+                let max_claims: i32 = row.get(3)?;
+                let registered_at: i64 = row.get(4)?;
+                let last_heartbeat: i64 = row.get(5)?;
+                let claim_count: i32 = row.get(6)?;
+                let current_thought: Option<String> = row.get(7)?;
+
+                Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought))
+            })?
+            .filter_map(|r| r.ok())
+            .map(|(id, name, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought)| {
+                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+                crate::types::AgentInfo {
+                    id,
+                    name,
+                    tags,
+                    max_claims,
+                    claim_count,
+                    current_thought,
                     registered_at,
                     last_heartbeat,
                 }

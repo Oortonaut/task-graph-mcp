@@ -3,7 +3,6 @@
 use crate::db::Database;
 use anyhow::Result;
 use serde_json::{json, Value};
-use uuid::Uuid;
 
 pub fn get_all_tasks(db: &Database) -> Result<Value> {
     let tasks = db.get_all_tasks()?;
@@ -11,8 +10,8 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| json!({
-            "id": t.id.to_string(),
-            "parent_id": t.parent_id.map(|id| id.to_string()),
+            "id": &t.id,
+            "parent_id": &t.parent_id,
             "title": t.title,
             "description": t.description,
             "status": t.status.as_str(),
@@ -32,8 +31,8 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
             "updated_at": t.updated_at
         })).collect::<Vec<_>>(),
         "dependencies": deps.iter().map(|d| json!({
-            "from": d.from_task_id.to_string(),
-            "to": d.to_task_id.to_string()
+            "from": &d.from_task_id,
+            "to": &d.to_task_id
         })).collect::<Vec<_>>()
     }))
 }
@@ -43,7 +42,7 @@ pub fn get_ready_tasks(db: &Database) -> Result<Value> {
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| json!({
-            "id": t.id.to_string(),
+            "id": &t.id,
             "title": t.title,
             "description": t.description,
             "priority": t.priority.as_str(),
@@ -59,12 +58,12 @@ pub fn get_blocked_tasks(db: &Database) -> Result<Value> {
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| {
-            let blockers = db.get_blockers(t.id).unwrap_or_default();
+            let blockers = db.get_blockers(&t.id).unwrap_or_default();
             json!({
-                "id": t.id.to_string(),
+                "id": &t.id,
                 "title": t.title,
                 "priority": t.priority.as_str(),
-                "blocked_by": blockers.iter().map(|id| id.to_string()).collect::<Vec<_>>()
+                "blocked_by": &blockers
             })
         }).collect::<Vec<_>>()
     }))
@@ -75,7 +74,7 @@ pub fn get_claimed_tasks(db: &Database, agent_id: Option<&str>) -> Result<Value>
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| json!({
-            "id": t.id.to_string(),
+            "id": &t.id,
             "title": t.title,
             "status": t.status.as_str(),
             "priority": t.priority.as_str(),
@@ -86,7 +85,7 @@ pub fn get_claimed_tasks(db: &Database, agent_id: Option<&str>) -> Result<Value>
     }))
 }
 
-pub fn get_task_tree(db: &Database, task_id: Uuid) -> Result<Value> {
+pub fn get_task_tree(db: &Database, task_id: &str) -> Result<Value> {
     let tree = db.get_task_tree(task_id)?
         .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
 

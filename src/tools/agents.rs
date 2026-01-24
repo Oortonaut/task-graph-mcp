@@ -1,19 +1,20 @@
-//! Agent registration and management tools.
+//! Agent connection and management tools.
 
-use super::{get_i32, get_string, get_string_array, make_tool};
+use super::{get_i32, get_string, get_string_array, make_tool_with_prompts};
+use crate::config::Prompts;
 use crate::db::Database;
-use crate::types::{EventType, TargetType};
+use crate::format::{format_agents_markdown, markdown_to_json, OutputFormat};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 
-pub fn get_tools() -> Vec<Tool> {
+pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     vec![
-        make_tool(
-            "register_agent",
-            "Register a new agent session. Call this FIRST before using other tools. Returns agent_id (save it for all subsequent calls). Tags enable task affinity matching.",
+        make_tool_with_prompts(
+            "connect",
+            "Connect as an agent. Call this FIRST before using other tools. Returns agent_id (save it for all subsequent calls). Tags enable task affinity matching.",
             json!({
-                "agent_id": {
+                "agent": {
                     "type": "string",
                     "description": "Optional custom agent ID (max 36 chars). If not provided, a UUID7 will be generated."
                 },
@@ -32,75 +33,43 @@ pub fn get_tools() -> Vec<Tool> {
                 }
             }),
             vec![],
+            prompts,
         ),
-        make_tool(
-            "update_agent",
-            "Update an agent's properties.",
+        make_tool_with_prompts(
+            "disconnect",
+            "Disconnect an agent, releasing all claims and locks.",
             json!({
-                "agent_id": {
+                "agent": {
                     "type": "string",
-                    "description": "The agent's UUID"
-                },
-                "name": {
-                    "type": "string",
-                    "description": "New display name"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "New tags array"
-                },
-                "max_claims": {
-                    "type": "integer",
-                    "description": "New maximum claim limit"
+                    "description": "The agent's ID"
                 }
             }),
-            vec!["agent_id"],
+            vec!["agent"],
+            prompts,
         ),
-        make_tool(
-            "heartbeat",
-            "Refresh agent heartbeat to prevent stale claim cleanup. Call periodically during long tasks. Returns current claim count.",
+        make_tool_with_prompts(
+            "list_agents",
+            "List all connected agents with their current status, claim counts, and what they're working on.",
             json!({
-                "agent_id": {
+                "format": {
                     "type": "string",
-                    "description": "The agent's UUID"
+                    "enum": ["json", "markdown"],
+                    "description": "Output format (default: json)"
                 }
             }),
-            vec!["agent_id"],
-        ),
-        make_tool(
-            "unregister_agent",
-            "Unregister an agent, releasing all claims and locks.",
-            json!({
-                "agent_id": {
-                    "type": "string",
-                    "description": "The agent's UUID"
-                }
-            }),
-            vec!["agent_id"],
+            vec![],
+            prompts,
         ),
     ]
 }
 
-pub fn register_agent(db: &Database, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent_id");
+pub fn connect(db: &Database, args: Value) -> Result<Value> {
+    let agent_id = get_string(&args, "agent");
     let name = get_string(&args, "name");
     let tags = get_string_array(&args, "tags").unwrap_or_default();
     let max_claims = get_i32(&args, "max_claims");
 
     let agent = db.register_agent(agent_id, name, tags, max_claims)?;
-
-    // Publish event for subscribers
-    let _ = db.publish_event(
-        TargetType::Agent,
-        &agent.id,
-        EventType::AgentRegistered,
-        json!({
-            "agent_id": &agent.id,
-            "name": agent.name,
-            "tags": agent.tags
-        }),
-    );
 
     Ok(json!({
         "agent_id": &agent.id,
@@ -111,59 +80,44 @@ pub fn register_agent(db: &Database, args: Value) -> Result<Value> {
     }))
 }
 
-pub fn update_agent(db: &Database, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent_id")
-        .ok_or_else(|| anyhow::anyhow!("agent_id is required"))?;
-    let name = if args.get("name").is_some() {
-        Some(get_string(&args, "name"))
-    } else {
-        None
-    };
-    let tags = get_string_array(&args, "tags");
-    let max_claims = get_i32(&args, "max_claims");
-
-    let agent = db.update_agent(&agent_id, name, tags, max_claims)?;
-
-    Ok(json!({
-        "agent_id": &agent.id,
-        "name": agent.name,
-        "tags": agent.tags,
-        "max_claims": agent.max_claims
-    }))
-}
-
-pub fn heartbeat(db: &Database, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent_id")
-        .ok_or_else(|| anyhow::anyhow!("agent_id is required"))?;
-
-    let claim_count = db.heartbeat(&agent_id)?;
-
-    Ok(json!({
-        "success": true,
-        "claim_count": claim_count
-    }))
-}
-
-pub fn unregister_agent(db: &Database, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent_id")
-        .ok_or_else(|| anyhow::anyhow!("agent_id is required"))?;
+pub fn disconnect(db: &Database, args: Value) -> Result<Value> {
+    let agent_id = get_string(&args, "agent")
+        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
 
     // Release agent locks before unregistering
     let _ = db.release_agent_locks(&agent_id);
-
-    // Publish event for subscribers before unregistering
-    let _ = db.publish_event(
-        TargetType::Agent,
-        &agent_id,
-        EventType::AgentTimeout,
-        json!({
-            "agent_id": &agent_id
-        }),
-    );
 
     db.unregister_agent(&agent_id)?;
 
     Ok(json!({
         "success": true
     }))
+}
+
+pub fn list_agents(db: &Database, args: Value) -> Result<Value> {
+    let format = get_string(&args, "format")
+        .and_then(|s| OutputFormat::from_str(&s))
+        .unwrap_or(OutputFormat::Json);
+
+    let agents = db.list_agents_info()?;
+
+    match format {
+        OutputFormat::Markdown => {
+            Ok(markdown_to_json(format_agents_markdown(&agents)))
+        }
+        OutputFormat::Json => {
+            Ok(json!({
+                "agents": agents.iter().map(|a| json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "tags": a.tags,
+                    "max_claims": a.max_claims,
+                    "claim_count": a.claim_count,
+                    "current_thought": a.current_thought,
+                    "registered_at": a.registered_at,
+                    "last_heartbeat": a.last_heartbeat
+                })).collect::<Vec<_>>()
+            }))
+        }
+    }
 }

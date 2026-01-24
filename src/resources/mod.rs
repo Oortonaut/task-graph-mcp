@@ -103,17 +103,6 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "inbox://{agent_id}".into(),
-                    name: "Agent Inbox".into(),
-                    title: None,
-                    description: Some("Unread messages for an agent".into()),
-                    mime_type: Some("application/json".into()),
-                    icons: None,
-                },
-                None,
-            ),
-            Annotated::new(
-                RawResourceTemplate {
                     uri_template: "agents://all".into(),
                     name: "All Agents".into(),
                     title: None,
@@ -155,8 +144,6 @@ impl ResourceHandler {
             self.read_tasks_resource(uri).await
         } else if uri.starts_with("files://") {
             self.read_files_resource(uri).await
-        } else if uri.starts_with("inbox://") {
-            self.read_inbox_resource(uri).await
         } else if uri.starts_with("agents://") {
             self.read_agents_resource(uri).await
         } else if uri.starts_with("plan://") {
@@ -182,8 +169,7 @@ impl ResourceHandler {
             }
             _ if path.starts_with("tree/") => {
                 let task_id = path.strip_prefix("tree/").unwrap();
-                let uuid = uuid::Uuid::parse_str(task_id)?;
-                tasks::get_task_tree(&self.db, uuid)
+                tasks::get_task_tree(&self.db, task_id)
             }
             _ => Err(anyhow::anyhow!("Unknown tasks resource: {}", path)),
         }
@@ -196,22 +182,6 @@ impl ResourceHandler {
             "locks" => files::get_all_file_locks(&self.db),
             _ => Err(anyhow::anyhow!("Unknown files resource: {}", path)),
         }
-    }
-
-    async fn read_inbox_resource(&self, uri: &str) -> Result<Value> {
-        let agent_id = uri.strip_prefix("inbox://").unwrap_or("");
-
-        // Get unread messages without marking them read
-        let messages = self.db.poll_inbox(agent_id, None, false)?;
-
-        Ok(serde_json::json!({
-            "messages": messages.iter().map(|m| serde_json::json!({
-                "id": m.id.to_string(),
-                "event_type": m.event_type.as_str(),
-                "payload": m.payload,
-                "created_at": m.created_at
-            })).collect::<Vec<_>>()
-        }))
     }
 
     async fn read_agents_resource(&self, uri: &str) -> Result<Value> {

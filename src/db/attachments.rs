@@ -4,18 +4,19 @@ use super::{now_ms, Database};
 use crate::types::{Attachment, AttachmentMeta};
 use anyhow::{anyhow, Result};
 use rusqlite::params;
-use uuid::Uuid;
 
 impl Database {
-    /// Add an attachment to a task.
+    /// Add an attachment to a task with auto-increment order_index.
+    /// Returns the order_index of the new attachment.
+    /// If file_path is provided, content should be empty (stored externally).
     pub fn add_attachment(
         &self,
-        task_id: Uuid,
+        task_id: &str,
         name: String,
         content: String,
         mime_type: Option<String>,
-    ) -> Result<Uuid> {
-        let id = Uuid::new_v4();
+        file_path: Option<String>,
+    ) -> Result<i32> {
         let now = now_ms();
         let mime_type = mime_type.unwrap_or_else(|| "text/plain".to_string());
 
@@ -24,7 +25,7 @@ impl Database {
             let exists: bool = conn
                 .query_row(
                     "SELECT 1 FROM tasks WHERE id = ?1",
-                    params![task_id.to_string()],
+                    params![task_id],
                     |_| Ok(true),
                 )
                 .unwrap_or(false);
@@ -33,44 +34,58 @@ impl Database {
                 return Err(anyhow!("Task not found"));
             }
 
+            // Get next order_index for this task
+            let max_order: Option<i32> = conn.query_row(
+                "SELECT MAX(order_index) FROM attachments WHERE task_id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )?;
+            let order_index = max_order.unwrap_or(-1) + 1;
+
             conn.execute(
-                "INSERT INTO attachments (id, task_id, name, mime_type, content, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO attachments (task_id, order_index, name, mime_type, content, file_path, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
-                    id.to_string(),
-                    task_id.to_string(),
+                    task_id,
+                    order_index,
                     name,
                     mime_type,
                     content,
+                    file_path,
                     now,
                 ],
             )?;
 
-            Ok(id)
+            Ok(order_index)
         })
     }
 
-    /// Get attachments for a task (metadata only).
-    pub fn get_attachments(&self, task_id: Uuid) -> Result<Vec<AttachmentMeta>> {
+    /// Get attachments for a task, optionally including content.
+    /// Note: For file-based attachments, content is NOT loaded here - use get_attachment for that.
+    pub fn get_attachments_full(&self, task_id: &str, include_content: bool) -> Result<Vec<Attachment>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, task_id, name, mime_type, created_at
-                 FROM attachments WHERE task_id = ?1 ORDER BY created_at",
+                "SELECT task_id, order_index, name, mime_type, content, file_path, created_at
+                 FROM attachments WHERE task_id = ?1 ORDER BY order_index, created_at",
             )?;
 
             let attachments = stmt
-                .query_map(params![task_id.to_string()], |row| {
-                    let id: String = row.get(0)?;
-                    let task_id: String = row.get(1)?;
+                .query_map(params![task_id], |row| {
+                    let task_id: String = row.get(0)?;
+                    let order_index: i32 = row.get(1)?;
                     let name: String = row.get(2)?;
                     let mime_type: String = row.get(3)?;
-                    let created_at: i64 = row.get(4)?;
+                    let content: String = row.get(4)?;
+                    let file_path: Option<String> = row.get(5)?;
+                    let created_at: i64 = row.get(6)?;
 
-                    Ok(AttachmentMeta {
-                        id: Uuid::parse_str(&id).unwrap(),
-                        task_id: Uuid::parse_str(&task_id).unwrap(),
+                    Ok(Attachment {
+                        task_id,
+                        order_index,
                         name,
                         mime_type,
+                        content: if include_content { content } else { String::new() },
+                        file_path,
                         created_at,
                     })
                 })?
@@ -81,28 +96,65 @@ impl Database {
         })
     }
 
-    /// Get a full attachment with content.
-    pub fn get_attachment(&self, attachment_id: Uuid) -> Result<Option<Attachment>> {
+    /// Get attachments for a task (metadata only).
+    pub fn get_attachments(&self, task_id: &str) -> Result<Vec<AttachmentMeta>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, task_id, name, mime_type, content, created_at
-                 FROM attachments WHERE id = ?1",
+                "SELECT task_id, order_index, name, mime_type, file_path, created_at
+                 FROM attachments WHERE task_id = ?1 ORDER BY order_index, created_at",
             )?;
 
-            let result = stmt.query_row(params![attachment_id.to_string()], |row| {
-                let id: String = row.get(0)?;
-                let task_id: String = row.get(1)?;
+            let attachments = stmt
+                .query_map(params![task_id], |row| {
+                    let task_id: String = row.get(0)?;
+                    let order_index: i32 = row.get(1)?;
+                    let name: String = row.get(2)?;
+                    let mime_type: String = row.get(3)?;
+                    let file_path: Option<String> = row.get(4)?;
+                    let created_at: i64 = row.get(5)?;
+
+                    Ok(AttachmentMeta {
+                        task_id,
+                        order_index,
+                        name,
+                        mime_type,
+                        file_path,
+                        created_at,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(attachments)
+        })
+    }
+
+    /// Get a full attachment by (task_id, order_index).
+    /// Note: For file-based attachments, content field contains the DB content (empty).
+    /// The caller should read from file_path if set.
+    pub fn get_attachment(&self, task_id: &str, order_index: i32) -> Result<Option<Attachment>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT task_id, order_index, name, mime_type, content, file_path, created_at
+                 FROM attachments WHERE task_id = ?1 AND order_index = ?2",
+            )?;
+
+            let result = stmt.query_row(params![task_id, order_index], |row| {
+                let task_id: String = row.get(0)?;
+                let order_index: i32 = row.get(1)?;
                 let name: String = row.get(2)?;
                 let mime_type: String = row.get(3)?;
                 let content: String = row.get(4)?;
-                let created_at: i64 = row.get(5)?;
+                let file_path: Option<String> = row.get(5)?;
+                let created_at: i64 = row.get(6)?;
 
                 Ok(Attachment {
-                    id: Uuid::parse_str(&id).unwrap(),
-                    task_id: Uuid::parse_str(&task_id).unwrap(),
+                    task_id,
+                    order_index,
                     name,
                     mime_type,
                     content,
+                    file_path,
                     created_at,
                 })
             });
@@ -115,12 +167,29 @@ impl Database {
         })
     }
 
-    /// Delete an attachment.
-    pub fn delete_attachment(&self, attachment_id: Uuid) -> Result<bool> {
+    /// Get just the file_path for an attachment (useful before deletion).
+    pub fn get_attachment_file_path(&self, task_id: &str, order_index: i32) -> Result<Option<String>> {
+        self.with_conn(|conn| {
+            let result = conn.query_row(
+                "SELECT file_path FROM attachments WHERE task_id = ?1 AND order_index = ?2",
+                params![task_id, order_index],
+                |row| row.get::<_, Option<String>>(0),
+            );
+
+            match result {
+                Ok(file_path) => Ok(file_path),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
+
+    /// Delete an attachment by (task_id, order_index).
+    pub fn delete_attachment(&self, task_id: &str, order_index: i32) -> Result<bool> {
         self.with_conn(|conn| {
             let deleted = conn.execute(
-                "DELETE FROM attachments WHERE id = ?1",
-                params![attachment_id.to_string()],
+                "DELETE FROM attachments WHERE task_id = ?1 AND order_index = ?2",
+                params![task_id, order_index],
             )?;
 
             Ok(deleted > 0)

@@ -1,56 +1,67 @@
 //! Live status and tracking tools.
 
-use super::{get_f64, get_i64, get_string, get_uuid, get_uuid_array, make_tool};
+use super::{get_f64, get_i64, get_string, get_string_array, make_tool_with_prompts};
+use crate::config::Prompts;
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-pub fn get_tools() -> Vec<Tool> {
+pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     vec![
-        make_tool(
-            "set_thought",
-            "Update your current activity (visible to other agents). Also refreshes heartbeat. Call regularly during long tasks to show progress and prevent stale claim cleanup.",
+        make_tool_with_prompts(
+            "thinking",
+            "Broadcast real-time status updates (what you're doing right now). Also refreshes heartbeat. Call frequently during work to show live progress.",
             json!({
-                "agent_id": {
+                "agent": {
                     "type": "string",
-                    "description": "Agent UUID"
+                    "description": "Agent ID"
                 },
                 "thought": {
                     "type": "string",
                     "description": "What the agent is currently doing"
                 },
-                "task_ids": {
+                "tasks": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Specific task UUIDs to update (default: all claimed tasks)"
+                    "description": "Specific task IDs to update (default: all claimed tasks)"
                 }
             }),
-            vec!["agent_id"],
+            vec!["agent"],
+            prompts,
         ),
-        make_tool(
+        make_tool_with_prompts(
             "log_time",
             "Log time spent on a task.",
             json!({
-                "task_id": {
+                "agent": {
                     "type": "string",
-                    "description": "Task UUID"
+                    "description": "Agent ID"
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Task ID"
                 },
                 "duration_ms": {
                     "type": "integer",
                     "description": "Duration in milliseconds to add"
                 }
             }),
-            vec!["task_id", "duration_ms"],
+            vec!["agent", "task", "duration_ms"],
+            prompts,
         ),
-        make_tool(
+        make_tool_with_prompts(
             "log_cost",
             "Log token usage and cost for a task.",
             json!({
-                "task_id": {
+                "agent": {
                     "type": "string",
-                    "description": "Task UUID"
+                    "description": "Agent ID"
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Task ID"
                 },
                 "tokens_in": {
                     "type": "integer",
@@ -85,16 +96,17 @@ pub fn get_tools() -> Vec<Tool> {
                     "description": "Custom metrics to merge"
                 }
             }),
-            vec!["task_id"],
+            vec!["agent", "task"],
+            prompts,
         ),
     ]
 }
 
-pub fn set_thought(db: &Database, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent_id")
-        .ok_or_else(|| anyhow::anyhow!("agent_id is required"))?;
+pub fn thinking(db: &Database, args: Value) -> Result<Value> {
+    let agent_id = get_string(&args, "agent")
+        .ok_or_else(|| anyhow::anyhow!("agent is required"))?;
     let thought = get_string(&args, "thought");
-    let task_ids = get_uuid_array(&args, "task_ids");
+    let task_ids = get_string_array(&args, "tasks");
 
     // Also refresh heartbeat since updating thought implies activity
     let _ = db.heartbeat(&agent_id);
@@ -108,12 +120,12 @@ pub fn set_thought(db: &Database, args: Value) -> Result<Value> {
 }
 
 pub fn log_time(db: &Database, args: Value) -> Result<Value> {
-    let task_id = get_uuid(&args, "task_id")
-        .ok_or_else(|| anyhow::anyhow!("task_id is required"))?;
+    let task_id = get_string(&args, "task")
+        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
     let duration_ms = get_i64(&args, "duration_ms")
         .ok_or_else(|| anyhow::anyhow!("duration_ms is required"))?;
 
-    let total = db.log_time(task_id, duration_ms)?;
+    let total = db.log_time(&task_id, duration_ms)?;
 
     Ok(json!({
         "success": true,
@@ -122,8 +134,8 @@ pub fn log_time(db: &Database, args: Value) -> Result<Value> {
 }
 
 pub fn log_cost(db: &Database, args: Value) -> Result<Value> {
-    let task_id = get_uuid(&args, "task_id")
-        .ok_or_else(|| anyhow::anyhow!("task_id is required"))?;
+    let task_id = get_string(&args, "task")
+        .ok_or_else(|| anyhow::anyhow!("task is required"))?;
 
     let tokens_in = get_i64(&args, "tokens_in");
     let tokens_cached = get_i64(&args, "tokens_cached");
@@ -138,7 +150,7 @@ pub fn log_cost(db: &Database, args: Value) -> Result<Value> {
         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
     let task = db.log_cost(
-        task_id,
+        &task_id,
         tokens_in,
         tokens_cached,
         tokens_out,

@@ -4,8 +4,7 @@
 //! Tests are organized by module and functionality.
 
 use task_graph_mcp::db::Database;
-use task_graph_mcp::types::{EventType, Priority, TargetType, TaskStatus};
-use uuid::Uuid;
+use task_graph_mcp::types::{Priority, TaskStatus};
 
 /// Helper to create a fresh in-memory database for testing.
 fn setup_db() -> Database {
@@ -86,6 +85,30 @@ mod agent_tests {
         let result = db.register_agent(Some("".to_string()), None, vec![], None);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn register_agent_rejects_duplicate_id() {
+        let db = setup_db();
+
+        // First registration should succeed
+        let result = db.register_agent(
+            Some("duplicate-agent".to_string()),
+            Some("First Agent".to_string()),
+            vec![],
+            None,
+        );
+        assert!(result.is_ok());
+
+        // Second registration with same ID should fail
+        let result = db.register_agent(
+            Some("duplicate-agent".to_string()),
+            Some("Second Agent".to_string()),
+            vec![],
+            None,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already registered"));
     }
 
     #[test]
@@ -222,7 +245,7 @@ mod task_tests {
                 Some(3600000),
                 Some(vec!["rust".to_string()]),
                 Some(vec!["backend".to_string()]),
-                Some(serde_json::json!({"key": "value"})),
+                None, // blocked_by
             )
             .unwrap();
 
@@ -233,7 +256,6 @@ mod task_tests {
         assert_eq!(task.time_estimate_ms, Some(3600000));
         assert_eq!(task.needed_tags, vec!["rust"]);
         assert_eq!(task.wanted_tags, vec!["backend"]);
-        assert!(task.metadata.is_some());
     }
 
     #[test]
@@ -247,7 +269,7 @@ mod task_tests {
             .create_task(
                 "Child 1".to_string(),
                 None,
-                Some(parent.id),
+                Some(parent.id.clone()),
                 None,
                 None,
                 None,
@@ -260,7 +282,7 @@ mod task_tests {
             .create_task(
                 "Child 2".to_string(),
                 None,
-                Some(parent.id),
+                Some(parent.id.clone()),
                 None,
                 None,
                 None,
@@ -281,7 +303,7 @@ mod task_tests {
             .create_task("Find Me".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        let found = db.get_task(task.id).unwrap();
+        let found = db.get_task(&task.id).unwrap();
 
         assert!(found.is_some());
         assert_eq!(found.unwrap().title, "Find Me");
@@ -290,7 +312,7 @@ mod task_tests {
     #[test]
     fn get_task_returns_none_for_unknown_id() {
         let db = setup_db();
-        let unknown_id = Uuid::new_v4();
+        let unknown_id = "non-existent-task-id";
 
         let result = db.get_task(unknown_id).unwrap();
 
@@ -306,12 +328,11 @@ mod task_tests {
 
         let updated = db
             .update_task(
-                task.id,
+                &task.id,
                 Some("Updated".to_string()),
                 Some(Some("New Description".to_string())),
                 Some(TaskStatus::InProgress),
                 Some(Priority::High),
-                None,
                 None,
             )
             .unwrap();
@@ -331,7 +352,7 @@ mod task_tests {
         assert!(task.completed_at.is_none());
 
         let updated = db
-            .update_task(task.id, None, None, Some(TaskStatus::Completed), None, None, None)
+            .update_task(&task.id, None, None, Some(TaskStatus::Completed), None, None)
             .unwrap();
 
         assert!(updated.completed_at.is_some());
@@ -344,9 +365,9 @@ mod task_tests {
             .create_task("Delete Me".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        db.delete_task(task.id, false).unwrap();
+        db.delete_task(&task.id, false).unwrap();
 
-        let found = db.get_task(task.id).unwrap();
+        let found = db.get_task(&task.id).unwrap();
         assert!(found.is_none());
     }
 
@@ -359,7 +380,7 @@ mod task_tests {
         db.create_task(
             "Child".to_string(),
             None,
-            Some(parent.id),
+            Some(parent.id.clone()),
             None,
             None,
             None,
@@ -369,7 +390,7 @@ mod task_tests {
         )
         .unwrap();
 
-        let result = db.delete_task(parent.id, false);
+        let result = db.delete_task(&parent.id, false);
 
         assert!(result.is_err());
     }
@@ -384,7 +405,7 @@ mod task_tests {
             .create_task(
                 "Child".to_string(),
                 None,
-                Some(parent.id),
+                Some(parent.id.clone()),
                 None,
                 None,
                 None,
@@ -394,10 +415,10 @@ mod task_tests {
             )
             .unwrap();
 
-        db.delete_task(parent.id, true).unwrap();
+        db.delete_task(&parent.id, true).unwrap();
 
-        assert!(db.get_task(parent.id).unwrap().is_none());
-        assert!(db.get_task(child.id).unwrap().is_none());
+        assert!(db.get_task(&parent.id).unwrap().is_none());
+        assert!(db.get_task(&child.id).unwrap().is_none());
     }
 
     #[test]
@@ -409,7 +430,7 @@ mod task_tests {
         db.create_task(
             "Child 1".to_string(),
             None,
-            Some(parent.id),
+            Some(parent.id.clone()),
             None,
             None,
             None,
@@ -421,7 +442,7 @@ mod task_tests {
         db.create_task(
             "Child 2".to_string(),
             None,
-            Some(parent.id),
+            Some(parent.id.clone()),
             None,
             None,
             None,
@@ -431,7 +452,7 @@ mod task_tests {
         )
         .unwrap();
 
-        let children = db.get_children(parent.id).unwrap();
+        let children = db.get_children(&parent.id).unwrap();
 
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].title, "Child 1");
@@ -446,7 +467,7 @@ mod task_tests {
         let task2 = db
             .create_task("Completed".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.update_task(task2.id, None, None, Some(TaskStatus::Completed), None, None, None)
+        db.update_task(&task2.id, None, None, Some(TaskStatus::Completed), None, None)
             .unwrap();
 
         let pending = db
@@ -474,7 +495,7 @@ mod task_claiming_tests {
             .create_task("Claim Me".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        let claimed = db.claim_task(task.id, &agent.id).unwrap();
+        let claimed = db.claim_task(&task.id, &agent.id).unwrap();
 
         assert_eq!(claimed.owner_agent, Some(agent.id.clone()));
         assert_eq!(claimed.status, TaskStatus::InProgress);
@@ -491,8 +512,8 @@ mod task_claiming_tests {
             .create_task("Claimed".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        db.claim_task(task.id, &agent1.id).unwrap();
-        let result = db.claim_task(task.id, &agent2.id);
+        db.claim_task(&task.id, &agent1.id).unwrap();
+        let result = db.claim_task(&task.id, &agent2.id);
 
         assert!(result.is_err());
     }
@@ -508,8 +529,8 @@ mod task_claiming_tests {
             .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        db.claim_task(task1.id, &agent.id).unwrap();
-        let result = db.claim_task(task2.id, &agent.id);
+        db.claim_task(&task1.id, &agent.id).unwrap();
+        let result = db.claim_task(&task2.id, &agent.id);
 
         assert!(result.is_err());
     }
@@ -534,7 +555,7 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        let result = db.claim_task(task.id, &agent.id);
+        let result = db.claim_task(&task.id, &agent.id);
 
         assert!(result.is_err());
     }
@@ -559,7 +580,7 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        let result = db.claim_task(task.id, &agent.id);
+        let result = db.claim_task(&task.id, &agent.id);
 
         assert!(result.is_ok());
     }
@@ -584,7 +605,7 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        let result = db.claim_task(task.id, &agent.id);
+        let result = db.claim_task(&task.id, &agent.id);
 
         assert!(result.is_err());
     }
@@ -596,11 +617,11 @@ mod task_claiming_tests {
         let task = db
             .create_task("Release Me".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.claim_task(task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id).unwrap();
 
-        db.release_task(task.id, &agent.id).unwrap();
+        db.release_task(&task.id, &agent.id).unwrap();
 
-        let updated = db.get_task(task.id).unwrap().unwrap();
+        let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.owner_agent.is_none());
         assert_eq!(updated.status, TaskStatus::Pending);
     }
@@ -613,9 +634,9 @@ mod task_claiming_tests {
         let task = db
             .create_task("Owned".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.claim_task(task.id, &agent1.id).unwrap();
+        db.claim_task(&task.id, &agent1.id).unwrap();
 
-        let result = db.release_task(task.id, &agent2.id);
+        let result = db.release_task(&task.id, &agent2.id);
 
         assert!(result.is_err());
     }
@@ -627,11 +648,11 @@ mod task_claiming_tests {
         let task = db
             .create_task("Force".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.claim_task(task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id).unwrap();
 
-        db.force_release(task.id).unwrap();
+        db.force_release(&task.id).unwrap();
 
-        let updated = db.get_task(task.id).unwrap().unwrap();
+        let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.owner_agent.is_none());
     }
 }
@@ -649,9 +670,9 @@ mod dependency_tests {
             .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        db.add_dependency(task1.id, task2.id).unwrap();
+        db.add_dependency(&task1.id, &task2.id).unwrap();
 
-        let blockers = db.get_blockers(task2.id).unwrap();
+        let blockers = db.get_blockers(&task2.id).unwrap();
         assert_eq!(blockers.len(), 1);
         assert_eq!(blockers[0], task1.id);
     }
@@ -666,9 +687,9 @@ mod dependency_tests {
             .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        db.add_dependency(task1.id, task2.id).unwrap(); // task1 blocks task2
+        db.add_dependency(&task1.id, &task2.id).unwrap(); // task1 blocks task2
 
-        let result = db.add_dependency(task2.id, task1.id); // task2 blocks task1 - cycle!
+        let result = db.add_dependency(&task2.id, &task1.id); // task2 blocks task1 - cycle!
 
         assert!(result.is_err());
     }
@@ -686,10 +707,10 @@ mod dependency_tests {
             .create_task("Task 3".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        db.add_dependency(task1.id, task2.id).unwrap(); // 1 -> 2
-        db.add_dependency(task2.id, task3.id).unwrap(); // 2 -> 3
+        db.add_dependency(&task1.id, &task2.id).unwrap(); // 1 -> 2
+        db.add_dependency(&task2.id, &task3.id).unwrap(); // 2 -> 3
 
-        let result = db.add_dependency(task3.id, task1.id); // 3 -> 1 - cycle!
+        let result = db.add_dependency(&task3.id, &task1.id); // 3 -> 1 - cycle!
 
         assert!(result.is_err());
     }
@@ -703,11 +724,11 @@ mod dependency_tests {
         let task2 = db
             .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.add_dependency(task1.id, task2.id).unwrap();
+        db.add_dependency(&task1.id, &task2.id).unwrap();
 
-        db.remove_dependency(task1.id, task2.id).unwrap();
+        db.remove_dependency(&task1.id, &task2.id).unwrap();
 
-        let blockers = db.get_blockers(task2.id).unwrap();
+        let blockers = db.get_blockers(&task2.id).unwrap();
         assert!(blockers.is_empty());
     }
 
@@ -720,7 +741,7 @@ mod dependency_tests {
         let task2 = db
             .create_task("Blocked".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.add_dependency(task1.id, task2.id).unwrap();
+        db.add_dependency(&task1.id, &task2.id).unwrap();
 
         let ready = db.get_ready_tasks(None).unwrap();
 
@@ -738,10 +759,10 @@ mod dependency_tests {
         let task2 = db
             .create_task("Blocked".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.add_dependency(task1.id, task2.id).unwrap();
+        db.add_dependency(&task1.id, &task2.id).unwrap();
 
         // Complete blocker
-        db.update_task(task1.id, None, None, Some(TaskStatus::Completed), None, None, None)
+        db.update_task(&task1.id, None, None, Some(TaskStatus::Completed), None, None)
             .unwrap();
 
         let ready = db.get_ready_tasks(None).unwrap();
@@ -760,7 +781,7 @@ mod file_lock_tests {
         let db = setup_db();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
 
-        let warning = db.lock_file("src/main.rs".to_string(), &agent.id).unwrap();
+        let warning = db.lock_file("src/main.rs".to_string(), &agent.id, None).unwrap();
 
         assert!(warning.is_none());
         let locks = db.get_file_locks(None, None).unwrap();
@@ -774,8 +795,8 @@ mod file_lock_tests {
         let agent1 = db.register_agent(None, None, vec![], None).unwrap();
         let agent2 = db.register_agent(None, None, vec![], None).unwrap();
 
-        db.lock_file("src/main.rs".to_string(), &agent1.id).unwrap();
-        let warning = db.lock_file("src/main.rs".to_string(), &agent2.id).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent1.id, None).unwrap();
+        let warning = db.lock_file("src/main.rs".to_string(), &agent2.id, None).unwrap();
 
         assert!(warning.is_some());
         assert_eq!(warning.unwrap(), agent1.id);
@@ -786,9 +807,9 @@ mod file_lock_tests {
         let db = setup_db();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
 
-        db.lock_file("src/main.rs".to_string(), &agent.id).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent.id, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let warning = db.lock_file("src/main.rs".to_string(), &agent.id).unwrap();
+        let warning = db.lock_file("src/main.rs".to_string(), &agent.id, None).unwrap();
 
         assert!(warning.is_none()); // No warning for same agent
     }
@@ -797,9 +818,9 @@ mod file_lock_tests {
     fn unlock_file_removes_lock() {
         let db = setup_db();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
-        db.lock_file("src/main.rs".to_string(), &agent.id).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent.id, None).unwrap();
 
-        let unlocked = db.unlock_file("src/main.rs", &agent.id).unwrap();
+        let unlocked = db.unlock_file("src/main.rs", &agent.id, None).unwrap();
 
         assert!(unlocked);
         let locks = db.get_file_locks(None, None).unwrap();
@@ -811,9 +832,9 @@ mod file_lock_tests {
         let db = setup_db();
         let agent1 = db.register_agent(None, None, vec![], None).unwrap();
         let agent2 = db.register_agent(None, None, vec![], None).unwrap();
-        db.lock_file("src/main.rs".to_string(), &agent1.id).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent1.id, None).unwrap();
 
-        let unlocked = db.unlock_file("src/main.rs", &agent2.id).unwrap();
+        let unlocked = db.unlock_file("src/main.rs", &agent2.id, None).unwrap();
 
         assert!(!unlocked);
     }
@@ -823,8 +844,8 @@ mod file_lock_tests {
         let db = setup_db();
         let agent1 = db.register_agent(None, None, vec![], None).unwrap();
         let agent2 = db.register_agent(None, None, vec![], None).unwrap();
-        db.lock_file("file1.rs".to_string(), &agent1.id).unwrap();
-        db.lock_file("file2.rs".to_string(), &agent2.id).unwrap();
+        db.lock_file("file1.rs".to_string(), &agent1.id, None).unwrap();
+        db.lock_file("file2.rs".to_string(), &agent2.id, None).unwrap();
 
         let agent1_locks = db.get_file_locks(None, Some(&agent1.id)).unwrap();
 
@@ -836,140 +857,14 @@ mod file_lock_tests {
     fn release_agent_locks_removes_all_agent_locks() {
         let db = setup_db();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
-        db.lock_file("file1.rs".to_string(), &agent.id).unwrap();
-        db.lock_file("file2.rs".to_string(), &agent.id).unwrap();
+        db.lock_file("file1.rs".to_string(), &agent.id, None).unwrap();
+        db.lock_file("file2.rs".to_string(), &agent.id, None).unwrap();
 
         let released = db.release_agent_locks(&agent.id).unwrap();
 
         assert_eq!(released, 2);
         let locks = db.get_file_locks(None, None).unwrap();
         assert!(locks.is_empty());
-    }
-}
-
-mod inbox_tests {
-    use super::*;
-
-    #[test]
-    fn subscribe_creates_subscription() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        let task = db
-            .create_task("Task".to_string(), None, None, None, None, None, None, None, None)
-            .unwrap();
-
-        let sub_id = db
-            .subscribe(&agent.id, TargetType::Task, task.id.to_string())
-            .unwrap();
-
-        assert!(!sub_id.is_nil());
-    }
-
-    #[test]
-    fn unsubscribe_removes_subscription() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        let sub_id = db
-            .subscribe(&agent.id, TargetType::Task, "some-task".to_string())
-            .unwrap();
-
-        let removed = db.unsubscribe(sub_id).unwrap();
-
-        assert!(removed);
-    }
-
-    #[test]
-    fn publish_event_adds_messages_to_subscribers() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        let task = db
-            .create_task("Task".to_string(), None, None, None, None, None, None, None, None)
-            .unwrap();
-        db.subscribe(&agent.id, TargetType::Task, task.id.to_string())
-            .unwrap();
-
-        let count = db
-            .publish_event(
-                TargetType::Task,
-                &task.id.to_string(),
-                EventType::TaskUpdated,
-                serde_json::json!({"status": "completed"}),
-            )
-            .unwrap();
-
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn poll_inbox_returns_unread_messages() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        db.add_inbox_message(&agent.id, EventType::TaskCreated, serde_json::json!({}))
-            .unwrap();
-
-        let messages = db.poll_inbox(&agent.id, None, false).unwrap();
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].event_type, EventType::TaskCreated);
-    }
-
-    #[test]
-    fn poll_inbox_marks_messages_as_read() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        db.add_inbox_message(&agent.id, EventType::TaskCreated, serde_json::json!({}))
-            .unwrap();
-
-        db.poll_inbox(&agent.id, None, true).unwrap(); // mark_read = true
-        let messages = db.poll_inbox(&agent.id, None, false).unwrap();
-
-        assert!(messages.is_empty()); // Already read
-    }
-
-    #[test]
-    fn poll_inbox_respects_limit() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        db.add_inbox_message(&agent.id, EventType::TaskCreated, serde_json::json!({}))
-            .unwrap();
-        db.add_inbox_message(&agent.id, EventType::TaskUpdated, serde_json::json!({}))
-            .unwrap();
-        db.add_inbox_message(&agent.id, EventType::TaskDeleted, serde_json::json!({}))
-            .unwrap();
-
-        let messages = db.poll_inbox(&agent.id, Some(2), false).unwrap();
-
-        assert_eq!(messages.len(), 2);
-    }
-
-    #[test]
-    fn clear_inbox_removes_all_messages() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        db.add_inbox_message(&agent.id, EventType::TaskCreated, serde_json::json!({}))
-            .unwrap();
-        db.add_inbox_message(&agent.id, EventType::TaskUpdated, serde_json::json!({}))
-            .unwrap();
-
-        let cleared = db.clear_inbox(&agent.id).unwrap();
-
-        assert_eq!(cleared, 2);
-        let messages = db.poll_inbox(&agent.id, None, false).unwrap();
-        assert!(messages.is_empty());
-    }
-
-    #[test]
-    fn get_subscriptions_returns_agent_subscriptions() {
-        let db = setup_db();
-        let agent = db.register_agent(None, None, vec![], None).unwrap();
-        db.subscribe(&agent.id, TargetType::Task, "task-1".to_string())
-            .unwrap();
-        db.subscribe(&agent.id, TargetType::File, "file.rs".to_string())
-            .unwrap();
-
-        let subs = db.get_subscriptions(&agent.id).unwrap();
-
-        assert_eq!(subs.len(), 2);
     }
 }
 
@@ -983,12 +878,12 @@ mod tracking_tests {
         let task = db
             .create_task("Think".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
-        db.claim_task(task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id).unwrap();
 
         db.set_thought(&agent.id, Some("Thinking...".to_string()), None)
             .unwrap();
 
-        let updated = db.get_task(task.id).unwrap().unwrap();
+        let updated = db.get_task(&task.id).unwrap().unwrap();
         assert_eq!(updated.current_thought, Some("Thinking...".to_string()));
     }
 
@@ -999,10 +894,10 @@ mod tracking_tests {
             .create_task("Time Me".to_string(), None, None, None, None, None, None, None, None)
             .unwrap();
 
-        db.log_time(task.id, 1000).unwrap();
-        db.log_time(task.id, 2000).unwrap();
+        db.log_time(&task.id, 1000).unwrap();
+        db.log_time(&task.id, 2000).unwrap();
 
-        let updated = db.get_task(task.id).unwrap().unwrap();
+        let updated = db.get_task(&task.id).unwrap().unwrap();
         assert_eq!(updated.time_actual_ms, Some(3000));
     }
 
@@ -1014,7 +909,7 @@ mod tracking_tests {
             .unwrap();
 
         db.log_cost(
-            task.id,
+            &task.id,
             Some(100),
             None,
             Some(50),
@@ -1026,7 +921,7 @@ mod tracking_tests {
         )
         .unwrap();
         db.log_cost(
-            task.id,
+            &task.id,
             Some(200),
             None,
             Some(100),
@@ -1038,7 +933,7 @@ mod tracking_tests {
         )
         .unwrap();
 
-        let updated = db.get_task(task.id).unwrap().unwrap();
+        let updated = db.get_task(&task.id).unwrap().unwrap();
         assert_eq!(updated.tokens_in, 300);
         assert_eq!(updated.tokens_out, 150);
         assert!((updated.cost_usd - 0.003).abs() < 0.0001);
@@ -1076,7 +971,7 @@ mod stats_tests {
                 None,
             )
             .unwrap();
-        db.update_task(task2.id, None, None, Some(TaskStatus::Completed), None, None, None)
+        db.update_task(&task2.id, None, None, Some(TaskStatus::Completed), None, None)
             .unwrap();
 
         let stats = db.get_stats(None, None).unwrap();
@@ -1105,7 +1000,7 @@ mod stats_tests {
                 None,
             )
             .unwrap();
-        db.claim_task(task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id).unwrap();
         db.create_task(
             "Other Task".to_string(),
             None,
@@ -1144,7 +1039,7 @@ mod stats_tests {
         db.create_task(
             "Child".to_string(),
             None,
-            Some(parent.id),
+            Some(parent.id.clone()),
             None,
             Some(3),
             None,
@@ -1166,7 +1061,7 @@ mod stats_tests {
         )
         .unwrap();
 
-        let stats = db.get_stats(None, Some(parent.id)).unwrap();
+        let stats = db.get_stats(None, Some(&parent.id)).unwrap();
 
         assert_eq!(stats.total_tasks, 2); // parent + child
         assert_eq!(stats.total_points, 5); // 2 + 3

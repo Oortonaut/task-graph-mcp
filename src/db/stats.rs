@@ -4,11 +4,10 @@ use super::Database;
 use crate::types::Stats;
 use anyhow::Result;
 use rusqlite::params;
-use uuid::Uuid;
 
 impl Database {
     /// Get aggregate statistics.
-    pub fn get_stats(&self, agent_id: Option<&str>, task_id: Option<Uuid>) -> Result<Stats> {
+    pub fn get_stats(&self, agent_id: Option<&str>, task_id: Option<&str>) -> Result<Stats> {
         self.with_conn(|conn| {
             let (sql, params_vec): (String, Vec<String>) = match (agent_id, task_id) {
                 (Some(aid), None) => (
