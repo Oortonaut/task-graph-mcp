@@ -1,6 +1,6 @@
 # Task Graph MCP - Database Schema
 
-> **Current Version:** V006
+> **Current Version:** V007
 > **Last Updated:** 2026-01-24
 > **Database:** SQLite 3
 
@@ -38,7 +38,7 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 | `parent_id` | TEXT | FK → tasks(id) CASCADE | Parent task for hierarchy |
 | `title` | TEXT | NOT NULL | Task title |
 | `description` | TEXT | | Detailed task description |
-| `status` | TEXT | NOT NULL DEFAULT 'pending' | One of: pending, in_progress, completed, failed, cancelled |
+| `status` | TEXT | NOT NULL DEFAULT 'pending' | Task state (configurable, see States Configuration) |
 | `priority` | TEXT | NOT NULL DEFAULT 'medium' | One of: low, medium, high, critical |
 | `join_mode` | TEXT | NOT NULL DEFAULT 'then' | 'then' (sequential) or 'also' (parallel) |
 | `sibling_order` | INTEGER | NOT NULL DEFAULT 0 | Position among sibling tasks |
@@ -152,7 +152,7 @@ Append-only audit log of task state transitions, enabling automatic time trackin
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Monotonic sequence ID |
 | `task_id` | TEXT | NOT NULL | Task being transitioned |
 | `agent_id` | TEXT | | Agent performing the transition (optional) |
-| `event` | TEXT | NOT NULL | Target state (pending, in_progress, completed, etc.) |
+| `event` | TEXT | NOT NULL | Target state (configurable, see States Configuration) |
 | `reason` | TEXT | | Optional reason for the transition |
 | `timestamp` | INTEGER | NOT NULL | Unix timestamp when state was entered |
 | `end_timestamp` | INTEGER | | Unix timestamp when state was exited |
@@ -168,14 +168,56 @@ Append-only audit log of task state transitions, enabling automatic time trackin
 
 ---
 
-## Enums (Application Layer)
+## States Configuration
 
-### TaskStatus
-- `pending` - Not yet started
-- `in_progress` - Currently being worked on
-- `completed` - Successfully finished
-- `failed` - Finished with errors
-- `cancelled` - Manually cancelled
+Task states are fully configurable via YAML. The configuration defines:
+
+- **initial** - Default state for new tasks
+- **blocking_states** - States that block dependent tasks (AND logic)
+- **definitions** - Per-state settings including allowed transitions and time tracking
+
+### Default States
+
+```yaml
+states:
+  initial: pending
+  blocking_states: [pending, in_progress]
+  definitions:
+    pending:
+      exits: [in_progress, cancelled]
+      timed: false
+    in_progress:
+      exits: [completed, failed, pending]
+      timed: true
+    completed:
+      exits: []
+      timed: false
+    failed:
+      exits: [pending]
+      timed: false
+    cancelled:
+      exits: []
+      timed: false
+```
+
+### State Definition Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `exits` | string[] | Allowed target states for transitions |
+| `timed` | boolean | If true, time in this state accumulates to `time_actual_ms` |
+
+### State Transition Rules
+
+1. Transitions are validated against the current state's `exits` list
+2. When exiting a `timed` state, duration is added to `time_actual_ms`
+3. States with empty `exits` are terminal (e.g., completed, cancelled)
+4. The `started_at` timestamp is set on first entry to any timed state
+5. The `completed_at` timestamp is set when entering a terminal state
+
+---
+
+## Enums (Application Layer)
 
 ### Priority
 - `low`
@@ -203,6 +245,7 @@ Append-only audit log of task state transitions, enabling automatic time trackin
 | V004 | 2026-01-23 | Add `claim_sequence` table for file claim tracking; add `last_claim_sequence` to agents; add `reason` to file_locks; drop pub/sub tables (inbox, subscriptions) |
 | V005 | 2026-01-23 | Add `file_path` column to attachments for media file references |
 | V006 | 2026-01-24 | Add `task_state_sequence` table for automatic time tracking; add `end_timestamp` to `claim_sequence` |
+| V007 | 2026-01-24 | Configurable task states via YAML; `status` field is now dynamic string based on config |
 
 ---
 
