@@ -10,7 +10,7 @@ pub fn get_tools() -> Vec<Tool> {
     vec![
         make_tool(
             "add_dependency",
-            "Add a dependency (from blocks to). Returns error if would create a cycle.",
+            "Add a dependency: from_task_id must complete before to_task_id can be claimed. Rejects cycles.",
             json!({
                 "from_task_id": {
                     "type": "string",
@@ -46,7 +46,7 @@ pub fn get_tools() -> Vec<Tool> {
         ),
         make_tool(
             "get_ready_tasks",
-            "Get all unclaimed tasks with all dependencies satisfied.",
+            "Get tasks ready to work on: unclaimed, pending status, all dependencies completed. Returns needed_tags/wanted_tags so you can filter by your capabilities.",
             json!({
                 "agent_id": {
                     "type": "string",

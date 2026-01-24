@@ -11,7 +11,7 @@ pub fn get_tools() -> Vec<Tool> {
     vec![
         make_tool(
             "set_thought",
-            "Set the current thought for tasks owned by an agent.",
+            "Update your current activity (visible to other agents). Also refreshes heartbeat. Call regularly during long tasks to show progress and prevent stale claim cleanup.",
             json!({
                 "agent_id": {
                     "type": "string",
@@ -95,6 +95,9 @@ pub fn set_thought(db: &Database, args: Value) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("agent_id is required"))?;
     let thought = get_string(&args, "thought");
     let task_ids = get_uuid_array(&args, "task_ids");
+
+    // Also refresh heartbeat since updating thought implies activity
+    let _ = db.heartbeat(&agent_id);
 
     let updated = db.set_thought(&agent_id, thought, task_ids)?;
 

@@ -11,7 +11,7 @@ pub fn get_tools() -> Vec<Tool> {
     vec![
         make_tool(
             "register_agent",
-            "Register a new agent session. Returns agent_id and config.",
+            "Register a new agent session. Call this FIRST before using other tools. Returns agent_id (save it for all subsequent calls). Tags enable task affinity matching.",
             json!({
                 "agent_id": {
                     "type": "string",
@@ -59,7 +59,7 @@ pub fn get_tools() -> Vec<Tool> {
         ),
         make_tool(
             "heartbeat",
-            "Refresh agent heartbeat. Returns current claim count.",
+            "Refresh agent heartbeat to prevent stale claim cleanup. Call periodically during long tasks. Returns current claim count.",
             json!({
                 "agent_id": {
                     "type": "string",

@@ -11,7 +11,7 @@ pub fn get_tools() -> Vec<Tool> {
     vec![
         make_tool(
             "claim_task",
-            "Claim a task for an agent. Validates claim limit and tag affinity.",
+            "Claim a task before working on it. Fails if: already claimed, dependencies unsatisfied, agent at max_claims limit, or agent lacks required tags. Sets status to in_progress.",
             json!({
                 "task_id": {
                     "type": "string",
@@ -26,7 +26,7 @@ pub fn get_tools() -> Vec<Tool> {
         ),
         make_tool(
             "release_task",
-            "Release a task claim.",
+            "Release a claimed task without completing it. Resets status to pending so another agent can claim it. Must be the current owner.",
             json!({
                 "task_id": {
                     "type": "string",

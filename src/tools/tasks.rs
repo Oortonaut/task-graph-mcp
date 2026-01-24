@@ -11,7 +11,7 @@ pub fn get_tools() -> Vec<Tool> {
     vec![
         make_tool(
             "create_task",
-            "Create a new task.",
+            "Create a new task. Use parent_id for subtasks. Set needed_tags (AND) or wanted_tags (OR) to restrict which agents can claim it.",
             json!({
                 "title": {
                     "type": "string",
@@ -57,7 +57,7 @@ pub fn get_tools() -> Vec<Tool> {
         ),
         make_tool(
             "create_task_tree",
-            "Create a task tree from a nested structure.",
+            "Create a task tree from a nested structure. Use join_mode='then' for sequential children (auto-creates dependencies), 'also' for parallel.",
             json!({
                 "tree": {
                     "type": "object",

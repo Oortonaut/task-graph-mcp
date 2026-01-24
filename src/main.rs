@@ -76,9 +76,22 @@ impl ServerHandler for TaskGraphServer {
                 ..Default::default()
             },
             instructions: Some(
-                "Task Graph MCP Server provides atomic, token-efficient task management \
-                for multi-agent coordination. Use tools for task CRUD, claiming, dependencies, \
-                file locking, and pub/sub. Query resources for task graphs, stats, and plans."
+                "Task Graph MCP Server provides atomic, token-efficient task management for multi-agent coordination.\n\n\
+                WORKFLOW:\n\
+                1. register_agent - Start here. Get your agent_id (store it for all subsequent calls)\n\
+                2. get_ready_tasks - Find unclaimed tasks with satisfied dependencies\n\
+                3. claim_task - Claim a task before working on it (prevents conflicts)\n\
+                4. set_thought - Update your current activity (visible to other agents)\n\
+                5. update_task status='completed' - Mark done when finished\n\n\
+                MULTI-AGENT COORDINATION:\n\
+                - lock_file before editing (advisory, check for conflicts)\n\
+                - subscribe to tasks/files/agents for change notifications\n\
+                - poll_inbox to receive events from subscriptions\n\
+                - Dependencies: task B can require task A to complete first\n\n\
+                TIPS:\n\
+                - Use get_ready_tasks to find work (respects dependencies + unclaimed)\n\
+                - Check needed_tags/wanted_tags on tasks for agent affinity\n\
+                - heartbeat periodically to prevent stale claim cleanup"
                     .into(),
             ),
             ..Default::default()

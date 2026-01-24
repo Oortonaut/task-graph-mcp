@@ -11,7 +11,7 @@ pub fn get_tools() -> Vec<Tool> {
     vec![
         make_tool(
             "subscribe",
-            "Subscribe to events for a target (task, file, or agent).",
+            "Subscribe to change events. target_type: 'task' (status changes), 'file' (lock/unlock), 'agent' (register/timeout). Events delivered to your inbox.",
             json!({
                 "agent_id": {
                     "type": "string",
@@ -42,7 +42,7 @@ pub fn get_tools() -> Vec<Tool> {
         ),
         make_tool(
             "poll_inbox",
-            "Poll for new messages in an agent's inbox.",
+            "Check for new events from your subscriptions. Returns unread messages. Call periodically to stay informed of changes by other agents.",
             json!({
                 "agent_id": {
                     "type": "string",

@@ -11,7 +11,7 @@ pub fn get_tools() -> Vec<Tool> {
     vec![
         make_tool(
             "lock_file",
-            "Declare intent to work on a file (advisory lock).",
+            "Declare intent to edit a file (advisory lock). Returns warning if another agent holds the lock. Not enforced - coordinate with other agents via the warning.",
             json!({
                 "file_path": {
                     "type": "string",
