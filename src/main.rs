@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 use clap::Parser;
-use task_graph_mcp::config::{Config, Prompts};
+use task_graph_mcp::config::{Config, Prompts, StatesConfig};
+use task_graph_mcp::error::ToolError;
 use task_graph_mcp::db::Database;
 use task_graph_mcp::resources::ResourceHandler;
 use rmcp::{
@@ -56,10 +57,10 @@ struct TaskGraphServer {
 }
 
 impl TaskGraphServer {
-    fn new(db: Arc<Database>, media_dir: std::path::PathBuf, prompts: Arc<Prompts>) -> Self {
+    fn new(db: Arc<Database>, media_dir: std::path::PathBuf, prompts: Arc<Prompts>, states_config: Arc<StatesConfig>) -> Self {
         Self {
-            tool_handler: Arc::new(ToolHandler::new(Arc::clone(&db), media_dir, Arc::clone(&prompts))),
-            resource_handler: Arc::new(ResourceHandler::new(db)),
+            tool_handler: Arc::new(ToolHandler::new(Arc::clone(&db), media_dir, Arc::clone(&prompts), Arc::clone(&states_config))),
+            resource_handler: Arc::new(ResourceHandler::new(db, states_config)),
             prompts,
         }
     }
@@ -144,14 +145,25 @@ impl ServerHandler for TaskGraphServer {
                 meta: None,
                 structured_content: None,
             }),
-            Err(e) => Ok(CallToolResult {
-                content: vec![Content::text(
-                    json!({ "error": e.to_string() }).to_string(),
-                )],
-                is_error: Some(true),
-                meta: None,
-                structured_content: None,
-            }),
+            Err(e) => {
+                // Try to downcast to ToolError for structured response
+                let error_json = match e.downcast::<ToolError>() {
+                    Ok(tool_err) => serde_json::to_string(&tool_err).unwrap_or_else(|_| {
+                        json!({ "error": tool_err.to_string() }).to_string()
+                    }),
+                    Err(e) => json!({
+                        "code": "INTERNAL_ERROR",
+                        "message": e.to_string()
+                    })
+                    .to_string(),
+                };
+                Ok(CallToolResult {
+                    content: vec![Content::text(error_json)],
+                    is_error: Some(true),
+                    meta: None,
+                    structured_content: None,
+                })
+            }
         }
     }
 
@@ -269,7 +281,8 @@ async fn main() -> Result<()> {
     info!("Database initialized successfully");
 
     // Create server handler
-    let server = TaskGraphServer::new(db, config.server.media_dir.clone(), prompts);
+    let states_config = Arc::new(config.states.clone());
+    let server = TaskGraphServer::new(db, config.server.media_dir.clone(), prompts, states_config);
 
     // Run the stdio server
     info!("Server ready, listening on stdio");

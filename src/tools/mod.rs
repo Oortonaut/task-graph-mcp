@@ -8,7 +8,7 @@ pub mod files;
 pub mod tasks;
 pub mod tracking;
 
-use crate::config::Prompts;
+use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::Tool;
@@ -21,11 +21,12 @@ pub struct ToolHandler {
     pub db: Arc<Database>,
     pub media_dir: PathBuf,
     pub prompts: Arc<Prompts>,
+    pub states_config: Arc<StatesConfig>,
 }
 
 impl ToolHandler {
-    pub fn new(db: Arc<Database>, media_dir: PathBuf, prompts: Arc<Prompts>) -> Self {
-        Self { db, media_dir, prompts }
+    pub fn new(db: Arc<Database>, media_dir: PathBuf, prompts: Arc<Prompts>, states_config: Arc<StatesConfig>) -> Self {
+        Self { db, media_dir, prompts, states_config }
     }
 
     /// Get all available tools.
@@ -35,8 +36,8 @@ impl ToolHandler {
         // Agent tools
         tools.extend(agents::get_tools(&self.prompts));
 
-        // Task tools
-        tools.extend(tasks::get_tools(&self.prompts));
+        // Task tools (with dynamic state schema)
+        tools.extend(tasks::get_tools(&self.prompts, &self.states_config));
 
         // Tracking tools
         tools.extend(tracking::get_tools(&self.prompts));
@@ -44,8 +45,8 @@ impl ToolHandler {
         // Dependency tools
         tools.extend(deps::get_tools(&self.prompts));
 
-        // Claiming tools
-        tools.extend(claiming::get_tools(&self.prompts));
+        // Claiming tools (with dynamic state schema)
+        tools.extend(claiming::get_tools(&self.prompts, &self.states_config));
 
         // File coordination tools
         tools.extend(files::get_tools(&self.prompts));
@@ -65,16 +66,16 @@ impl ToolHandler {
             "list_agents" => agents::list_agents(&self.db, arguments),
 
             // Task tools
-            "create" => tasks::create(&self.db, arguments),
-            "create_tree" => tasks::create_tree(&self.db, arguments),
+            "create" => tasks::create(&self.db, &self.states_config, arguments),
+            "create_tree" => tasks::create_tree(&self.db, &self.states_config, arguments),
             "get" => tasks::get(&self.db, arguments),
-            "list_tasks" => tasks::list_tasks(&self.db, arguments),
-            "update" => tasks::update(&self.db, arguments),
+            "list_tasks" => tasks::list_tasks(&self.db, &self.states_config, arguments),
+            "update" => tasks::update(&self.db, &self.states_config, arguments),
             "delete" => tasks::delete(&self.db, arguments),
 
             // Tracking tools
             "thinking" => tracking::thinking(&self.db, arguments),
-            "log_time" => tracking::log_time(&self.db, arguments),
+            "get_state_history" => tracking::get_state_history(&self.db, &self.states_config, arguments),
             "log_cost" => tracking::log_cost(&self.db, arguments),
 
             // Dependency tools
@@ -82,9 +83,9 @@ impl ToolHandler {
             "unblock" => deps::unblock(&self.db, arguments),
 
             // Claiming tools
-            "claim" => claiming::claim(&self.db, arguments),
-            "release" => claiming::release(&self.db, arguments),
-            "complete" => claiming::complete(&self.db, arguments),
+            "claim" => claiming::claim(&self.db, &self.states_config, arguments),
+            "release" => claiming::release(&self.db, &self.states_config, arguments),
+            "complete" => claiming::complete(&self.db, &self.states_config, arguments),
 
             // File coordination tools
             "claim_file" => files::claim_file(&self.db, arguments),

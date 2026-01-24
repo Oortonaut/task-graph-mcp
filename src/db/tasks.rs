@@ -1,7 +1,9 @@
 //! Task CRUD and tree operations.
 
+use super::state_transitions::record_state_transition;
 use super::{now_ms, Database};
-use crate::types::{JoinMode, Priority, Task, TaskStatus, TaskSummary, TaskTree, TaskTreeInput};
+use crate::config::StatesConfig;
+use crate::types::{Agent, JoinMode, Priority, Task, TaskSummary, TaskTree, TaskTreeInput};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use std::collections::HashMap;
@@ -47,7 +49,7 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         parent_id,
         title,
         description,
-        status: TaskStatus::from_str(&status).unwrap_or(TaskStatus::Pending),
+        status,
         priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
         join_mode: JoinMode::from_str(&join_mode).unwrap_or(JoinMode::Then),
         sibling_order,
@@ -91,8 +93,6 @@ fn get_task_internal(conn: &Connection, task_id: &str) -> Result<Option<Task>> {
         Err(e) => Err(e.into()),
     }
 }
-
-use crate::types::Agent;
 
 /// Internal helper to get an agent using an existing connection (avoids deadlock).
 fn get_agent_internal(conn: &Connection, agent_id: &str) -> Result<Option<Agent>> {
@@ -152,10 +152,12 @@ impl Database {
         needed_tags: Option<Vec<String>>,
         wanted_tags: Option<Vec<String>>,
         blocked_by: Option<Vec<String>>,
+        states_config: &StatesConfig,
     ) -> Result<Task> {
         let id = Uuid::now_v7().to_string();
         let now = now_ms();
         let priority = priority.unwrap_or(Priority::Medium);
+        let initial_status = &states_config.initial;
 
         // Calculate sibling order
         let sibling_order = self.get_next_sibling_order(parent_id.as_deref())?;
@@ -178,7 +180,7 @@ impl Database {
                     &parent_id,
                     title,
                     description,
-                    TaskStatus::Pending.as_str(),
+                    initial_status,
                     priority.as_str(),
                     JoinMode::Then.as_str(),
                     sibling_order,
@@ -201,6 +203,9 @@ impl Database {
                 }
             }
 
+            // Record initial state
+            record_state_transition(&tx, &id, initial_status, None, None, states_config)?;
+
             tx.commit()?;
 
             Ok(Task {
@@ -208,7 +213,7 @@ impl Database {
                 parent_id,
                 title,
                 description,
-                status: TaskStatus::Pending,
+                status: initial_status.clone(),
                 priority,
                 join_mode: JoinMode::Then,
                 sibling_order,
@@ -262,12 +267,20 @@ impl Database {
         &self,
         input: TaskTreeInput,
         parent_id: Option<String>,
+        states_config: &StatesConfig,
     ) -> Result<(String, Vec<String>)> {
         let mut all_ids = Vec::new();
 
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
-            let root_id = create_tree_recursive(&tx, &input, parent_id.as_deref(), 0, &mut all_ids)?;
+            let root_id = create_tree_recursive(
+                &tx,
+                &input,
+                parent_id.as_deref(),
+                0,
+                &mut all_ids,
+                states_config,
+            )?;
             tx.commit()?;
             Ok((root_id, all_ids))
         })
@@ -339,9 +352,10 @@ impl Database {
         task_id: &str,
         title: Option<String>,
         description: Option<Option<String>>,
-        status: Option<TaskStatus>,
+        status: Option<String>,
         priority: Option<Priority>,
         points: Option<Option<i32>>,
+        states_config: &StatesConfig,
     ) -> Result<Task> {
         let now = now_ms();
 
@@ -351,18 +365,58 @@ impl Database {
 
             let new_title = title.unwrap_or(task.title.clone());
             let new_description = description.unwrap_or(task.description.clone());
-            let new_status = status.unwrap_or(task.status);
+            let new_status = status.unwrap_or(task.status.clone());
             let new_priority = priority.unwrap_or(task.priority);
             let new_points = points.unwrap_or(task.points);
 
-            // Handle status transitions
-            let (started_at, completed_at) = match (task.status, new_status) {
-                (TaskStatus::Pending, TaskStatus::InProgress) => (Some(now), task.completed_at),
-                (_, TaskStatus::Completed) | (_, TaskStatus::Failed) | (_, TaskStatus::Cancelled) => {
-                    (task.started_at, Some(now))
+            // Validate the new status exists
+            if !states_config.is_valid_state(&new_status) {
+                return Err(anyhow!(
+                    "Invalid state '{}'. Valid states: {:?}",
+                    new_status,
+                    states_config.state_names()
+                ));
+            }
+
+            // Validate state transition if status changed
+            if task.status != new_status {
+                if !states_config.is_valid_transition(&task.status, &new_status) {
+                    let exits = states_config.get_exits(&task.status);
+                    return Err(anyhow!(
+                        "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
+                        task.status,
+                        new_status,
+                        exits
+                    ));
                 }
-                _ => (task.started_at, task.completed_at),
+            }
+
+            // Handle status transitions for timestamps
+            // Set started_at when first entering a timed state
+            let started_at = if task.started_at.is_none() && states_config.is_timed_state(&new_status) {
+                Some(now)
+            } else {
+                task.started_at
             };
+
+            // Set completed_at when entering a terminal state
+            let completed_at = if states_config.is_terminal_state(&new_status) {
+                Some(now)
+            } else {
+                task.completed_at
+            };
+
+            // Record state transition if status changed (handles time accumulation)
+            if task.status != new_status {
+                record_state_transition(
+                    conn,
+                    task_id,
+                    &new_status,
+                    task.owner_agent.as_deref(),
+                    None,
+                    states_config,
+                )?;
+            }
 
             conn.execute(
                 "UPDATE tasks SET
@@ -372,7 +426,7 @@ impl Database {
                 params![
                     new_title,
                     new_description,
-                    new_status.as_str(),
+                    new_status,
                     new_priority.as_str(),
                     new_points,
                     started_at,
@@ -428,7 +482,7 @@ impl Database {
     /// List tasks with optional filters.
     pub fn list_tasks(
         &self,
-        status: Option<TaskStatus>,
+        status: Option<&str>,
         owner: Option<&str>,
         parent_id: Option<Option<&str>>,
         limit: Option<i32>,
@@ -442,7 +496,7 @@ impl Database {
 
             if let Some(s) = status {
                 sql.push_str(" AND status = ?");
-                params_vec.push(Box::new(s.as_str().to_string()));
+                params_vec.push(Box::new(s.to_string()));
             }
 
             if let Some(o) = owner {
@@ -485,7 +539,7 @@ impl Database {
                     id,
                     parent_id,
                     title,
-                    status: TaskStatus::from_str(&status).unwrap_or(TaskStatus::Pending),
+                    status,
                     priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
                     owner_agent,
                     points,
@@ -635,8 +689,22 @@ impl Database {
     }
 
     /// Claim a task for an agent.
-    pub fn claim_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
+    /// Uses the first timed state (typically "in_progress") as the claiming state.
+    pub fn claim_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        states_config: &StatesConfig,
+    ) -> Result<Task> {
         let now = now_ms();
+
+        // Find the first timed state to use for claiming (typically "in_progress")
+        let claim_status = states_config
+            .definitions
+            .iter()
+            .find(|(_, def)| def.timed)
+            .map(|(name, _)| name.as_str())
+            .unwrap_or("in_progress");
 
         self.with_conn(|conn| {
             // Get the task (using internal helper to avoid deadlock)
@@ -646,6 +714,16 @@ impl Database {
             // Check if already claimed
             if task.owner_agent.is_some() {
                 return Err(anyhow!("Task is already claimed"));
+            }
+
+            // Validate state transition
+            if !states_config.is_valid_transition(&task.status, claim_status) {
+                let exits = states_config.get_exits(&task.status);
+                return Err(anyhow!(
+                    "Cannot claim task in state '{}'. Allowed transitions: {:?}",
+                    task.status,
+                    exits
+                ));
             }
 
             // Get the agent (using internal helper to avoid deadlock)
@@ -681,12 +759,15 @@ impl Database {
                 params![
                     agent_id,
                     now,
-                    TaskStatus::InProgress.as_str(),
+                    claim_status,
                     now,
                     now,
                     task_id,
                 ],
             )?;
+
+            // Record state transition (accumulates time if coming from timed state)
+            record_state_transition(conn, task_id, claim_status, Some(agent_id), None, states_config)?;
 
             // Refresh agent heartbeat
             conn.execute(
@@ -697,7 +778,7 @@ impl Database {
             Ok(Task {
                 owner_agent: Some(agent_id.to_string()),
                 claimed_at: Some(now),
-                status: TaskStatus::InProgress,
+                status: claim_status.to_string(),
                 started_at: Some(now),
                 updated_at: now,
                 ..task
@@ -706,8 +787,14 @@ impl Database {
     }
 
     /// Release a task claim.
-    pub fn release_task(&self, task_id: &str, agent_id: &str) -> Result<()> {
+    pub fn release_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        states_config: &StatesConfig,
+    ) -> Result<()> {
         let now = now_ms();
+        let release_status = &states_config.initial;
 
         self.with_conn(|conn| {
             let task = get_task_internal(conn, task_id)?
@@ -717,10 +804,13 @@ impl Database {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
+            // Record state transition (accumulates time if coming from timed state)
+            record_state_transition(conn, task_id, release_status, Some(agent_id), None, states_config)?;
+
             conn.execute(
                 "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
                  WHERE id = ?3",
-                params![TaskStatus::Pending.as_str(), now, task_id],
+                params![release_status, now, task_id],
             )?;
 
             Ok(())
@@ -728,14 +818,28 @@ impl Database {
     }
 
     /// Force release a task regardless of owner.
-    pub fn force_release(&self, task_id: &str) -> Result<()> {
+    pub fn force_release(&self, task_id: &str, states_config: &StatesConfig) -> Result<()> {
         let now = now_ms();
+        let release_status = &states_config.initial;
 
         self.with_conn(|conn| {
+            let task = get_task_internal(conn, task_id)?
+                .ok_or_else(|| anyhow!("Task not found"))?;
+
+            // Record state transition (accumulates time if coming from timed state)
+            record_state_transition(
+                conn,
+                task_id,
+                release_status,
+                task.owner_agent.as_deref(),
+                None,
+                states_config,
+            )?;
+
             conn.execute(
                 "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
                  WHERE id = ?3",
-                params![TaskStatus::Pending.as_str(), now, task_id],
+                params![release_status, now, task_id],
             )?;
 
             Ok(())
@@ -743,8 +847,21 @@ impl Database {
     }
 
     /// Force claim a task even if owned by another agent.
-    pub fn force_claim_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
+    pub fn force_claim_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        states_config: &StatesConfig,
+    ) -> Result<Task> {
         let now = now_ms();
+
+        // Find the first timed state to use for claiming (typically "in_progress")
+        let claim_status = states_config
+            .definitions
+            .iter()
+            .find(|(_, def)| def.timed)
+            .map(|(name, _)| name.as_str())
+            .unwrap_or("in_progress");
 
         self.with_conn(|conn| {
             // Get the task
@@ -784,12 +901,15 @@ impl Database {
                 params![
                     agent_id,
                     now,
-                    TaskStatus::InProgress.as_str(),
+                    claim_status,
                     now,
                     now,
                     task_id,
                 ],
             )?;
+
+            // Record state transition (accumulates time if coming from timed state)
+            record_state_transition(conn, task_id, claim_status, Some(agent_id), None, states_config)?;
 
             // Refresh agent heartbeat
             conn.execute(
@@ -800,7 +920,7 @@ impl Database {
             Ok(Task {
                 owner_agent: Some(agent_id.to_string()),
                 claimed_at: Some(now),
-                status: TaskStatus::InProgress,
+                status: claim_status.to_string(),
                 started_at: task.started_at.or(Some(now)),
                 updated_at: now,
                 ..task
@@ -809,7 +929,13 @@ impl Database {
     }
 
     /// Release a task claim with a specified state.
-    pub fn release_task_with_state(&self, task_id: &str, agent_id: &str, state: TaskStatus) -> Result<()> {
+    pub fn release_task_with_state(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        state: &str,
+        states_config: &StatesConfig,
+    ) -> Result<()> {
         let now = now_ms();
 
         self.with_conn(|conn| {
@@ -820,16 +946,40 @@ impl Database {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
-            // Set completed_at only for terminal states
-            let completed_at = match state {
-                TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled => Some(now),
-                _ => None,
+            // Validate state exists
+            if !states_config.is_valid_state(state) {
+                return Err(anyhow!(
+                    "Invalid state '{}'. Valid states: {:?}",
+                    state,
+                    states_config.state_names()
+                ));
+            }
+
+            // Validate transition
+            if !states_config.is_valid_transition(&task.status, state) {
+                let exits = states_config.get_exits(&task.status);
+                return Err(anyhow!(
+                    "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
+                    task.status,
+                    state,
+                    exits
+                ));
+            }
+
+            // Set completed_at for terminal states
+            let completed_at = if states_config.is_terminal_state(state) {
+                Some(now)
+            } else {
+                None
             };
+
+            // Record state transition (accumulates time if coming from timed state)
+            record_state_transition(conn, task_id, state, Some(agent_id), None, states_config)?;
 
             conn.execute(
                 "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, completed_at = COALESCE(?2, completed_at), updated_at = ?3
                  WHERE id = ?4",
-                params![state.as_str(), completed_at, now, task_id],
+                params![state, completed_at, now, task_id],
             )?;
 
             Ok(())
@@ -837,15 +987,20 @@ impl Database {
     }
 
     /// Force release stale claims.
-    pub fn force_release_stale(&self, timeout_seconds: i64) -> Result<i32> {
+    pub fn force_release_stale(
+        &self,
+        timeout_seconds: i64,
+        states_config: &StatesConfig,
+    ) -> Result<i32> {
         let now = now_ms();
         let cutoff = now - (timeout_seconds * 1000);
+        let release_status = &states_config.initial;
 
         self.with_conn(|conn| {
             let updated = conn.execute(
                 "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
                  WHERE claimed_at < ?3 AND owner_agent IS NOT NULL",
-                params![TaskStatus::Pending.as_str(), now, cutoff],
+                params![release_status, now, cutoff],
             )?;
 
             Ok(updated as i32)
@@ -854,15 +1009,35 @@ impl Database {
 
 
     /// Complete a task and release file locks held by the agent.
-    pub fn complete_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
+    /// Uses "completed" state by default, which should be a terminal state.
+    pub fn complete_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        states_config: &StatesConfig,
+    ) -> Result<Task> {
         let now = now_ms();
+
+        // Find a terminal state to use (prefer "completed" if it exists)
+        let complete_status = if states_config.definitions.contains_key("completed") {
+            "completed"
+        } else {
+            // Find any terminal state
+            states_config
+                .definitions
+                .iter()
+                .find(|(_, def)| def.exits.is_empty())
+                .map(|(name, _)| name.as_str())
+                .unwrap_or("completed")
+        };
 
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
 
             // Get the task
             let mut stmt = tx.prepare("SELECT * FROM tasks WHERE id = ?1")?;
-            let task = stmt.query_row(params![task_id], parse_task_row)
+            let task = stmt
+                .query_row(params![task_id], parse_task_row)
                 .map_err(|_| anyhow!("Task not found"))?;
             drop(stmt);
 
@@ -871,17 +1046,25 @@ impl Database {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
+            // Validate transition
+            if !states_config.is_valid_transition(&task.status, complete_status) {
+                let exits = states_config.get_exits(&task.status);
+                return Err(anyhow!(
+                    "Cannot complete task in state '{}'. Allowed transitions: {:?}",
+                    task.status,
+                    exits
+                ));
+            }
+
+            // Record state transition (accumulates time from timed state)
+            record_state_transition(&tx, task_id, complete_status, Some(agent_id), None, states_config)?;
+
             // Update task to completed
             tx.execute(
                 "UPDATE tasks SET status = ?1, completed_at = ?2, updated_at = ?3,
                  owner_agent = NULL, claimed_at = NULL
                  WHERE id = ?4",
-                params![
-                    TaskStatus::Completed.as_str(),
-                    now,
-                    now,
-                    task_id,
-                ],
+                params![complete_status, now, now, task_id],
             )?;
 
             // Release all file locks held by this agent
@@ -899,7 +1082,7 @@ impl Database {
             tx.commit()?;
 
             Ok(Task {
-                status: TaskStatus::Completed,
+                status: complete_status.to_string(),
                 completed_at: Some(now),
                 updated_at: now,
                 owner_agent: None,
@@ -922,10 +1105,11 @@ impl Database {
 
     /// Get tasks by status.
     #[allow(dead_code)]
-    pub fn get_tasks_by_status(&self, status: TaskStatus) -> Result<Vec<Task>> {
+    pub fn get_tasks_by_status(&self, status: &str) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tasks WHERE status = ?1 ORDER BY created_at")?;
-            let tasks = stmt.query_map(params![status.as_str()], parse_task_row)?
+            let tasks = stmt
+                .query_map(params![status], parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();
             Ok(tasks)
@@ -963,11 +1147,13 @@ fn create_tree_recursive(
     parent_id: Option<&str>,
     sibling_order: i32,
     all_ids: &mut Vec<String>,
+    states_config: &StatesConfig,
 ) -> Result<String> {
     let id = Uuid::now_v7().to_string();
     let now = now_ms();
     let priority = input.priority.unwrap_or(Priority::Medium);
     let join_mode = input.join_mode.unwrap_or(JoinMode::Then);
+    let initial_status = &states_config.initial;
 
     let needed_tags = input.needed_tags.clone().unwrap_or_default();
     let wanted_tags = input.wanted_tags.clone().unwrap_or_default();
@@ -984,7 +1170,7 @@ fn create_tree_recursive(
             parent_id,
             input.title,
             input.description,
-            TaskStatus::Pending.as_str(),
+            initial_status,
             priority.as_str(),
             join_mode.as_str(),
             sibling_order,
@@ -997,11 +1183,14 @@ fn create_tree_recursive(
         ],
     )?;
 
+    // Record initial state transition
+    record_state_transition(conn, &id, initial_status, None, None, states_config)?;
+
     all_ids.push(id.clone());
 
     // Create children
     for (i, child) in input.children.iter().enumerate() {
-        create_tree_recursive(conn, child, Some(&id), i as i32, all_ids)?;
+        create_tree_recursive(conn, child, Some(&id), i as i32, all_ids, states_config)?;
     }
 
     Ok(id)

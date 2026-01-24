@@ -1,7 +1,7 @@
 //! Live status and tracking tools.
 
 use super::{get_f64, get_i64, get_string, get_string_array, make_tool_with_prompts};
-use crate::config::Prompts;
+use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::Tool;
@@ -32,23 +32,15 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
             prompts,
         ),
         make_tool_with_prompts(
-            "log_time",
-            "Log time spent on a task.",
+            "get_state_history",
+            "Get the state transition history for a task, including automatic time tracking data.",
             json!({
-                "agent": {
-                    "type": "string",
-                    "description": "Agent ID"
-                },
                 "task": {
                     "type": "string",
                     "description": "Task ID"
-                },
-                "duration_ms": {
-                    "type": "integer",
-                    "description": "Duration in milliseconds to add"
                 }
             }),
-            vec!["agent", "task", "duration_ms"],
+            vec!["task"],
             prompts,
         ),
         make_tool_with_prompts(
@@ -119,17 +111,16 @@ pub fn thinking(db: &Database, args: Value) -> Result<Value> {
     }))
 }
 
-pub fn log_time(db: &Database, args: Value) -> Result<Value> {
+pub fn get_state_history(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
         .ok_or_else(|| anyhow::anyhow!("task is required"))?;
-    let duration_ms = get_i64(&args, "duration_ms")
-        .ok_or_else(|| anyhow::anyhow!("duration_ms is required"))?;
 
-    let total = db.log_time(&task_id, duration_ms)?;
+    let history = db.get_task_state_history(&task_id)?;
+    let current_duration = db.get_current_state_duration(&task_id, states_config)?;
 
     Ok(json!({
-        "success": true,
-        "time_actual_ms": total
+        "history": history,
+        "current_duration_ms": current_duration
     }))
 }
 

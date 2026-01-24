@@ -61,6 +61,13 @@ impl Database {
             )?;
 
             if deleted > 0 {
+                // Close any open claim for this file+agent
+                conn.execute(
+                    "UPDATE claim_sequence SET end_timestamp = ?1
+                     WHERE file_path = ?2 AND agent_id = ?3 AND end_timestamp IS NULL",
+                    params![now, file_path, agent_id],
+                )?;
+
                 // Record release event for tracking
                 conn.execute(
                     "INSERT INTO claim_sequence (file_path, agent_id, event, reason, timestamp) VALUES (?1, ?2, 'released', ?3, ?4)",
@@ -91,7 +98,7 @@ impl Database {
                 } else {
                     let placeholders: Vec<String> = paths.iter().map(|_| "?".to_string()).collect();
                     let sql = format!(
-                        "SELECT id, file_path, agent_id, event, reason, timestamp 
+                        "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp 
                          FROM claim_sequence 
                          WHERE id > ?1 AND file_path IN ({})
                          ORDER BY id",
@@ -115,6 +122,7 @@ impl Database {
                         let event_str: String = row.get(3)?;
                         let reason: Option<String> = row.get(4)?;
                         let timestamp: i64 = row.get(5)?;
+                        let end_timestamp: Option<i64> = row.get(6)?;
                         Ok(ClaimEvent {
                             id,
                             file_path,
@@ -122,6 +130,7 @@ impl Database {
                             event: ClaimEventType::from_str(&event_str).unwrap_or(ClaimEventType::Claimed),
                             reason,
                             timestamp,
+                            end_timestamp,
                         })
                     })?
                     .filter_map(|r| r.ok())
@@ -129,7 +138,7 @@ impl Database {
                 }
             } else {
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_path, agent_id, event, reason, timestamp 
+                    "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp 
                      FROM claim_sequence 
                      WHERE id > ?1
                      ORDER BY id"
@@ -141,6 +150,7 @@ impl Database {
                     let event_str: String = row.get(3)?;
                     let reason: Option<String> = row.get(4)?;
                     let timestamp: i64 = row.get(5)?;
+                    let end_timestamp: Option<i64> = row.get(6)?;
                     Ok(ClaimEvent {
                         id,
                         file_path,
@@ -148,6 +158,7 @@ impl Database {
                         event: ClaimEventType::from_str(&event_str).unwrap_or(ClaimEventType::Claimed),
                         reason,
                         timestamp,
+                        end_timestamp,
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -271,7 +282,16 @@ impl Database {
 
     /// Release all locks held by an agent.
     pub fn release_agent_locks(&self, agent_id: &str) -> Result<i32> {
+        let now = now_ms();
+
         self.with_conn(|conn| {
+            // Close any open claims for this agent
+            conn.execute(
+                "UPDATE claim_sequence SET end_timestamp = ?1
+                 WHERE agent_id = ?2 AND end_timestamp IS NULL",
+                params![now, agent_id],
+            )?;
+
             let deleted = conn.execute(
                 "DELETE FROM file_locks WHERE agent_id = ?1",
                 params![agent_id],

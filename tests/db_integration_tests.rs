@@ -3,12 +3,18 @@
 //! These tests verify the core database operations using an in-memory SQLite database.
 //! Tests are organized by module and functionality.
 
+use task_graph_mcp::config::StatesConfig;
 use task_graph_mcp::db::Database;
-use task_graph_mcp::types::{Priority, TaskStatus};
+use task_graph_mcp::types::Priority;
 
 /// Helper to create a fresh in-memory database for testing.
 fn setup_db() -> Database {
     Database::open_in_memory().expect("Failed to create in-memory database")
+}
+
+/// Helper to create a default StatesConfig for testing.
+fn default_states_config() -> StatesConfig {
+    StatesConfig::default()
 }
 
 mod agent_tests {
@@ -208,6 +214,7 @@ mod task_tests {
     #[test]
     fn create_task_with_minimal_fields() {
         let db = setup_db();
+        let states_config = default_states_config();
 
         let task = db
             .create_task(
@@ -220,13 +227,14 @@ mod task_tests {
                 None,
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
 
         assert_eq!(task.title, "Test Task");
         assert!(task.description.is_none());
         assert!(task.parent_id.is_none());
-        assert_eq!(task.status, TaskStatus::Pending);
+        assert_eq!(task.status, "pending");
         assert_eq!(task.priority, Priority::Medium);
         assert!(task.owner_agent.is_none());
     }
@@ -234,6 +242,7 @@ mod task_tests {
     #[test]
     fn create_task_with_all_fields() {
         let db = setup_db();
+        let states_config = default_states_config();
 
         let task = db
             .create_task(
@@ -246,6 +255,7 @@ mod task_tests {
                 Some(vec!["rust".to_string()]),
                 Some(vec!["backend".to_string()]),
                 None, // blocked_by
+                &states_config,
             )
             .unwrap();
 
@@ -261,8 +271,9 @@ mod task_tests {
     #[test]
     fn create_task_with_parent_assigns_correct_sibling_order() {
         let db = setup_db();
+        let states_config = default_states_config();
         let parent = db
-            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         let child1 = db
@@ -276,6 +287,7 @@ mod task_tests {
                 None,
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
         let child2 = db
@@ -289,6 +301,7 @@ mod task_tests {
                 None,
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
 
@@ -299,8 +312,9 @@ mod task_tests {
     #[test]
     fn get_task_returns_existing_task() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task = db
-            .create_task("Find Me".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Find Me".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         let found = db.get_task(&task.id).unwrap();
@@ -322,8 +336,9 @@ mod task_tests {
     #[test]
     fn update_task_modifies_properties() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task = db
-            .create_task("Original".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Original".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         let updated = db
@@ -331,28 +346,33 @@ mod task_tests {
                 &task.id,
                 Some("Updated".to_string()),
                 Some(Some("New Description".to_string())),
-                Some(TaskStatus::InProgress),
+                Some("in_progress".to_string()),
                 Some(Priority::High),
                 None,
+                &states_config,
             )
             .unwrap();
 
         assert_eq!(updated.title, "Updated");
         assert_eq!(updated.description, Some("New Description".to_string()));
-        assert_eq!(updated.status, TaskStatus::InProgress);
+        assert_eq!(updated.status, "in_progress");
         assert_eq!(updated.priority, Priority::High);
     }
 
     #[test]
     fn update_task_to_completed_sets_completed_at() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task = db
-            .create_task("Complete Me".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Complete Me".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         assert!(task.completed_at.is_none());
 
+        // Need to transition through in_progress first (pending -> in_progress -> completed)
+        db.update_task(&task.id, None, None, Some("in_progress".to_string()), None, None, &states_config)
+            .unwrap();
         let updated = db
-            .update_task(&task.id, None, None, Some(TaskStatus::Completed), None, None)
+            .update_task(&task.id, None, None, Some("completed".to_string()), None, None, &states_config)
             .unwrap();
 
         assert!(updated.completed_at.is_some());
@@ -361,8 +381,9 @@ mod task_tests {
     #[test]
     fn delete_task_removes_task() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task = db
-            .create_task("Delete Me".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Delete Me".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         db.delete_task(&task.id, false).unwrap();
@@ -374,8 +395,9 @@ mod task_tests {
     #[test]
     fn delete_task_without_cascade_fails_if_has_children() {
         let db = setup_db();
+        let states_config = default_states_config();
         let parent = db
-            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         db.create_task(
             "Child".to_string(),
@@ -387,6 +409,7 @@ mod task_tests {
             None,
             None,
             None,
+            &states_config,
         )
         .unwrap();
 
@@ -398,8 +421,9 @@ mod task_tests {
     #[test]
     fn delete_task_with_cascade_removes_children() {
         let db = setup_db();
+        let states_config = default_states_config();
         let parent = db
-            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let child = db
             .create_task(
@@ -412,6 +436,7 @@ mod task_tests {
                 None,
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
 
@@ -424,8 +449,9 @@ mod task_tests {
     #[test]
     fn get_children_returns_direct_children_in_order() {
         let db = setup_db();
+        let states_config = default_states_config();
         let parent = db
-            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Parent".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         db.create_task(
             "Child 1".to_string(),
@@ -437,6 +463,7 @@ mod task_tests {
             None,
             None,
             None,
+            &states_config,
         )
         .unwrap();
         db.create_task(
@@ -449,6 +476,7 @@ mod task_tests {
             None,
             None,
             None,
+            &states_config,
         )
         .unwrap();
 
@@ -462,19 +490,23 @@ mod task_tests {
     #[test]
     fn list_tasks_filters_by_status() {
         let db = setup_db();
-        db.create_task("Pending".to_string(), None, None, None, None, None, None, None, None)
+        let states_config = default_states_config();
+        db.create_task("Pending".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Completed".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Completed".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
-        db.update_task(&task2.id, None, None, Some(TaskStatus::Completed), None, None)
+        // Transition through in_progress to completed
+        db.update_task(&task2.id, None, None, Some("in_progress".to_string()), None, None, &states_config)
+            .unwrap();
+        db.update_task(&task2.id, None, None, Some("completed".to_string()), None, None, &states_config)
             .unwrap();
 
         let pending = db
-            .list_tasks(Some(TaskStatus::Pending), None, None, None)
+            .list_tasks(Some("pending"), None, None, None)
             .unwrap();
         let completed = db
-            .list_tasks(Some(TaskStatus::Completed), None, None, None)
+            .list_tasks(Some("completed"), None, None, None)
             .unwrap();
 
         assert_eq!(pending.len(), 1);
@@ -490,15 +522,16 @@ mod task_claiming_tests {
     #[test]
     fn claim_task_assigns_owner_and_updates_status() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
         let task = db
-            .create_task("Claim Me".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Claim Me".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
-        let claimed = db.claim_task(&task.id, &agent.id).unwrap();
+        let claimed = db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
         assert_eq!(claimed.owner_agent, Some(agent.id.clone()));
-        assert_eq!(claimed.status, TaskStatus::InProgress);
+        assert_eq!(claimed.status, "in_progress");
         assert!(claimed.claimed_at.is_some());
         assert!(claimed.started_at.is_some());
     }
@@ -506,14 +539,15 @@ mod task_claiming_tests {
     #[test]
     fn claim_task_fails_if_already_claimed() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent1 = db.register_agent(None, None, vec![], None).unwrap();
         let agent2 = db.register_agent(None, None, vec![], None).unwrap();
         let task = db
-            .create_task("Claimed".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Claimed".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
-        db.claim_task(&task.id, &agent1.id).unwrap();
-        let result = db.claim_task(&task.id, &agent2.id);
+        db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
+        let result = db.claim_task(&task.id, &agent2.id, &states_config);
 
         assert!(result.is_err());
     }
@@ -521,16 +555,17 @@ mod task_claiming_tests {
     #[test]
     fn claim_task_fails_if_agent_at_claim_limit() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db.register_agent(None, None, vec![], Some(1)).unwrap(); // max 1 claim
         let task1 = db
-            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
-        db.claim_task(&task1.id, &agent.id).unwrap();
-        let result = db.claim_task(&task2.id, &agent.id);
+        db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
+        let result = db.claim_task(&task2.id, &agent.id, &states_config);
 
         assert!(result.is_err());
     }
@@ -538,6 +573,7 @@ mod task_claiming_tests {
     #[test]
     fn claim_task_fails_if_agent_missing_needed_tag() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db
             .register_agent(None, None, vec!["python".to_string()], None)
             .unwrap();
@@ -552,10 +588,11 @@ mod task_claiming_tests {
                 Some(vec!["rust".to_string()]), // needs rust tag
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
 
-        let result = db.claim_task(&task.id, &agent.id);
+        let result = db.claim_task(&task.id, &agent.id, &states_config);
 
         assert!(result.is_err());
     }
@@ -563,6 +600,7 @@ mod task_claiming_tests {
     #[test]
     fn claim_task_succeeds_if_agent_has_needed_tags() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db
             .register_agent(None, None, vec!["rust".to_string(), "backend".to_string()], None)
             .unwrap();
@@ -577,10 +615,11 @@ mod task_claiming_tests {
                 Some(vec!["rust".to_string()]),
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
 
-        let result = db.claim_task(&task.id, &agent.id);
+        let result = db.claim_task(&task.id, &agent.id, &states_config);
 
         assert!(result.is_ok());
     }
@@ -588,6 +627,7 @@ mod task_claiming_tests {
     #[test]
     fn claim_task_fails_if_agent_has_none_of_wanted_tags() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db
             .register_agent(None, None, vec!["python".to_string()], None)
             .unwrap();
@@ -602,10 +642,11 @@ mod task_claiming_tests {
                 None,
                 Some(vec!["rust".to_string(), "go".to_string()]), // wants rust OR go
                 None,
+                &states_config,
             )
             .unwrap();
 
-        let result = db.claim_task(&task.id, &agent.id);
+        let result = db.claim_task(&task.id, &agent.id, &states_config);
 
         assert!(result.is_err());
     }
@@ -613,30 +654,32 @@ mod task_claiming_tests {
     #[test]
     fn release_task_clears_owner_and_resets_status() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
         let task = db
-            .create_task("Release Me".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Release Me".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
-        db.claim_task(&task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
-        db.release_task(&task.id, &agent.id).unwrap();
+        db.release_task(&task.id, &agent.id, &states_config).unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.owner_agent.is_none());
-        assert_eq!(updated.status, TaskStatus::Pending);
+        assert_eq!(updated.status, "pending");
     }
 
     #[test]
     fn release_task_fails_if_not_owner() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent1 = db.register_agent(None, None, vec![], None).unwrap();
         let agent2 = db.register_agent(None, None, vec![], None).unwrap();
         let task = db
-            .create_task("Owned".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Owned".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
-        db.claim_task(&task.id, &agent1.id).unwrap();
+        db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
 
-        let result = db.release_task(&task.id, &agent2.id);
+        let result = db.release_task(&task.id, &agent2.id, &states_config);
 
         assert!(result.is_err());
     }
@@ -644,13 +687,14 @@ mod task_claiming_tests {
     #[test]
     fn force_release_clears_owner_regardless() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
         let task = db
-            .create_task("Force".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Force".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
-        db.claim_task(&task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
-        db.force_release(&task.id).unwrap();
+        db.force_release(&task.id, &states_config).unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.owner_agent.is_none());
@@ -663,11 +707,12 @@ mod dependency_tests {
     #[test]
     fn add_dependency_creates_relationship() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task1 = db
-            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         db.add_dependency(&task1.id, &task2.id).unwrap();
@@ -680,11 +725,12 @@ mod dependency_tests {
     #[test]
     fn add_dependency_fails_if_would_create_cycle() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task1 = db
-            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         db.add_dependency(&task1.id, &task2.id).unwrap(); // task1 blocks task2
@@ -697,14 +743,15 @@ mod dependency_tests {
     #[test]
     fn add_dependency_fails_for_longer_cycles() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task1 = db
-            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task3 = db
-            .create_task("Task 3".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 3".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         db.add_dependency(&task1.id, &task2.id).unwrap(); // 1 -> 2
@@ -718,11 +765,12 @@ mod dependency_tests {
     #[test]
     fn remove_dependency_removes_relationship() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task1 = db
-            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Task 2".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         db.add_dependency(&task1.id, &task2.id).unwrap();
 
@@ -735,15 +783,16 @@ mod dependency_tests {
     #[test]
     fn get_ready_tasks_excludes_blocked_tasks() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task1 = db
-            .create_task("Blocker".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Blocker".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Blocked".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Blocked".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         db.add_dependency(&task1.id, &task2.id).unwrap();
 
-        let ready = db.get_ready_tasks(None).unwrap();
+        let ready = db.get_ready_tasks(None, &states_config).unwrap();
 
         // task1 is ready, task2 is blocked
         assert_eq!(ready.len(), 1);
@@ -753,19 +802,22 @@ mod dependency_tests {
     #[test]
     fn get_ready_tasks_includes_unblocked_after_completion() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task1 = db
-            .create_task("Blocker".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Blocker".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         let task2 = db
-            .create_task("Blocked".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Blocked".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
         db.add_dependency(&task1.id, &task2.id).unwrap();
 
-        // Complete blocker
-        db.update_task(&task1.id, None, None, Some(TaskStatus::Completed), None, None)
+        // Complete blocker (need to transition through in_progress first)
+        db.update_task(&task1.id, None, None, Some("in_progress".to_string()), None, None, &states_config)
+            .unwrap();
+        db.update_task(&task1.id, None, None, Some("completed".to_string()), None, None, &states_config)
             .unwrap();
 
-        let ready = db.get_ready_tasks(None).unwrap();
+        let ready = db.get_ready_tasks(None, &states_config).unwrap();
 
         // Now task2 is ready
         assert_eq!(ready.len(), 1);
@@ -874,11 +926,12 @@ mod tracking_tests {
     #[test]
     fn set_thought_updates_current_thought() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
         let task = db
-            .create_task("Think".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Think".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
-        db.claim_task(&task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
         db.set_thought(&agent.id, Some("Thinking...".to_string()), None)
             .unwrap();
@@ -890,8 +943,9 @@ mod tracking_tests {
     #[test]
     fn log_time_accumulates_duration() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task = db
-            .create_task("Time Me".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Time Me".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         db.log_time(&task.id, 1000).unwrap();
@@ -904,8 +958,9 @@ mod tracking_tests {
     #[test]
     fn log_cost_accumulates_tokens_and_cost() {
         let db = setup_db();
+        let states_config = default_states_config();
         let task = db
-            .create_task("Cost Me".to_string(), None, None, None, None, None, None, None, None)
+            .create_task("Cost Me".to_string(), None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
         db.log_cost(
@@ -946,6 +1001,7 @@ mod stats_tests {
     #[test]
     fn get_stats_returns_aggregate_statistics() {
         let db = setup_db();
+        let states_config = default_states_config();
         db.create_task(
             "Task 1".to_string(),
             None,
@@ -956,6 +1012,7 @@ mod stats_tests {
             None,
             None,
             None,
+            &states_config,
         )
         .unwrap();
         let task2 = db
@@ -969,16 +1026,20 @@ mod stats_tests {
                 None,
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
-        db.update_task(&task2.id, None, None, Some(TaskStatus::Completed), None, None)
+        // Transition through in_progress to completed
+        db.update_task(&task2.id, None, None, Some("in_progress".to_string()), None, None, &states_config)
+            .unwrap();
+        db.update_task(&task2.id, None, None, Some("completed".to_string()), None, None, &states_config)
             .unwrap();
 
-        let stats = db.get_stats(None, None).unwrap();
+        let stats = db.get_stats(None, None, &states_config).unwrap();
 
         assert_eq!(stats.total_tasks, 2);
-        assert_eq!(stats.pending_tasks, 1);
-        assert_eq!(stats.completed_tasks, 1);
+        assert_eq!(*stats.tasks_by_state.get("pending").unwrap_or(&0), 1);
+        assert_eq!(*stats.tasks_by_state.get("completed").unwrap_or(&0), 1);
         assert_eq!(stats.total_points, 8);
         assert_eq!(stats.completed_points, 5);
     }
@@ -986,6 +1047,7 @@ mod stats_tests {
     #[test]
     fn get_stats_filters_by_agent() {
         let db = setup_db();
+        let states_config = default_states_config();
         let agent = db.register_agent(None, None, vec![], None).unwrap();
         let task = db
             .create_task(
@@ -998,9 +1060,10 @@ mod stats_tests {
                 None,
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
-        db.claim_task(&task.id, &agent.id).unwrap();
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
         db.create_task(
             "Other Task".to_string(),
             None,
@@ -1011,10 +1074,11 @@ mod stats_tests {
             None,
             None,
             None,
+            &states_config,
         )
         .unwrap();
 
-        let stats = db.get_stats(Some(&agent.id), None).unwrap();
+        let stats = db.get_stats(Some(&agent.id), None, &states_config).unwrap();
 
         assert_eq!(stats.total_tasks, 1);
         assert_eq!(stats.total_points, 3);
@@ -1023,6 +1087,7 @@ mod stats_tests {
     #[test]
     fn get_stats_filters_by_task_tree() {
         let db = setup_db();
+        let states_config = default_states_config();
         let parent = db
             .create_task(
                 "Parent".to_string(),
@@ -1034,6 +1099,7 @@ mod stats_tests {
                 None,
                 None,
                 None,
+                &states_config,
             )
             .unwrap();
         db.create_task(
@@ -1046,6 +1112,7 @@ mod stats_tests {
             None,
             None,
             None,
+            &states_config,
         )
         .unwrap();
         db.create_task(
@@ -1058,12 +1125,157 @@ mod stats_tests {
             None,
             None,
             None,
+            &states_config,
         )
         .unwrap();
 
-        let stats = db.get_stats(None, Some(&parent.id)).unwrap();
+        let stats = db.get_stats(None, Some(&parent.id), &states_config).unwrap();
 
         assert_eq!(stats.total_tasks, 2); // parent + child
         assert_eq!(stats.total_points, 5); // 2 + 3
+    }
+}
+
+mod state_transition_tests {
+    use super::*;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    #[test]
+    fn create_task_records_initial_pending_state() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let task = db
+            .create_task("Test".to_string(), None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        let history = db.get_task_state_history(&task.id).unwrap();
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].event, "pending");
+        assert!(history[0].end_timestamp.is_none()); // Still open
+    }
+
+    #[test]
+    fn claim_task_records_in_progress_transition() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, None, vec![], None).unwrap();
+        let task = db
+            .create_task("Test".to_string(), None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+
+        let history = db.get_task_state_history(&task.id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].event, "pending");
+        assert!(history[0].end_timestamp.is_some()); // Closed by claim
+        assert_eq!(history[1].event, "in_progress");
+        assert!(history[1].agent_id.is_some());
+    }
+
+    #[test]
+    fn complete_task_accumulates_time_from_in_progress() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, None, vec![], None).unwrap();
+        let task = db
+            .create_task("Test".to_string(), None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+        sleep(Duration::from_millis(100));
+        db.complete_task(&task.id, &agent.id, &states_config).unwrap();
+
+        let updated = db.get_task(&task.id).unwrap().unwrap();
+        assert!(updated.time_actual_ms.unwrap() >= 100);
+
+        let history = db.get_task_state_history(&task.id).unwrap();
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[2].event, "completed");
+    }
+
+    #[test]
+    fn multiple_claim_cycles_accumulate_time() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, None, vec![], None).unwrap();
+        let task = db
+            .create_task("Test".to_string(), None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // First claim cycle
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+        sleep(Duration::from_millis(50));
+        db.release_task_with_state(&task.id, &agent.id, "pending", &states_config).unwrap();
+
+        // Second claim cycle
+        db.force_claim_task(&task.id, &agent.id, &states_config).unwrap();
+        sleep(Duration::from_millis(50));
+        db.complete_task(&task.id, &agent.id, &states_config).unwrap();
+
+        let updated = db.get_task(&task.id).unwrap().unwrap();
+        // Should have accumulated time from both in_progress periods
+        assert!(updated.time_actual_ms.unwrap() >= 100);
+
+        let history = db.get_task_state_history(&task.id).unwrap();
+        // pending -> in_progress -> pending -> in_progress -> completed
+        assert_eq!(history.len(), 5);
+    }
+
+    #[test]
+    fn release_to_non_working_state_accumulates_time() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, None, vec![], None).unwrap();
+        let task = db
+            .create_task("Test".to_string(), None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+        sleep(Duration::from_millis(100));
+        db.release_task_with_state(&task.id, &agent.id, "failed", &states_config).unwrap();
+
+        let updated = db.get_task(&task.id).unwrap().unwrap();
+        assert!(updated.time_actual_ms.unwrap() >= 100);
+    }
+
+    #[test]
+    fn current_state_duration_returns_elapsed_time_for_working_state() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, None, vec![], None).unwrap();
+        let task = db
+            .create_task("Test".to_string(), None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Before claim, should be None (pending is not a working state)
+        let duration = db.get_current_state_duration(&task.id, &states_config).unwrap();
+        assert!(duration.is_none());
+
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+        sleep(Duration::from_millis(50));
+
+        // After claim, should return elapsed time
+        let duration = db.get_current_state_duration(&task.id, &states_config).unwrap();
+        assert!(duration.is_some());
+        assert!(duration.unwrap() >= 50);
+    }
+
+    #[test]
+    fn update_task_status_records_transition() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let task = db
+            .create_task("Test".to_string(), None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.update_task(&task.id, None, None, Some("cancelled".to_string()), None, None, &states_config).unwrap();
+
+        let history = db.get_task_state_history(&task.id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].event, "pending");
+        assert_eq!(history[1].event, "cancelled");
     }
 }

@@ -5,6 +5,7 @@ pub mod files;
 pub mod stats;
 pub mod tasks;
 
+use crate::config::StatesConfig;
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::{Annotated, RawResourceTemplate, ResourceTemplate};
@@ -14,11 +15,12 @@ use std::sync::Arc;
 /// Resource handler that processes MCP resource requests.
 pub struct ResourceHandler {
     pub db: Arc<Database>,
+    pub states_config: Arc<StatesConfig>,
 }
 
 impl ResourceHandler {
-    pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<Database>, states_config: Arc<StatesConfig>) -> Self {
+        Self { db, states_config }
     }
 
     /// Get all available resource templates.
@@ -160,8 +162,8 @@ impl ResourceHandler {
 
         match path {
             "all" => tasks::get_all_tasks(&self.db),
-            "ready" => tasks::get_ready_tasks(&self.db),
-            "blocked" => tasks::get_blocked_tasks(&self.db),
+            "ready" => tasks::get_ready_tasks(&self.db, &self.states_config),
+            "blocked" => tasks::get_blocked_tasks(&self.db, &self.states_config),
             "claimed" => tasks::get_claimed_tasks(&self.db, None),
             _ if path.starts_with("agent/") => {
                 let agent_id = path.strip_prefix("agent/").unwrap();
@@ -206,7 +208,7 @@ impl ResourceHandler {
         let path = uri.strip_prefix("stats://").unwrap_or("");
 
         match path {
-            "summary" => stats::get_stats_summary(&self.db),
+            "summary" => stats::get_stats_summary(&self.db, &self.states_config),
             _ => Err(anyhow::anyhow!("Unknown stats resource: {}", path)),
         }
     }

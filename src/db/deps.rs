@@ -1,6 +1,7 @@
 //! Dependency operations and cycle detection.
 
 use super::Database;
+use crate::config::StatesConfig;
 use crate::types::{Dependency, Task};
 use anyhow::{anyhow, Result};
 use rusqlite::params;
@@ -136,20 +137,42 @@ impl Database {
     }
 
     /// Get tasks that are blocked by incomplete dependencies.
-    pub fn get_blocked_tasks(&self) -> Result<Vec<Task>> {
+    /// A task is blocked if any of its dependencies are in a blocking state.
+    pub fn get_blocked_tasks(&self, states_config: &StatesConfig) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
-            // A task is blocked if it has dependencies on tasks that are not completed
-            let mut stmt = conn.prepare(
+            // Build IN clause from blocking_states
+            let blocking_placeholders: Vec<String> = states_config
+                .blocking_states
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect();
+            let blocking_clause = blocking_placeholders.join(", ");
+
+            let sql = format!(
                 "SELECT DISTINCT t.*
                  FROM tasks t
                  INNER JOIN dependencies d ON t.id = d.to_task_id
                  INNER JOIN tasks blocker ON d.from_task_id = blocker.id
-                 WHERE blocker.status NOT IN ('completed')
-                 AND t.status = 'pending'
-                 ORDER BY t.created_at"
-            )?;
+                 WHERE blocker.status IN ({})
+                 AND t.status = ?1
+                 ORDER BY t.created_at",
+                blocking_clause
+            );
 
-            let tasks = stmt.query_map([], super::tasks::parse_task_row)?
+            let mut stmt = conn.prepare(&sql)?;
+
+            // Build params: initial state + all blocking states
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            params_vec.push(Box::new(states_config.initial.clone()));
+            for state in &states_config.blocking_states {
+                params_vec.push(Box::new(state.clone()));
+            }
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|b| b.as_ref()).collect();
+
+            let tasks = stmt
+                .query_map(params_refs.as_slice(), super::tasks::parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();
 
@@ -158,68 +181,93 @@ impl Database {
     }
 
     /// Get tasks that are ready to be claimed (all dependencies satisfied).
-    pub fn get_ready_tasks(&self, exclude_agent: Option<&str>) -> Result<Vec<Task>> {
+    /// A task is ready if it's in the initial state, unclaimed, and all dependencies are not blocking.
+    pub fn get_ready_tasks(
+        &self,
+        exclude_agent: Option<&str>,
+        states_config: &StatesConfig,
+    ) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
-            // A task is ready if:
-            // 1. It's pending
-            // 2. Not claimed
-            // 3. All its dependencies are completed
-            // 4. All its "then" predecessor siblings are completed
+            // Build IN clause from blocking_states for both dependency check and sibling check
+            let blocking_placeholders: Vec<String> = states_config
+                .blocking_states
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2)) // Start at ?2 (after initial state)
+                .collect();
+            let blocking_clause = blocking_placeholders.join(", ");
 
+            // Build the SQL with dynamic blocking states check
             let sql = if exclude_agent.is_some() {
-                "SELECT t.*
-                 FROM tasks t
-                 WHERE t.status = 'pending'
-                 AND t.owner_agent IS NULL
-                 AND NOT EXISTS (
-                     SELECT 1 FROM dependencies d
-                     INNER JOIN tasks blocker ON d.from_task_id = blocker.id
-                     WHERE d.to_task_id = t.id AND blocker.status != 'completed'
-                 )
-                 AND NOT EXISTS (
-                     SELECT 1 FROM tasks prev
-                     WHERE prev.parent_id = t.parent_id
-                     AND prev.sibling_order < t.sibling_order
-                     AND t.join_mode = 'then'
-                     AND prev.status != 'completed'
-                 )
-                 AND (t.owner_agent IS NULL OR t.owner_agent != ?1)
-                 ORDER BY
-                     CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
-                     t.created_at"
+                format!(
+                    "SELECT t.*
+                     FROM tasks t
+                     WHERE t.status = ?1
+                     AND t.owner_agent IS NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM dependencies d
+                         INNER JOIN tasks blocker ON d.from_task_id = blocker.id
+                         WHERE d.to_task_id = t.id AND blocker.status IN ({})
+                     )
+                     AND NOT EXISTS (
+                         SELECT 1 FROM tasks prev
+                         WHERE prev.parent_id = t.parent_id
+                         AND prev.sibling_order < t.sibling_order
+                         AND t.join_mode = 'then'
+                         AND prev.status IN ({})
+                     )
+                     AND (t.owner_agent IS NULL OR t.owner_agent != ?{})
+                     ORDER BY
+                         CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                         t.created_at",
+                    blocking_clause,
+                    blocking_clause,
+                    states_config.blocking_states.len() + 2 // Position for exclude_agent param
+                )
             } else {
-                "SELECT t.*
-                 FROM tasks t
-                 WHERE t.status = 'pending'
-                 AND t.owner_agent IS NULL
-                 AND NOT EXISTS (
-                     SELECT 1 FROM dependencies d
-                     INNER JOIN tasks blocker ON d.from_task_id = blocker.id
-                     WHERE d.to_task_id = t.id AND blocker.status != 'completed'
-                 )
-                 AND NOT EXISTS (
-                     SELECT 1 FROM tasks prev
-                     WHERE prev.parent_id = t.parent_id
-                     AND prev.sibling_order < t.sibling_order
-                     AND t.join_mode = 'then'
-                     AND prev.status != 'completed'
-                 )
-                 ORDER BY
-                     CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
-                     t.created_at"
+                format!(
+                    "SELECT t.*
+                     FROM tasks t
+                     WHERE t.status = ?1
+                     AND t.owner_agent IS NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM dependencies d
+                         INNER JOIN tasks blocker ON d.from_task_id = blocker.id
+                         WHERE d.to_task_id = t.id AND blocker.status IN ({})
+                     )
+                     AND NOT EXISTS (
+                         SELECT 1 FROM tasks prev
+                         WHERE prev.parent_id = t.parent_id
+                         AND prev.sibling_order < t.sibling_order
+                         AND t.join_mode = 'then'
+                         AND prev.status IN ({})
+                     )
+                     ORDER BY
+                         CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                         t.created_at",
+                    blocking_clause,
+                    blocking_clause
+                )
             };
 
-            let mut stmt = conn.prepare(sql)?;
+            let mut stmt = conn.prepare(&sql)?;
 
-            let tasks = if let Some(aid) = exclude_agent {
-                stmt.query_map(params![aid], super::tasks::parse_task_row)?
-                    .filter_map(|r| r.ok())
-                    .collect()
-            } else {
-                stmt.query_map([], super::tasks::parse_task_row)?
-                    .filter_map(|r| r.ok())
-                    .collect()
-            };
+            // Build params: initial state + blocking states (+ optionally exclude_agent)
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            params_vec.push(Box::new(states_config.initial.clone()));
+            for state in &states_config.blocking_states {
+                params_vec.push(Box::new(state.clone()));
+            }
+            if let Some(aid) = exclude_agent {
+                params_vec.push(Box::new(aid.to_string()));
+            }
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|b| b.as_ref()).collect();
+
+            let tasks = stmt
+                .query_map(params_refs.as_slice(), super::tasks::parse_task_row)?
+                .filter_map(|r| r.ok())
+                .collect();
 
             Ok(tasks)
         })
@@ -227,15 +275,38 @@ impl Database {
 
     /// Check if a task has unmet dependencies.
     #[allow(dead_code)]
-    pub fn has_unmet_dependencies(&self, task_id: &str) -> Result<bool> {
+    pub fn has_unmet_dependencies(
+        &self,
+        task_id: &str,
+        states_config: &StatesConfig,
+    ) -> Result<bool> {
         self.with_conn(|conn| {
-            let count: i32 = conn.query_row(
+            // Build IN clause from blocking_states
+            let blocking_placeholders: Vec<String> = states_config
+                .blocking_states
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect();
+            let blocking_clause = blocking_placeholders.join(", ");
+
+            let sql = format!(
                 "SELECT COUNT(*) FROM dependencies d
                  INNER JOIN tasks blocker ON d.from_task_id = blocker.id
-                 WHERE d.to_task_id = ?1 AND blocker.status != 'completed'",
-                params![task_id],
-                |row| row.get(0),
-            )?;
+                 WHERE d.to_task_id = ?1 AND blocker.status IN ({})",
+                blocking_clause
+            );
+
+            // Build params: task_id + blocking states
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            params_vec.push(Box::new(task_id.to_string()));
+            for state in &states_config.blocking_states {
+                params_vec.push(Box::new(state.clone()));
+            }
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|b| b.as_ref()).collect();
+
+            let count: i32 = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
 
             Ok(count > 0)
         })

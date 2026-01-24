@@ -1,6 +1,6 @@
 //! Configuration loading and management.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,9 @@ pub struct Config {
 
     #[serde(default)]
     pub paths: PathsConfig,
+
+    #[serde(default)]
+    pub states: StatesConfig,
 }
 
 impl Default for Config {
@@ -20,6 +23,7 @@ impl Default for Config {
         Self {
             server: ServerConfig::default(),
             paths: PathsConfig::default(),
+            states: StatesConfig::default(),
         }
     }
 }
@@ -100,6 +104,196 @@ pub enum PathStyle {
 impl Default for PathStyle {
     fn default() -> Self {
         PathStyle::Relative
+    }
+}
+
+/// Task state configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatesConfig {
+    /// Default state for new tasks.
+    #[serde(default = "default_initial_state")]
+    pub initial: String,
+
+    /// States that block dependent tasks (tasks in these states count as "not done").
+    #[serde(default = "default_blocking_states")]
+    pub blocking_states: Vec<String>,
+
+    /// State definitions with allowed transitions and timing behavior.
+    #[serde(default = "default_state_definitions")]
+    pub definitions: HashMap<String, StateDefinition>,
+}
+
+impl Default for StatesConfig {
+    fn default() -> Self {
+        Self {
+            initial: default_initial_state(),
+            blocking_states: default_blocking_states(),
+            definitions: default_state_definitions(),
+        }
+    }
+}
+
+fn default_initial_state() -> String {
+    "pending".to_string()
+}
+
+fn default_blocking_states() -> Vec<String> {
+    vec!["pending".to_string(), "in_progress".to_string()]
+}
+
+fn default_state_definitions() -> HashMap<String, StateDefinition> {
+    let mut defs = HashMap::new();
+
+    defs.insert(
+        "pending".to_string(),
+        StateDefinition {
+            exits: vec!["in_progress".to_string(), "cancelled".to_string()],
+            timed: false,
+        },
+    );
+
+    defs.insert(
+        "in_progress".to_string(),
+        StateDefinition {
+            exits: vec![
+                "completed".to_string(),
+                "failed".to_string(),
+                "pending".to_string(),
+            ],
+            timed: true,
+        },
+    );
+
+    defs.insert(
+        "completed".to_string(),
+        StateDefinition {
+            exits: vec![],
+            timed: false,
+        },
+    );
+
+    defs.insert(
+        "failed".to_string(),
+        StateDefinition {
+            exits: vec!["pending".to_string()],
+            timed: false,
+        },
+    );
+
+    defs.insert(
+        "cancelled".to_string(),
+        StateDefinition {
+            exits: vec![],
+            timed: false,
+        },
+    );
+
+    defs
+}
+
+/// Definition of a single task state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateDefinition {
+    /// Allowed states to transition to from this state.
+    #[serde(default)]
+    pub exits: Vec<String>,
+
+    /// Whether time spent in this state should be tracked (accumulated to time_actual_ms).
+    #[serde(default)]
+    pub timed: bool,
+}
+
+impl StatesConfig {
+    /// Check if a state is a valid defined state.
+    pub fn is_valid_state(&self, state: &str) -> bool {
+        self.definitions.contains_key(state)
+    }
+
+    /// Check if a transition from one state to another is allowed.
+    pub fn is_valid_transition(&self, from: &str, to: &str) -> bool {
+        if let Some(def) = self.definitions.get(from) {
+            def.exits.contains(&to.to_string())
+        } else {
+            false
+        }
+    }
+
+    /// Check if a state is timed (accumulates duration).
+    pub fn is_timed_state(&self, state: &str) -> bool {
+        self.definitions
+            .get(state)
+            .map(|d| d.timed)
+            .unwrap_or(false)
+    }
+
+    /// Check if a state is terminal (has no exits).
+    pub fn is_terminal_state(&self, state: &str) -> bool {
+        self.definitions
+            .get(state)
+            .map(|d| d.exits.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Check if a state is a blocking state (blocks dependents).
+    pub fn is_blocking_state(&self, state: &str) -> bool {
+        self.blocking_states.contains(&state.to_string())
+    }
+
+    /// Get all defined state names.
+    pub fn state_names(&self) -> Vec<&str> {
+        self.definitions.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get allowed exit states for a given state.
+    pub fn get_exits(&self, state: &str) -> Vec<&str> {
+        self.definitions
+            .get(state)
+            .map(|d| d.exits.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Validate the states configuration.
+    pub fn validate(&self) -> Result<()> {
+        // Check initial state exists
+        if !self.definitions.contains_key(&self.initial) {
+            return Err(anyhow!(
+                "Initial state '{}' is not defined in state definitions",
+                self.initial
+            ));
+        }
+
+        // Check all blocking_states exist
+        for state in &self.blocking_states {
+            if !self.definitions.contains_key(state) {
+                return Err(anyhow!(
+                    "Blocking state '{}' is not defined in state definitions",
+                    state
+                ));
+            }
+        }
+
+        // Check all exit targets exist
+        for (state_name, def) in &self.definitions {
+            for exit in &def.exits {
+                if !self.definitions.contains_key(exit) {
+                    return Err(anyhow!(
+                        "State '{}' has exit '{}' which is not defined",
+                        state_name,
+                        exit
+                    ));
+                }
+            }
+        }
+
+        // Check at least one terminal state exists
+        let has_terminal = self.definitions.values().any(|d| d.exits.is_empty());
+        if !has_terminal {
+            return Err(anyhow!(
+                "At least one terminal state (with empty exits) must be defined"
+            ));
+        }
+
+        Ok(())
     }
 }
 

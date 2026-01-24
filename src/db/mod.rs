@@ -4,6 +4,7 @@ pub mod agents;
 pub mod attachments;
 pub mod deps;
 pub mod locks;
+pub mod state_transitions;
 pub mod stats;
 pub mod tasks;
 

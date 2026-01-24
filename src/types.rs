@@ -27,40 +27,6 @@ pub struct AgentInfo {
     pub last_heartbeat: i64,
 }
 
-/// Task status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Pending,
-    InProgress,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-impl TaskStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            TaskStatus::Pending => "pending",
-            TaskStatus::InProgress => "in_progress",
-            TaskStatus::Completed => "completed",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Cancelled => "cancelled",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(TaskStatus::Pending),
-            "in_progress" => Some(TaskStatus::InProgress),
-            "completed" => Some(TaskStatus::Completed),
-            "failed" => Some(TaskStatus::Failed),
-            "cancelled" => Some(TaskStatus::Cancelled),
-            _ => None,
-        }
-    }
-}
-
 /// Task priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -123,7 +89,7 @@ pub struct Task {
     pub parent_id: Option<String>,
     pub title: String,
     pub description: Option<String>,
-    pub status: TaskStatus,
+    pub status: String,
     pub priority: Priority,
     pub join_mode: JoinMode,
     pub sibling_order: i32,
@@ -206,6 +172,19 @@ pub struct ClaimEvent {
     pub event: ClaimEventType,
     pub reason: Option<String>,
     pub timestamp: i64,
+    pub end_timestamp: Option<i64>,
+}
+
+/// A task state transition event for time tracking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskStateEvent {
+    pub id: i64,
+    pub task_id: String,
+    pub agent_id: Option<String>,
+    pub event: String,
+    pub reason: Option<String>,
+    pub timestamp: i64,
+    pub end_timestamp: Option<i64>,
 }
 
 /// Type of claim event.
@@ -276,11 +255,8 @@ pub struct AttachmentMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
     pub total_tasks: i64,
-    pub pending_tasks: i64,
-    pub in_progress_tasks: i64,
-    pub completed_tasks: i64,
-    pub failed_tasks: i64,
-    pub cancelled_tasks: i64,
+    /// Task counts by state (dynamic based on config).
+    pub tasks_by_state: HashMap<String, i64>,
     pub total_points: i64,
     pub completed_points: i64,
     pub total_time_estimate_ms: i64,
@@ -300,7 +276,7 @@ pub struct TaskSummary {
     pub id: String,
     pub parent_id: Option<String>,
     pub title: String,
-    pub status: TaskStatus,
+    pub status: String,
     pub priority: Priority,
     pub owner_agent: Option<String>,
     pub points: Option<i32>,
@@ -310,49 +286,6 @@ pub struct TaskSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    mod task_status_tests {
-        use super::*;
-
-        #[test]
-        fn as_str_returns_correct_string_for_all_variants() {
-            assert_eq!(TaskStatus::Pending.as_str(), "pending");
-            assert_eq!(TaskStatus::InProgress.as_str(), "in_progress");
-            assert_eq!(TaskStatus::Completed.as_str(), "completed");
-            assert_eq!(TaskStatus::Failed.as_str(), "failed");
-            assert_eq!(TaskStatus::Cancelled.as_str(), "cancelled");
-        }
-
-        #[test]
-        fn from_str_parses_valid_strings() {
-            assert_eq!(TaskStatus::from_str("pending"), Some(TaskStatus::Pending));
-            assert_eq!(TaskStatus::from_str("in_progress"), Some(TaskStatus::InProgress));
-            assert_eq!(TaskStatus::from_str("completed"), Some(TaskStatus::Completed));
-            assert_eq!(TaskStatus::from_str("failed"), Some(TaskStatus::Failed));
-            assert_eq!(TaskStatus::from_str("cancelled"), Some(TaskStatus::Cancelled));
-        }
-
-        #[test]
-        fn from_str_returns_none_for_invalid_strings() {
-            assert_eq!(TaskStatus::from_str("invalid"), None);
-            assert_eq!(TaskStatus::from_str("PENDING"), None);
-            assert_eq!(TaskStatus::from_str(""), None);
-            assert_eq!(TaskStatus::from_str("in-progress"), None);
-        }
-
-        #[test]
-        fn roundtrip_conversion_is_lossless() {
-            for status in [
-                TaskStatus::Pending,
-                TaskStatus::InProgress,
-                TaskStatus::Completed,
-                TaskStatus::Failed,
-                TaskStatus::Cancelled,
-            ] {
-                assert_eq!(TaskStatus::from_str(status.as_str()), Some(status));
-            }
-        }
-    }
 
     mod priority_tests {
         use super::*;

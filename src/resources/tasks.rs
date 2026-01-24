@@ -1,5 +1,6 @@
 //! Task resource handlers.
 
+use crate::config::StatesConfig;
 use crate::db::Database;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -37,8 +38,8 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
     }))
 }
 
-pub fn get_ready_tasks(db: &Database) -> Result<Value> {
-    let tasks = db.get_ready_tasks(None)?;
+pub fn get_ready_tasks(db: &Database, states_config: &StatesConfig) -> Result<Value> {
+    let tasks = db.get_ready_tasks(None, states_config)?;
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| json!({
@@ -53,8 +54,8 @@ pub fn get_ready_tasks(db: &Database) -> Result<Value> {
     }))
 }
 
-pub fn get_blocked_tasks(db: &Database) -> Result<Value> {
-    let tasks = db.get_blocked_tasks()?;
+pub fn get_blocked_tasks(db: &Database, states_config: &StatesConfig) -> Result<Value> {
+    let tasks = db.get_blocked_tasks(states_config)?;
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| {

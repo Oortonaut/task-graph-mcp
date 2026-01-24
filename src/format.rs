@@ -1,7 +1,9 @@
 //! Output formatting utilities for markdown and JSON.
 
-use crate::types::{AgentInfo, Task, TaskStatus, Priority};
+use crate::config::StatesConfig;
+use crate::types::{AgentInfo, Priority, Task};
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Output format for query results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +28,7 @@ pub fn format_task_markdown(task: &Task, blocked_by: &[String]) -> String {
 
     md.push_str(&format!("## Task: {}\n", task.title));
     md.push_str(&format!("- **id**: `{}`\n", task.id));
-    md.push_str(&format!("- **status**: {}\n", task.status.as_str()));
+    md.push_str(&format!("- **status**: {}\n", task.status));
     md.push_str(&format!("- **priority**: {}\n", task.priority.as_str()));
 
     if let Some(ref owner) = task.owner_agent {
@@ -60,59 +62,90 @@ pub fn format_task_markdown(task: &Task, blocked_by: &[String]) -> String {
 }
 
 /// Format a list of tasks as markdown.
-pub fn format_tasks_markdown(tasks: &[(Task, Vec<String>)]) -> String {
+/// Groups tasks by their state dynamically based on the states config.
+pub fn format_tasks_markdown(
+    tasks: &[(Task, Vec<String>)],
+    states_config: &StatesConfig,
+) -> String {
     let mut md = String::new();
 
     md.push_str(&format!("# Tasks ({})\n\n", tasks.len()));
 
-    // Group by status
-    let pending: Vec<_> = tasks.iter().filter(|(t, _)| t.status == TaskStatus::Pending).collect();
-    let in_progress: Vec<_> = tasks.iter().filter(|(t, _)| t.status == TaskStatus::InProgress).collect();
-    let completed: Vec<_> = tasks.iter().filter(|(t, _)| t.status == TaskStatus::Completed).collect();
-    let failed: Vec<_> = tasks.iter().filter(|(t, _)| t.status == TaskStatus::Failed).collect();
-    let cancelled: Vec<_> = tasks.iter().filter(|(t, _)| t.status == TaskStatus::Cancelled).collect();
-
-    if !in_progress.is_empty() {
-        md.push_str("## In Progress\n\n");
-        for (task, blocked_by) in &in_progress {
-            md.push_str(&format_task_short(task, blocked_by));
-        }
-        md.push('\n');
+    // Group tasks by status
+    let mut by_status: HashMap<String, Vec<&(Task, Vec<String>)>> = HashMap::new();
+    for state in states_config.state_names() {
+        by_status.insert(state.to_string(), Vec::new());
+    }
+    for task_entry in tasks {
+        by_status
+            .entry(task_entry.0.status.clone())
+            .or_default()
+            .push(task_entry);
     }
 
-    if !pending.is_empty() {
-        md.push_str("## Pending\n\n");
-        for (task, blocked_by) in &pending {
-            md.push_str(&format_task_short(task, blocked_by));
+    // Output blocking states first (in-progress tasks), then initial state, then others
+    // This provides a sensible default ordering
+
+    // First, output blocking states (excluding initial state)
+    for state in &states_config.blocking_states {
+        if state != &states_config.initial {
+            if let Some(state_tasks) = by_status.get(state) {
+                if !state_tasks.is_empty() {
+                    md.push_str(&format!("## {}\n\n", format_state_name(state)));
+                    for (task, blocked_by) in state_tasks {
+                        md.push_str(&format_task_short(task, blocked_by));
+                    }
+                    md.push('\n');
+                }
+            }
         }
-        md.push('\n');
     }
 
-    if !completed.is_empty() {
-        md.push_str("## Completed\n\n");
-        for (task, blocked_by) in &completed {
-            md.push_str(&format_task_short(task, blocked_by));
+    // Then initial state
+    if let Some(state_tasks) = by_status.get(&states_config.initial) {
+        if !state_tasks.is_empty() {
+            md.push_str(&format!(
+                "## {}\n\n",
+                format_state_name(&states_config.initial)
+            ));
+            for (task, blocked_by) in state_tasks {
+                md.push_str(&format_task_short(task, blocked_by));
+            }
+            md.push('\n');
         }
-        md.push('\n');
     }
 
-    if !failed.is_empty() {
-        md.push_str("## Failed\n\n");
-        for (task, blocked_by) in &failed {
-            md.push_str(&format_task_short(task, blocked_by));
+    // Then non-blocking states (terminal states like completed, failed, cancelled)
+    for state in states_config.state_names() {
+        if !states_config.is_blocking_state(state) && state != &states_config.initial {
+            if let Some(state_tasks) = by_status.get(state) {
+                if !state_tasks.is_empty() {
+                    md.push_str(&format!("## {}\n\n", format_state_name(state)));
+                    for (task, blocked_by) in state_tasks {
+                        md.push_str(&format_task_short(task, blocked_by));
+                    }
+                    md.push('\n');
+                }
+            }
         }
-        md.push('\n');
-    }
-
-    if !cancelled.is_empty() {
-        md.push_str("## Cancelled\n\n");
-        for (task, blocked_by) in &cancelled {
-            md.push_str(&format_task_short(task, blocked_by));
-        }
-        md.push('\n');
     }
 
     md
+}
+
+/// Format a state name for display (capitalize, replace underscores with spaces).
+fn format_state_name(state: &str) -> String {
+    state
+        .split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Format a task in short form for lists.

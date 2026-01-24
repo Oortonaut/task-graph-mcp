@@ -1,22 +1,16 @@
 //! Stats and plan resource handlers.
 
+use crate::config::StatesConfig;
 use crate::db::Database;
-use crate::types::TaskStatus;
 use anyhow::Result;
 use serde_json::{json, Value};
 
-pub fn get_stats_summary(db: &Database) -> Result<Value> {
-    let stats = db.get_stats(None, None)?;
+pub fn get_stats_summary(db: &Database, states_config: &StatesConfig) -> Result<Value> {
+    let stats = db.get_stats(None, None, states_config)?;
 
     Ok(json!({
         "total_tasks": stats.total_tasks,
-        "by_status": {
-            "pending": stats.pending_tasks,
-            "in_progress": stats.in_progress_tasks,
-            "completed": stats.completed_tasks,
-            "failed": stats.failed_tasks,
-            "cancelled": stats.cancelled_tasks
-        },
+        "by_status": stats.tasks_by_state,
         "points": {
             "total": stats.total_points,
             "completed": stats.completed_points,
@@ -56,12 +50,12 @@ pub fn get_acp_plan(db: &Database) -> Result<Value> {
     let acp_tasks: Vec<Value> = tasks.iter().map(|t| {
         let blockers = blockers_map.get(&t.id.to_string()).cloned().unwrap_or_default();
 
-        let status = match t.status {
-            TaskStatus::Pending => "todo",
-            TaskStatus::InProgress => "in_progress",
-            TaskStatus::Completed => "done",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Cancelled => "cancelled",
+        // Map status to ACP format
+        let status = match t.status.as_str() {
+            "pending" => "todo",
+            "in_progress" => "in_progress",
+            "completed" => "done",
+            _ => &t.status, // Pass through other states
         };
 
         json!({

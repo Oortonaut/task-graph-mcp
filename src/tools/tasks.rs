@@ -1,15 +1,19 @@
 //! Task CRUD tools.
 
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
-use crate::config::Prompts;
+use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
 use crate::format::{format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
-use crate::types::{Priority, TaskStatus, TaskTreeInput};
+use crate::types::{Priority, TaskTreeInput};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 
-pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
+pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
+    // Generate state enum from config
+    let state_names: Vec<&str> = states_config.state_names();
+    let state_enum: Vec<Value> = state_names.iter().map(|s| json!(s)).collect();
+
     vec![
         make_tool_with_prompts(
             "create",
@@ -111,7 +115,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
             json!({
                 "status": {
                     "oneOf": [
-                        { "type": "string", "enum": ["pending", "in_progress", "completed", "failed", "cancelled"] },
+                        { "type": "string", "enum": state_enum },
                         { "type": "array", "items": { "type": "string" } }
                     ],
                     "description": "Filter by status (single or array)"
@@ -163,7 +167,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 },
                 "state": {
                     "type": "string",
-                    "enum": ["pending", "in_progress", "completed", "failed", "cancelled"],
+                    "enum": state_enum,
                     "description": "New status"
                 },
                 "title": {
@@ -206,13 +210,12 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     ]
 }
 
-pub fn create(db: &Database, args: Value) -> Result<Value> {
+pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let title = get_string(&args, "title")
         .ok_or_else(|| anyhow::anyhow!("title is required"))?;
     let description = get_string(&args, "description");
     let parent_id = get_string(&args, "parent");
-    let priority = get_string(&args, "priority")
-        .and_then(|s| Priority::from_str(&s));
+    let priority = get_string(&args, "priority").and_then(|s| Priority::from_str(&s));
     let points = get_i32(&args, "points");
     let time_estimate_ms = get_i64(&args, "time_estimate_ms");
     let needed_tags = get_string_array(&args, "needed_tags");
@@ -229,25 +232,28 @@ pub fn create(db: &Database, args: Value) -> Result<Value> {
         needed_tags,
         wanted_tags,
         blocked_by,
+        states_config,
     )?;
 
     Ok(json!({
         "task_id": &task.id,
         "parent_id": task.parent_id,
         "title": task.title,
-        "status": task.status.as_str(),
+        "status": task.status,
         "priority": task.priority.as_str(),
         "created_at": task.created_at
     }))
 }
 
-pub fn create_tree(db: &Database, args: Value) -> Result<Value> {
+pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let tree: TaskTreeInput = serde_json::from_value(
-        args.get("tree").cloned().ok_or_else(|| anyhow::anyhow!("tree is required"))?
+        args.get("tree")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("tree is required"))?,
     )?;
     let parent_id = get_string(&args, "parent");
 
-    let (root_id, all_ids) = db.create_task_tree(tree, parent_id)?;
+    let (root_id, all_ids) = db.create_task_tree(tree, parent_id, states_config)?;
 
     Ok(json!({
         "root_task_id": root_id,
@@ -288,7 +294,7 @@ pub fn get(db: &Database, args: Value) -> Result<Value> {
     }
 }
 
-pub fn list_tasks(db: &Database, args: Value) -> Result<Value> {
+pub fn list_tasks(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::from_str(&s))
         .unwrap_or(OutputFormat::Json);
@@ -299,16 +305,15 @@ pub fn list_tasks(db: &Database, args: Value) -> Result<Value> {
 
     // Get tasks based on filters
     let tasks = if ready {
-        // Ready tasks: pending, unclaimed, all deps satisfied
+        // Ready tasks: in initial state, unclaimed, all deps satisfied
         let agent_id = get_string(&args, "agent");
-        db.get_ready_tasks(agent_id.as_deref())?
+        db.get_ready_tasks(agent_id.as_deref(), states_config)?
     } else if blocked {
         // Blocked tasks: have unsatisfied deps
-        db.get_blocked_tasks()?
+        db.get_blocked_tasks(states_config)?
     } else {
         // General query with filters
-        let status = get_string(&args, "status")
-            .and_then(|s| TaskStatus::from_str(&s));
+        let status = get_string(&args, "status");
         let owner = get_string(&args, "owner");
         let parent_id_str = get_string(&args, "parent");
         let parent_id: Option<Option<&str>> = match &parent_id_str {
@@ -318,7 +323,7 @@ pub fn list_tasks(db: &Database, args: Value) -> Result<Value> {
         };
 
         // Use list_tasks but get full Task objects
-        let summaries = db.list_tasks(status, owner.as_deref(), parent_id, limit)?;
+        let summaries = db.list_tasks(status.as_deref(), owner.as_deref(), parent_id, limit)?;
 
         // Convert summaries to full tasks
         let mut tasks = Vec::new();
@@ -347,24 +352,23 @@ pub fn list_tasks(db: &Database, args: Value) -> Result<Value> {
         .collect();
 
     match format {
-        OutputFormat::Markdown => {
-            Ok(markdown_to_json(format_tasks_markdown(&tasks_with_blockers)))
-        }
-        OutputFormat::Json => {
-            Ok(json!({
-                "tasks": tasks_with_blockers.iter().map(|(task, blockers)| {
-                    let mut task_json = serde_json::to_value(task).unwrap();
-                    if let Some(obj) = task_json.as_object_mut() {
-                        obj.insert("blocked_by".to_string(), json!(blockers));
-                    }
-                    task_json
-                }).collect::<Vec<_>>()
-            }))
-        }
+        OutputFormat::Markdown => Ok(markdown_to_json(format_tasks_markdown(
+            &tasks_with_blockers,
+            states_config,
+        ))),
+        OutputFormat::Json => Ok(json!({
+            "tasks": tasks_with_blockers.iter().map(|(task, blockers)| {
+                let mut task_json = serde_json::to_value(task).unwrap();
+                if let Some(obj) = task_json.as_object_mut() {
+                    obj.insert("blocked_by".to_string(), json!(blockers));
+                }
+                task_json
+            }).collect::<Vec<_>>()
+        })),
     }
 }
 
-pub fn update(db: &Database, args: Value) -> Result<Value> {
+pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
         .ok_or_else(|| anyhow::anyhow!("task is required"))?;
     let title = get_string(&args, "title");
@@ -373,17 +377,15 @@ pub fn update(db: &Database, args: Value) -> Result<Value> {
     } else {
         None
     };
-    let status = get_string(&args, "state")
-        .and_then(|s| TaskStatus::from_str(&s));
-    let priority = get_string(&args, "priority")
-        .and_then(|s| Priority::from_str(&s));
+    let status = get_string(&args, "state");
+    let priority = get_string(&args, "priority").and_then(|s| Priority::from_str(&s));
     let points = if args.get("points").is_some() {
         Some(get_i32(&args, "points"))
     } else {
         None
     };
 
-    let task = db.update_task(&task_id, title, description, status, priority, points)?;
+    let task = db.update_task(&task_id, title, description, status, priority, points, states_config)?;
 
     Ok(serde_json::to_value(task)?)
 }

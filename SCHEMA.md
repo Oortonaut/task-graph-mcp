@@ -1,7 +1,7 @@
 # Task Graph MCP - Database Schema
 
-> **Current Version:** V005
-> **Last Updated:** 2026-01-23
+> **Current Version:** V006
+> **Last Updated:** 2026-01-24
 > **Database:** SQLite 3
 
 ## Overview
@@ -135,9 +135,36 @@ Event log for file claim/release tracking, enabling efficient polling.
 | `event` | TEXT | NOT NULL | 'claimed' or 'released' |
 | `reason` | TEXT | | Optional reason for the event |
 | `timestamp` | INTEGER | NOT NULL | Unix timestamp of the event |
+| `end_timestamp` | INTEGER | | Unix timestamp when this claim period ended |
 
 **Indexes:**
 - `idx_claim_sequence_file` on `(file_path, id)`
+- `idx_claim_seq_open` on `file_path` WHERE `end_timestamp IS NULL`
+
+---
+
+### `task_state_sequence`
+
+Append-only audit log of task state transitions, enabling automatic time tracking.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Monotonic sequence ID |
+| `task_id` | TEXT | NOT NULL | Task being transitioned |
+| `agent_id` | TEXT | | Agent performing the transition (optional) |
+| `event` | TEXT | NOT NULL | Target state (pending, in_progress, completed, etc.) |
+| `reason` | TEXT | | Optional reason for the transition |
+| `timestamp` | INTEGER | NOT NULL | Unix timestamp when state was entered |
+| `end_timestamp` | INTEGER | | Unix timestamp when state was exited |
+
+**Indexes:**
+- `idx_task_state_seq_task` on `(task_id, id)`
+- `idx_task_state_seq_open` on `task_id` WHERE `end_timestamp IS NULL`
+
+**Notes:**
+- Time spent in "working" states (like `in_progress`) is automatically added to `time_actual_ms` when transitioning out
+- The `end_timestamp` is filled when the next transition occurs
+- Provides complete audit trail of task lifecycle
 
 ---
 
@@ -175,6 +202,7 @@ Event log for file claim/release tracking, enabling efficient polling.
 | V003 | 2026-01-23 | Change attachments primary key from UUID to composite `(task_id, order_index)` |
 | V004 | 2026-01-23 | Add `claim_sequence` table for file claim tracking; add `last_claim_sequence` to agents; add `reason` to file_locks; drop pub/sub tables (inbox, subscriptions) |
 | V005 | 2026-01-23 | Add `file_path` column to attachments for media file references |
+| V006 | 2026-01-24 | Add `task_state_sequence` table for automatic time tracking; add `end_timestamp` to `claim_sequence` |
 
 ---
 
@@ -184,9 +212,11 @@ Event log for file claim/release tracking, enabling efficient polling.
 agents 1──────< tasks (owner_agent)
 agents 1──────< file_locks (agent_id)
 agents 1──────< claim_sequence (agent_id)
+agents 1──────< task_state_sequence (agent_id, optional)
 
 tasks 1──────< tasks (parent_id, self-referential hierarchy)
 tasks 1──────< attachments (task_id)
+tasks 1──────< task_state_sequence (task_id)
 tasks >──────< tasks (via dependencies table, DAG)
 ```
 

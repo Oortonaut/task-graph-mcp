@@ -9,7 +9,7 @@ A Rust MCP (Model Context Protocol) server providing atomic, token-efficient tas
 - **Task Claiming**: Strict locking with configurable limits and tag-based affinity
 - **File Coordination**: Advisory locks with claim tracking for coordinating file edits
 - **Cost Tracking**: Token usage and cost accounting per task
-- **Time Tracking**: Estimation and actual time logging
+- **Time Tracking**: Automatic time accumulation based on state transitions, plus manual logging
 - **Live Status**: Real-time "current thought" for claimed tasks
 
 ## Installation
@@ -110,8 +110,11 @@ Environment variables:
 | Tool | Arguments | Description |
 |------|-----------|-------------|
 | `thinking` | `agent`, `thought?`, `tasks?` | Update current activity (visible to other agents). Refreshes heartbeat. |
-| `log_time` | `agent`, `task`, `duration_ms` | Log time spent on a task. |
+| `log_time` | `agent`, `task`, `duration_ms` | Manually log time spent on a task (in addition to automatic tracking). |
 | `log_cost` | `agent`, `task`, `tokens_in?`, `tokens_cached?`, `tokens_out?`, `tokens_thinking?`, `tokens_image?`, `tokens_audio?`, `cost_usd?`, `user_metrics?` | Log token usage and cost. |
+| `get_state_history` | `task` | Get state transition history and current duration in state. |
+
+**Note:** Time spent in working states (like `in_progress`) is automatically added to `time_actual_ms` when transitioning to another state. The `log_time` tool can be used for additional manual adjustments.
 
 ### File Coordination
 
