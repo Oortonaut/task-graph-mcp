@@ -294,10 +294,10 @@ Environment variables:
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `claim_file` | `agent`, `file`, `reason?` | Claim advisory lock on a file. |
-| `release_file` | `agent`, `file`, `reason?` | Release file lock. Use `reason` to leave notes. |
-| `list_files` | `files?`, `agent?` | Get current file locks. |
-| `claim_updates` | `agent`, `files?`, `timeout?` | Poll for file claim changes. Use `timeout` (ms) for long-polling. |
+| `mark_file` | `agent`, `file`, `reason?` | Mark a file to signal intent to work on it (advisory). |
+| `unmark_file` | `agent`, `file`, `reason?` | Remove mark from a file. Use `reason` to leave notes. |
+| `list_marks` | `files?`, `agent?` | Get current file marks. |
+| `mark_updates` | `agent`, `files?`, `timeout?` | Poll for file mark changes. Use `timeout` (ms) for long-polling. |
 
 ### Attachments
 
@@ -330,7 +330,7 @@ Suggested MIME types for version control:
 | `tasks://claimed` | All claimed tasks |
 | `tasks://agent/{id}` | Tasks owned by an agent |
 | `tasks://tree/{id}` | Task with all descendants |
-| `files://locks` | All file locks |
+| `files://marks` | All file marks |
 | `agents://all` | Registered agents |
 | `plan://acp` | ACP-compatible plan export |
 | `stats://summary` | Aggregate statistics |
@@ -375,16 +375,16 @@ Tasks can specify required capabilities with a non-empty list. Use either for on
 
 ## File Coordination
 
-Agents can coordinate file edits using advisory locks with change tracking:
+Agents can coordinate file edits using advisory marks with change tracking:
 
 ```
 Agent A: connect() -> "agent-a"
-Agent A: claim_file("agent-a", "src/main.rs", "refactoring")
+Agent A: mark_file("agent-a", "src/main.rs", "refactoring")
 Agent B: connect() -> "agent-b"
-Agent B: claim_updates("agent-b", ["src/main.rs"]) -> sees agent-a's claim
-Agent A: release_file("agent-a", "src/main.rs", "ready for review")
-Agent B: claim_updates("agent-b") -> sees release with reason
-Agent B: claim_file("agent-b", "src/main.rs", "adding tests")
+Agent B: mark_updates("agent-b", ["src/main.rs"]) -> sees agent-a's mark
+Agent A: unmark_file("agent-a", "src/main.rs", "ready for review")
+Agent B: mark_updates("agent-b") -> sees removal with reason
+Agent B: mark_file("agent-b", "src/main.rs", "adding tests")
 ```
 
 ## Architecture

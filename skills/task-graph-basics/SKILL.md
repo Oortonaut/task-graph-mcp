@@ -113,10 +113,10 @@ Every worker MUST connect before using task-graph tools:
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `claim_file` | Advisory lock | `worker_id`, `file`, `reason` |
-| `release_file` | Release lock | `worker_id`, `file`, `reason` |
-| `list_files` | Current locks | `worker_id`, `files[]` |
-| `claim_updates` | Poll changes | `worker_id`, `files[]`, `timeout` |
+| `mark_file` | Mark file | `worker_id`, `file`, `reason` |
+| `unmark_file` | Unmark file | `worker_id`, `file`, `reason` |
+| `list_marks` | Current marks | `worker_id`, `files[]` |
+| `mark_updates` | Poll changes | `worker_id`, `files[]`, `timeout` |
 
 ### Progress & Metrics
 
@@ -270,8 +270,8 @@ search(query="auth", include_attachments=true, status_filter="pending")
 ### Always Do
 - Save your `worker_id` after connecting
 - Use `thinking()` frequently to show progress
-- Claim files before editing (`claim_file`)
-- Check `claim_updates` before editing shared files
+- Mark files before editing (`mark_file`)
+- Check `mark_updates` before editing shared files
 - Log costs with `log_cost` for tracking
 
 ### Never Do

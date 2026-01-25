@@ -113,10 +113,10 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "files://locks".into(),
-                    name: "File Locks".into(),
+                    uri_template: "files://marks".into(),
+                    name: "File Marks".into(),
                     title: None,
-                    description: Some("All advisory file locks".into()),
+                    description: Some("All advisory file marks".into()),
                     mime_type: Some("application/json".into()),
                     icons: None,
                 },
@@ -225,7 +225,7 @@ impl ResourceHandler {
         let path = uri.strip_prefix("files://").unwrap_or("");
 
         match path {
-            "locks" => files::get_all_file_locks(&self.db),
+            "marks" => files::get_all_file_locks(&self.db),
             _ => Err(anyhow::anyhow!("Unknown files resource: {}", path)),
         }
     }

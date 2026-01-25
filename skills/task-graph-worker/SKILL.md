@@ -121,8 +121,8 @@ list_tasks(ready=true, worker_id=worker_id)
 │       get(task=task_id)                             │
 │       attachments(task=task_id, content=true)       │
 │                                                     │
-│    b. Lock files you'll edit:                       │
-│       claim_file(worker_id=worker_id, file="src/x.rs")│
+│    b. Mark files you'll edit:                       │
+│       mark_file(worker_id=worker_id, file="src/x.rs")│
 │                                                     │
 │    c. Report progress frequently:                   │
 │       thinking(worker_id=worker_id,                 │
@@ -131,8 +131,8 @@ list_tasks(ready=true, worker_id=worker_id)
 │    d. Do the actual work                            │
 ├─────────────────────────────────────────────────────┤
 │ 4. FINISH                                           │
-│    a. Release file locks:                           │
-│       release_file(worker_id=worker_id, file="src/x.rs")│
+│    a. Unmark files:                                 │
+│       unmark_file(worker_id=worker_id, file="src/x.rs")│
 │                                                     │
 │    b. Attach outputs (optional):                    │
 │       attach(task=task_id, name="result",           │
@@ -194,48 +194,48 @@ Multiple workers may edit the same codebase. Advisory locks prevent conflicts an
 
 ### Recommended Discipline
 
-**Claim all files before you begin working on any of them.**
+**Mark all files before you begin working on any of them.**
 
-Before writing any code, identify every file you'll need to modify and claim them all upfront in a single call. This prevents mid-task conflicts where another worker claims a file you need, forcing you to wait or redo work.
+Before writing any code, identify every file you'll need to modify and mark them all upfront in a single call. This prevents mid-task conflicts where another worker marks a file you need, forcing you to wait or redo work.
 
 ```
-# Good: Claim all files upfront with task-level reason
-claim_file(worker_id=id,
-           file=["src/types.rs", "src/handler.rs", "tests/handler_test.rs"],
-           reason="Add Status enum and update handlers")
+# Good: Mark all files upfront with task-level reason
+mark_file(worker_id=id,
+          file=["src/types.rs", "src/handler.rs", "tests/handler_test.rs"],
+          reason="Add Status enum and update handlers")
 # Now begin implementation...
 
-# Bad: Claim as you go (risks mid-task conflicts)
-claim_file(worker_id=id, file="src/types.rs", reason="...")
+# Bad: Mark as you go (risks mid-task conflicts)
+mark_file(worker_id=id, file="src/types.rs", reason="...")
 # Edit types.rs...
-claim_file(worker_id=id, file="src/handler.rs", reason="...")  # May already be claimed!
+mark_file(worker_id=id, file="src/handler.rs", reason="...")  # May already be marked!
 ```
 
 ### Coordination Model
 
-Claims include a **reason** describing what you're doing:
+Marks include a **reason** describing what you're doing:
 
 ```
-claim_file(worker_id=id, file="src/types.rs",
-           reason="Renaming state to status throughout")
+mark_file(worker_id=id, file="src/types.rs",
+          reason="Renaming state to status throughout")
 ```
 
-When you claim a file, you see what others are doing:
+When you mark a file, you see what others are doing:
 
-1. **On claim**: If locked, you get a warning with their ID and reason
-2. **Via polling**: `claim_updates` shows claims/releases with reasons
+1. **On mark**: If already marked, you get a warning with their ID and reason
+2. **Via polling**: `mark_updates` shows marks/removals with reasons
 
 Example scenarios:
 ```
 # Scenario 1: Refactoring
-Worker A claims types.rs: "Renaming state to status"
-Worker B tries to claim types.rs → sees A's reason
+Worker A marks types.rs: "Renaming state to status"
+Worker B tries to mark types.rs → sees A's reason
 Worker B decides to wait, OR uses 'status' not 'state'
 
 # Scenario 2: Test failure
 Test fails in auth.rs
-Worker A claims auth.rs: "Fixing null check in validate()"
-Worker B sees the claim → knows it's being handled
+Worker A marks auth.rs: "Fixing null check in validate()"
+Worker B sees the mark → knows it's being handled
 Worker B moves on to other work instead of duplicating effort
 ```
 
@@ -250,28 +250,28 @@ The key insight: reasons communicate intent, enabling smart coordination.
 ### Workflow
 
 ```
-# 1. Check if file is locked
-list_files(files=["src/auth.rs"])
+# 1. Check if file is marked
+list_marks(files=["src/auth.rs"])
 
 # 2. Check for recent activity
-claim_updates(worker_id=worker_id)
+mark_updates(worker_id=worker_id)
 
-# 3. Claim the file
-claim_file(worker_id=worker_id, file="src/auth.rs",
-           reason="Adding auth middleware")
+# 3. Mark the file
+mark_file(worker_id=worker_id, file="src/auth.rs",
+          reason="Adding auth middleware")
 
 # 4. Do your work...
 
-# 5. Release when done
-release_file(worker_id=worker_id, file="src/auth.rs",
-             reason="Auth middleware complete")
+# 5. Unmark when done
+unmark_file(worker_id=worker_id, file="src/auth.rs",
+            reason="Auth middleware complete")
 ```
 
 ### Handling Conflicts
 
-If file is locked by another worker:
+If file is marked by another worker:
 
-1. **Wait** - Use `claim_updates(timeout=30000)` to long-poll for release
+1. **Wait** - Use `mark_updates(timeout=30000)` to long-poll for removal
 2. **Coordinate** - Work on different files
 3. **Request** - Ask coordinator to intervene
 
@@ -459,7 +459,7 @@ After completing:
 |-------|-----|---------|
 | Claiming without capacity | Blocks others | Only claim what you'll do |
 | Silent work | Looks stuck | Report progress |
-| Editing unlocked files | Conflicts | Always `claim_file` first |
+| Editing unmarked files | Conflicts | Always `mark_file` first |
 | Abandoning tasks | Blocks progress | Update state if can't finish |
 | Ignoring dependencies | Task will fail | Check `ready=true` |
 

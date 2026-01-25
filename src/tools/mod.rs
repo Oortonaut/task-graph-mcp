@@ -142,10 +142,10 @@ impl ToolHandler {
             "claim" => json(claiming::claim(&self.db, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),
 
             // File coordination tools
-            "claim_file" => json(files::claim_file(&self.db, arguments)),
-            "release_file" => json(files::release_file(&self.db, arguments)),
-            "list_files" => json(files::list_files(&self.db, self.default_format, arguments)),
-            "claim_updates" => json(files::claim_updates_async(std::sync::Arc::clone(&self.db), arguments).await),
+            "mark_file" => json(files::mark_file(&self.db, arguments)),
+            "unmark_file" => json(files::unmark_file(&self.db, arguments)),
+            "list_marks" => json(files::list_marks(&self.db, self.default_format, arguments)),
+            "mark_updates" => json(files::mark_updates_async(std::sync::Arc::clone(&self.db), arguments).await),
 
             // Attachment tools
             "attach" => json(attachments::attach(&self.db, &self.media_dir, &self.attachments_config, arguments)),

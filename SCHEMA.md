@@ -38,7 +38,7 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 | `parent_id` | TEXT | FK → tasks(id) CASCADE | Parent task for hierarchy |
 | `title` | TEXT | NOT NULL | Task title |
 | `description` | TEXT | | Detailed task description |
-| `status` | TEXT | NOT NULL DEFAULT 'pending' | Task state (configurable, see States Configuration) |
+| `status` | TEXT | NOT NULL DEFAULT 'pending' | Task status (configurable, see States Configuration) |
 | `priority` | TEXT | NOT NULL DEFAULT 'medium' | One of: low, medium, high, critical |
 | `join_mode` | TEXT | NOT NULL DEFAULT 'then' | 'then' (sequential) or 'also' (parallel) |
 | `sibling_order` | INTEGER | NOT NULL DEFAULT 0 | Position among sibling tasks |
@@ -157,7 +157,7 @@ File claims enable multi-agent coordination through intent communication:
    - Work around their changes (use their new naming, etc.)
    - Move on to other work if the issue is already being addressed
 
-3. **Polling for updates**: Agents poll `claim_updates` to see claims/releases as they happen, maintaining awareness of what's being worked on
+3. **Polling for updates**: Agents poll `mark_updates` to see marks/removals as they happen, maintaining awareness of what's being worked on
 
 4. **Release notifications**: When a file is released, waiting agents are notified and can claim it
 
@@ -177,7 +177,7 @@ Append-only audit log of task state transitions, enabling automatic time trackin
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Monotonic sequence ID |
 | `task_id` | TEXT | NOT NULL | Task being transitioned |
 | `agent_id` | TEXT | | Agent performing the transition (optional) |
-| `event` | TEXT | NOT NULL | Target state (configurable, see States Configuration) |
+| `event` | TEXT | NOT NULL | Target status (configurable, see States Configuration) |
 | `reason` | TEXT | | Optional reason for the transition |
 | `timestamp` | INTEGER | NOT NULL | Unix timestamp when state was entered |
 | `end_timestamp` | INTEGER | | Unix timestamp when state was exited |

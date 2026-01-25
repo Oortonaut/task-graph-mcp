@@ -1,4 +1,4 @@
-//! File coordination tools (advisory locking).
+//! File coordination tools (advisory marks for file coordination).
 
 use super::{get_string, get_string_array, get_string_or_array, make_tool_with_prompts};
 use crate::config::Prompts;
@@ -118,8 +118,8 @@ fn format_duration(ms: i64) -> String {
 pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     vec![
         make_tool_with_prompts(
-            "claim_file",
-            "Claim advisory lock on a file. Use for coordination - signals intent to work on a file. Returns warning if another agent holds the lock. Track changes via claim_updates.",
+            "mark_file",
+            "Mark a file to signal intent to work on it (advisory, non-blocking). Returns warning if another agent has marked the file. Track changes via mark_updates.",
             json!({
                 "agent": {
                     "type": "string",
@@ -134,19 +134,19 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 },
                 "task": {
                     "type": "string",
-                    "description": "Optional task ID to associate with the lock (for auto-cleanup when task completes)"
+                    "description": "Optional task ID to associate with the mark (for auto-cleanup when task completes)"
                 },
                 "reason": {
                     "type": "string",
-                    "description": "Optional reason for claiming (visible to other agents)"
+                    "description": "Optional reason for marking (visible to other agents)"
                 }
             }),
             vec!["agent", "file"],
             prompts,
         ),
         make_tool_with_prompts(
-            "release_file",
-            "Release advisory lock on a file. Optionally include a reason for the next agent.",
+            "unmark_file",
+            "Remove mark from a file. Optionally include a note for the next agent.",
             json!({
                 "agent": {
                     "type": "string",
@@ -157,23 +157,23 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                         { "type": "string" },
                         { "type": "array", "items": { "type": "string" } }
                     ],
-                    "description": "Relative file path, array of paths, or '*' to release all files held by this agent"
+                    "description": "Relative file path, array of paths, or '*' to unmark all files held by this agent"
                 },
                 "task": {
                     "type": "string",
-                    "description": "Optional task ID - release all files associated with this task"
+                    "description": "Optional task ID - unmark all files associated with this task"
                 },
                 "reason": {
                     "type": "string",
-                    "description": "Optional reason/note for next claimant"
+                    "description": "Optional reason/note for next agent"
                 }
             }),
             vec!["agent"],
             prompts,
         ),
         make_tool_with_prompts(
-            "list_files",
-            "Get current file locks. Requires at least one filter: agent, task, or files.",
+            "list_marks",
+            "Get current file marks. Requires at least one filter: agent, task, or files.",
             json!({
                 "files": {
                     "type": "array",
@@ -193,8 +193,8 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
             prompts,
         ),
         make_tool_with_prompts(
-            "claim_updates",
-            "Poll for file claim changes since last call. Returns new claims and releases. Use for coordination between agents.",
+            "mark_updates",
+            "Poll for file mark changes since last call. Returns new marks and removals. Use for coordination between agents.",
             json!({
                 "agent": {
                     "type": "string",
@@ -207,7 +207,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     ]
 }
 
-pub fn claim_file(db: &Database, args: Value) -> Result<Value> {
+pub fn mark_file(db: &Database, args: Value) -> Result<Value> {
     let worker_id = get_string(&args, "agent")
         .ok_or_else(|| ToolError::missing_field("agent"))?;
     let file_paths = get_string_or_array(&args, "file")
@@ -227,7 +227,7 @@ pub fn claim_file(db: &Database, args: Value) -> Result<Value> {
         if let Some(other_agent) = warning {
             warnings.push(json!({
                 "file": file_path,
-                "locked_by": other_agent
+                "marked_by": other_agent
             }));
         }
         results.push(file_path.clone());
@@ -235,7 +235,7 @@ pub fn claim_file(db: &Database, args: Value) -> Result<Value> {
 
     let mut response = json!({
         "success": true,
-        "claimed": results
+        "marked": results
     });
 
     if !warnings.is_empty() {
@@ -245,22 +245,22 @@ pub fn claim_file(db: &Database, args: Value) -> Result<Value> {
     Ok(response)
 }
 
-pub fn release_file(db: &Database, args: Value) -> Result<Value> {
+pub fn unmark_file(db: &Database, args: Value) -> Result<Value> {
     let worker_id = get_string(&args, "agent")
         .ok_or_else(|| ToolError::missing_field("agent"))?;
     let reason = get_string(&args, "reason");
     let task_id = get_string(&args, "task");
 
-    // If task_id is provided, release all files for that task
+    // If task_id is provided, unmark all files for that task
     if let Some(tid) = task_id {
-        let released = db.release_task_locks_verbose(&tid, reason)?;
+        let unmarked = db.release_task_locks_verbose(&tid, reason)?;
         return Ok(json!({
             "success": true,
-            "released": released.iter().map(|(f, w)| json!({
+            "unmarked": unmarked.iter().map(|(f, w)| json!({
                 "file": f,
                 "agent": w
             })).collect::<Vec<_>>(),
-            "count": released.len()
+            "count": unmarked.len()
         }));
     }
 
@@ -269,29 +269,29 @@ pub fn release_file(db: &Database, args: Value) -> Result<Value> {
 
     match file_param {
         Some(files) if files.len() == 1 && files[0] == "*" => {
-            // Wildcard: release all files held by this agent
-            let released = db.release_worker_locks_verbose(&worker_id, reason)?;
+            // Wildcard: unmark all files held by this agent
+            let unmarked = db.release_worker_locks_verbose(&worker_id, reason)?;
             Ok(json!({
                 "success": true,
-                "released": released.iter().map(|(f, w)| json!({
+                "unmarked": unmarked.iter().map(|(f, w)| json!({
                     "file": f,
                     "agent": w
                 })).collect::<Vec<_>>(),
-                "count": released.len()
+                "count": unmarked.len()
             }))
         }
         Some(files) => {
-            // Normalize the file paths before releasing
+            // Normalize the file paths before unmarking
             let normalized_files = normalize_file_paths(files);
-            // Specific files: release each one
-            let released = db.unlock_files_verbose(normalized_files, &worker_id, reason)?;
+            // Specific files: unmark each one
+            let unmarked = db.unlock_files_verbose(normalized_files, &worker_id, reason)?;
             Ok(json!({
                 "success": true,
-                "released": released.iter().map(|(f, w)| json!({
+                "unmarked": unmarked.iter().map(|(f, w)| json!({
                     "file": f,
                     "agent": w
                 })).collect::<Vec<_>>(),
-                "count": released.len()
+                "count": unmarked.len()
             }))
         }
         None => {
@@ -301,7 +301,7 @@ pub fn release_file(db: &Database, args: Value) -> Result<Value> {
     }
 }
 
-pub fn list_files(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
+pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
     let files = get_string_array(&args, "files");
     let worker_id = get_string(&args, "agent");
     let task_id = get_string(&args, "task");
@@ -320,26 +320,26 @@ pub fn list_files(db: &Database, default_format: OutputFormat, args: Value) -> R
     // Normalize file paths in the filter if provided
     let normalized_files = files.map(normalize_file_paths);
 
-    let locks = db.get_file_locks(normalized_files, worker_id.as_deref(), task_id.as_deref())?;
+    let marks = db.get_file_locks(normalized_files, worker_id.as_deref(), task_id.as_deref())?;
     let now = crate::db::now_ms();
 
     match format {
         OutputFormat::Markdown => {
-            let mut md = String::from("# File Locks\n\n");
-            if locks.is_empty() {
-                md.push_str("No locks found.\n");
+            let mut md = String::from("# File Marks\n\n");
+            if marks.is_empty() {
+                md.push_str("No marks found.\n");
             } else {
                 md.push_str("| File | Agent | Task | Reason | Age |\n");
                 md.push_str("|------|-------|------|--------|-----|\n");
-                for (path, lock) in &locks {
-                    let age_ms = now - lock.locked_at;
+                for (path, mark) in &marks {
+                    let age_ms = now - mark.locked_at;
                     let age_str = format_duration(age_ms);
                     md.push_str(&format!(
                         "| {} | {} | {} | {} | {} |\n",
                         path,
-                        lock.worker_id,
-                        lock.task_id.as_deref().unwrap_or("-"),
-                        lock.reason.as_deref().unwrap_or("-"),
+                        mark.worker_id,
+                        mark.task_id.as_deref().unwrap_or("-"),
+                        mark.reason.as_deref().unwrap_or("-"),
                         age_str
                     ));
                 }
@@ -347,28 +347,28 @@ pub fn list_files(db: &Database, default_format: OutputFormat, args: Value) -> R
             Ok(markdown_to_json(md))
         }
         OutputFormat::Json => {
-            let locks_json: Vec<Value> = locks
+            let marks_json: Vec<Value> = marks
                 .into_iter()
-                .map(|(path, lock)| {
-                    let age_ms = now - lock.locked_at;
+                .map(|(path, mark)| {
+                    let age_ms = now - mark.locked_at;
                     json!({
                         "file": path,
-                        "agent": lock.worker_id,
-                        "task_id": lock.task_id,
-                        "reason": lock.reason,
-                        "locked_at": lock.locked_at,
-                        "lock_age_ms": age_ms
+                        "agent": mark.worker_id,
+                        "task_id": mark.task_id,
+                        "reason": mark.reason,
+                        "marked_at": mark.locked_at,
+                        "mark_age_ms": age_ms
                     })
                 })
                 .collect();
 
-            Ok(json!({ "locks": locks_json }))
+            Ok(json!({ "marks": marks_json }))
         }
     }
 }
 
-/// Async version of claim_updates.
-pub async fn claim_updates_async(db: std::sync::Arc<Database>, args: Value) -> Result<Value> {
+/// Async version of mark_updates.
+pub async fn mark_updates_async(db: std::sync::Arc<Database>, args: Value) -> Result<Value> {
     let worker_id = get_string(&args, "agent")
         .ok_or_else(|| ToolError::missing_field("agent"))?;
 
@@ -380,41 +380,41 @@ pub async fn claim_updates_async(db: std::sync::Arc<Database>, args: Value) -> R
     .map_err(|e| anyhow::anyhow!("Task join error: {}", e))??;
 
     Ok(json!({
-        "new_claims": updates.new_claims.iter().map(|e| json!({
+        "new_marks": updates.new_claims.iter().map(|e| json!({
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "claimed_at": e.timestamp
+            "marked_at": e.timestamp
         })).collect::<Vec<_>>(),
-        "dropped_claims": updates.dropped_claims.iter().map(|e| json!({
+        "removed_marks": updates.dropped_claims.iter().map(|e| json!({
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "dropped_at": e.timestamp
+            "removed_at": e.timestamp
         })).collect::<Vec<_>>(),
         "sequence": updates.sequence
     }))
 }
 
-/// Synchronous version of claim_updates.
-pub fn claim_updates(db: &Database, args: Value) -> Result<Value> {
+/// Synchronous version of mark_updates.
+pub fn mark_updates(db: &Database, args: Value) -> Result<Value> {
     let worker_id = get_string(&args, "agent")
         .ok_or_else(|| ToolError::missing_field("agent"))?;
 
     let updates = db.claim_updates(&worker_id)?;
 
     Ok(json!({
-        "new_claims": updates.new_claims.iter().map(|e| json!({
+        "new_marks": updates.new_claims.iter().map(|e| json!({
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "claimed_at": e.timestamp
+            "marked_at": e.timestamp
         })).collect::<Vec<_>>(),
-        "dropped_claims": updates.dropped_claims.iter().map(|e| json!({
+        "removed_marks": updates.dropped_claims.iter().map(|e| json!({
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "dropped_at": e.timestamp
+            "removed_at": e.timestamp
         })).collect::<Vec<_>>(),
         "sequence": updates.sequence
     }))

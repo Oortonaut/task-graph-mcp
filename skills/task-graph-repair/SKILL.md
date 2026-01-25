@@ -44,7 +44,7 @@ Run these queries to identify issues:
 | `list_tasks(blocked=true)` | Tasks stuck on deps |
 | `list_tasks(status="in_progress")` | Potentially stale work |
 | `list_agents()` | Disconnected/stale agents |
-| `list_files()` | Abandoned file locks |
+| `list_marks()` | Abandoned file marks |
 | `list_tasks(parent="null")` | Unexpected root tasks |
 
 ---
@@ -152,21 +152,21 @@ release(agent=your_agent_id, task=task_id, state="pending")
 **Diagnosis:**
 
 ```
-# List all locks
-list_files()
+# List all marks
+list_marks()
 
 # Cross-reference with active agents
 list_agents()
 
-# Locks by agents not in list = abandoned
+# Marks by agents not in list = abandoned
 ```
 
 **Repair:**
 
 ```
-# Release the lock (as repair agent)
-release_file(agent=your_agent_id, file=locked_file,
-             reason="Released by repair: original agent disconnected")
+# Unmark the file (as repair agent)
+unmark_file(agent=your_agent_id, file=marked_file,
+            reason="Unmarked by repair: original agent disconnected")
 ```
 
 ---
@@ -300,7 +300,7 @@ delete(task=duplicate_id, cascade=false)  # Don't delete children
 │    • list_tasks (all statuses)                      │
 │    • list_tasks(blocked=true)                       │
 │    • list_agents                                    │
-│    • list_files                                     │
+│    • list_marks                                     │
 ├─────────────────────────────────────────────────────┤
 │ 3. CATEGORIZE ISSUES                                │
 │    • Orphaned tasks                                 │

@@ -22,9 +22,9 @@ Coordinated 16 worker agents completing 15 tasks:
 ## What Works Well
 
 ### File Coordination
-- `claim_file()` / `release_file()` prevents conflicts
-- Workers check `list_files()` before editing
-- Advisory locks with reasons visible to others
+- `mark_file()` / `unmark_file()` prevents conflicts
+- Workers check `list_marks()` before editing
+- Advisory marks with reasons visible to others
 
 ### Progress Visibility
 - `thinking()` updates show real-time worker status
