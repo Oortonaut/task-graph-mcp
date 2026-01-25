@@ -52,11 +52,13 @@ cargo build --release
 
 ```
 # Agent workflow
-connect(name="worker-1", tags=["rust", "backend"])  → agent_id
-list_tasks(ready=true, agent="...")                 → claimable work
-claim(agent, task)                                  → you own it
-thinking(agent, "Implementing auth middleware")     → visible to others
-complete(agent, task)                               → done, deps unblock
+connect(worker_id="worker-1", tags=["rust","backend"])  → worker_id
+list_tasks(ready=true, agent="worker-1")                → claimable work
+claim(worker_id="worker-1", task="task-123")            → you own it
+thinking(agent="worker-1", thought="Implementing...")   → visible to others
+update(worker_id="worker-1", task="task-123",           → done, deps unblock
+       status="completed",
+       attachments=[{name:"commit", content:"abc123"}])
 ```
 
 ## Installation
@@ -212,6 +214,7 @@ attachments:
 |-----|-----------|------|----------|
 | `commit` | text/git.hash | append | Git commit hashes |
 | `checkin` | text/p4.changelist | append | Perforce changelists |
+| `changelist` | text/plain | append | Files changed |
 | `meta` | application/json | replace | Structured metadata |
 | `note` | text/plain | append | General notes |
 | `log` | text/plain | append | Log output |
@@ -244,81 +247,73 @@ Environment variables:
 
 ### Agent Management
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `connect` | `agent?`, `name?`, `tags?`, `max_claims?` | Register a new agent session. Returns `agent_id`. |
-| `disconnect` | `agent` | Unregister agent and release all claims/locks. |
-| `list_agents` | `format?` | List all connected agents. |
+| Tool | Description |
+|------|-------------|
+| `connect(worker_id?: str, tags?: str[], force?: bool = false)` | Register a worker session. Returns `worker_id`. Use `force` to reconnect a stuck worker. |
+| `disconnect(worker_id: str, final_status?: str = "pending")` | Unregister worker and release all claims/locks. |
+| `list_agents(tags?: str[], file?: str, task?: str, depth?: int)` | List connected workers with filters. |
 
 ### Task CRUD
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `create` | `title`, `description?`, `parent?`, `priority?`, `points?`, `time_estimate_ms?`, `agent_tags_all?`, `agent_tags_any?`, `blocked_by?` | Create a new task. |
-| `create_tree` | `tree`, `parent?` | Create a nested task tree with `then`/`also` join modes. |
-| `get` | `task`, `children?`, `format?` | Get a task by ID with optional descendants. |
-| `list_tasks` | `status?`, `ready?`, `blocked?`, `owner?`, `parent?`, `agent?`, `limit?`, `format?` | Query tasks with filters. |
-| `search` | `query`, `limit?`, `include_attachments?`, `status_filter?` | Full-text search across tasks and attachments with FTS5 ranking. |
-| `update` | `agent`, `task`, `state`, `title?`, `description?`, `priority?`, `points?` | Update task properties. |
-| `delete` | `task`, `cascade?` | Delete a task. Use `cascade=true` to delete children. |
-
-**Priority**: Integer 0-10 (default 5). Higher values = more important. Tasks are sorted by priority descending when querying `ready` tasks, so priority 10 tasks appear first. Priority is advisory only—any agent can claim any task.
+| Tool | Description |
+|------|-------------|
+| `create(description: str, id?: str, parent?: task_id, priority?: int = 5, points?: int, time_estimate_ms?: int, tags?: str[])` | Create a task. Priority 0-10 (higher = more important). |
+| `create_tree(tree: object, parent?: task_id)` | Create nested task tree. Tree nodes have `title`, `children[]`, `join_mode` (then/also), etc. |
+| `get(task: task_id)` | Get task by ID with attachment metadata and counts. |
+| `list_tasks(status?: str[], ready?: bool, blocked?: bool, claimed?: bool, owner?: str, parent?: str, agent?: str, tags_any?: str[], tags_all?: str[], sort_by?: str, sort_order?: str, limit?: int)` | Query tasks with filters. Use `ready=true` for claimable tasks. |
+| `update(worker_id: str, task: task_id, status?: str, assignee?: str, title?: str, description?: str, priority?: int, points?: int, tags?: str[], needed_tags?: str[], wanted_tags?: str[], time_estimate_ms?: int, reason?: str, force?: bool, attachments?: object[])` | Update task. Status changes auto-manage ownership. Include `attachments` to record commits/changelists. |
+| `delete(worker_id: str, task: task_id, cascade?: bool, reason?: str, obliterate?: bool, force?: bool)` | Delete task. Soft delete by default; `obliterate=true` for permanent. |
+| `scan(task: task_id, before?: int, after?: int, above?: int, below?: int)` | Scan task graph in multiple directions. Depth: 0=none, N=levels, -1=all. |
+| `search(query: str, limit?: int = 20, include_attachments?: bool, status_filter?: str)` | FTS5 search. Supports phrases, prefix*, AND/OR/NOT, title:word. |
 
 ### Task Claiming
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `claim` | `agent`, `task`, `state?`, `force?` | Claim a task. Use `force=true` to steal from another agent. |
-| `release` | `agent`, `task`, `state?` | Release a task. Use `state` to set status (default: pending). |
-| `complete` | `agent`, `task` | Shorthand for release with `state=completed`. |
+| Tool | Description |
+|------|-------------|
+| `claim(worker_id: str, task: task_id, force?: bool)` | Claim a task. Fails if deps unsatisfied, at limit, or lacks tags. Use `force` to steal. |
+
+**Note**: Release via `update(status="pending")`. Complete via `update(status="completed")`. Status changes auto-manage ownership.
 
 ### Dependencies
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `block` | `blocker`, `blocked` | Add dependency: `blocker` must complete before `blocked` can be claimed. |
-| `unblock` | `blocker`, `blocked` | Remove a dependency. |
+| Tool | Description |
+|------|-------------|
+| `link(from: task_id\|task_id[], to: task_id\|task_id[], type?: str = "blocks")` | Create dependencies. Types: blocks, follows, contains, duplicate, see-also. |
+| `unlink(from: task_id\|"*", to: task_id\|"*", type?: str)` | Remove dependencies. Use `*` as wildcard. |
+| `relink(prev_from: task_id[], prev_to: task_id[], from: task_id[], to: task_id[], type?: str = "contains")` | Atomically move dependencies (unlink then link). |
 
 ### Tracking
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `thinking` | `agent`, `thought`, `tasks?` | Update current activity (visible to other agents). Refreshes heartbeat. |
-| `log_time` | `agent`, `task`, `duration_ms` | Manually log time spent on a task (in addition to automatic tracking). |
-| `log_cost` | `agent`, `task`, `tokens_in?`, `tokens_cached?`, `tokens_out?`, `tokens_thinking?`, `tokens_image?`, `tokens_audio?`, `cost_usd?`, `user_metrics?` | Log token usage and cost. |
-| `get_state_history` | `task` | Get state transition history and current duration in state. |
-
-**Note:** Time spent in working states (like `in_progress`) is automatically added to `time_actual_ms` when transitioning to another state. The `log_time` tool can be used for additional manual adjustments.
+| Tool | Description |
+|------|-------------|
+| `thinking(agent: str, thought: str, tasks?: task_id[])` | Broadcast live status. Visible to other agents. Refreshes heartbeat. |
+| `task_history(task: task_id, states?: str[])` | Get status transition history with time tracking. |
+| `project_history(from?: str, to?: str, states?: str[], limit?: int = 100)` | Project-wide history with date range filters. |
+| `log_metrics(agent: str, task: task_id, cost_usd?: float, values?: int[8], user_metrics?: object)` | Log metrics (aggregated). |
+| `get_metrics(task: task_id\|task_id[])` | Get metrics for task(s). |
 
 ### File Coordination
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `mark_file` | `agent`, `file`, `reason?` | Mark a file to signal intent to work on it (advisory). |
-| `unmark_file` | `agent`, `file`, `reason?` | Remove mark from a file. Use `reason` to leave notes. |
-| `list_marks` | `files?`, `agent?` | Get current file marks. |
-| `mark_updates` | `agent`, `files?`, `timeout?` | Poll for file mark changes. Use `timeout` (ms) for long-polling. |
+| Tool | Description |
+|------|-------------|
+| `mark_file(agent: str, file: str\|str[], task?: task_id, reason?: str)` | Mark file(s) to signal intent. Advisory, non-blocking. |
+| `unmark_file(agent: str, file?: str\|str[]\|"*", task?: task_id, reason?: str)` | Remove marks. Use `*` for all. |
+| `list_marks(files?: str[], agent?: str, task?: task_id)` | Get current file marks. |
+| `mark_updates(agent: str)` | Poll for mark changes since last call. |
 
 ### Attachments
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `attach` | `task`, `name`, `content?`, `mime?`, `file?`, `store_as_file?`, `mode?` | Add an attachment. |
-| `attachments` | `task`, `content?` | Get attachment metadata. Use `content=true` for full content. |
-| `detach` | `task`, `index` | Delete an attachment by task and index. |
+| Tool | Description |
+|------|-------------|
+| `attach(task: task_id\|task_id[], name: str, content?: str, mime?: str, file?: str, store_as_file?: bool, mode?: str)` | Add attachment. Use `file` for reference, `store_as_file` for media storage. |
+| `attachments(task: task_id, name?: str, mime?: str)` | Get attachment metadata. Glob patterns supported for name. |
+| `detach(agent: str, task: task_id, name: str, delete_file?: bool)` | Delete attachment by name. |
 
-Attachment storage modes:
-- **Inline**: Content stored in database (`content` parameter)
-- **File reference**: Reference an existing file (`file` parameter)
-- **Media storage**: Store to `.task-graph/media/` (`content` + `store_as_file=true`)
+### Advanced
 
-Same-name behavior (`mode` parameter):
-- **append** (default): Multiple attachments with same name allowed (useful for tracking commits)
-- **replace**: New attachment replaces existing with same name
-
-Suggested MIME types for version control:
-- `application/git-commit` - Git commit hash
-- `application/p4-changelist` - Perforce changelist number
+| Tool | Description |
+|------|-------------|
+| `query(sql: str, params?: str[], limit?: int = 100, format?: str)` | Execute read-only SQL. SELECT only. Requires permission. |
 
 ## MCP Resources
 
