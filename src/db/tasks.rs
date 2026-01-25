@@ -1,11 +1,14 @@
 //! Task CRUD and tree operations.
 
 use super::state_transitions::record_state_transition;
-use super::{now_ms, Database};
+use super::{Database, now_ms};
 use crate::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
-use crate::types::{clamp_priority, parse_priority, Priority, Task, TaskTree, TaskTreeInput, Worker, PRIORITY_DEFAULT};
-use anyhow::{anyhow, Result};
-use rusqlite::{params, Connection, Row};
+use crate::types::{
+    PRIORITY_DEFAULT, Priority, Task, TaskTree, TaskTreeInput, Worker, clamp_priority,
+    parse_priority,
+};
+use anyhow::{Result, anyhow};
+use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
 
 /// Build an ORDER BY clause from sort_by and sort_order parameters.
@@ -49,7 +52,10 @@ fn sync_task_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result<(
 
 /// Sync needed tags (agent must have ALL) to the task_needed_tags junction table.
 fn sync_needed_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result<()> {
-    conn.execute("DELETE FROM task_needed_tags WHERE task_id = ?1", params![task_id])?;
+    conn.execute(
+        "DELETE FROM task_needed_tags WHERE task_id = ?1",
+        params![task_id],
+    )?;
     for tag in tags {
         conn.execute(
             "INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)",
@@ -61,7 +67,10 @@ fn sync_needed_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result
 
 /// Sync wanted tags (agent must have ANY) to the task_wanted_tags junction table.
 fn sync_wanted_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result<()> {
-    conn.execute("DELETE FROM task_wanted_tags WHERE task_id = ?1", params![task_id])?;
+    conn.execute(
+        "DELETE FROM task_wanted_tags WHERE task_id = ?1",
+        params![task_id],
+    )?;
     for tag in tags {
         conn.execute(
             "INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)",
@@ -129,7 +138,9 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         completed_at,
         current_thought,
         cost_usd,
-        metrics: [metric_0, metric_1, metric_2, metric_3, metric_4, metric_5, metric_6, metric_7],
+        metrics: [
+            metric_0, metric_1, metric_2, metric_3, metric_4, metric_5, metric_6, metric_7,
+        ],
         created_at,
         updated_at,
     })
@@ -220,8 +231,8 @@ impl Database {
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     &task_id,
-                    &description,  // Use description as title
-                    &description,  // Also store as description
+                    &description, // Use description as title
+                    &description, // Also store as description
                     initial_status,
                     priority.to_string(),
                     needed_tags_json,
@@ -403,8 +414,8 @@ impl Database {
             }
 
             // Validate state transition if status changed
-            if task.status != new_status {
-                if !states_config.is_valid_transition(&task.status, &new_status) {
+            if task.status != new_status
+                && !states_config.is_valid_transition(&task.status, &new_status) {
                     let exits = states_config.get_exits(&task.status);
                     return Err(anyhow!(
                         "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
@@ -413,7 +424,6 @@ impl Database {
                         exits
                     ));
                 }
-            }
 
             // Handle status transitions for timestamps
             // Set started_at when first entering a timed state
@@ -479,7 +489,6 @@ impl Database {
         })
     }
 
-
     /// Update a task with unified claim/release logic.
     /// - Transition to timed state = CLAIM (set owner, validate tags, check limit)
     /// - Transition from timed to non-timed = RELEASE (clear owner)
@@ -521,14 +530,13 @@ impl Database {
                 get_task_internal(&tx, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             // Owner-only validation: if task is claimed, only owner can update (unless force)
-            if let Some(ref current_owner) = task.worker_id {
-                if current_owner != agent_id && !force {
+            if let Some(ref current_owner) = task.worker_id
+                && current_owner != agent_id && !force {
                     return Err(anyhow!(
                         "Task is claimed by agent '{}'. Only the owner can update claimed tasks (use force=true to override)",
                         current_owner
                     ));
                 }
-            }
 
             let new_title = title.unwrap_or(task.title.clone());
             let new_description = description.unwrap_or(task.description.clone());
@@ -555,8 +563,8 @@ impl Database {
             }
 
             // Validate state transition if status changed
-            if task.status != new_status {
-                if !states_config.is_valid_transition(&task.status, &new_status) {
+            if task.status != new_status
+                && !states_config.is_valid_transition(&task.status, &new_status) {
                     let exits = states_config.get_exits(&task.status);
                     return Err(anyhow!(
                         "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
@@ -565,7 +573,6 @@ impl Database {
                         exits
                     ));
                 }
-            }
 
             // Determine ownership changes based on state transition
             let new_is_timed = states_config.is_timed_state(&new_status);
@@ -701,11 +708,10 @@ impl Database {
             // COMPLETE: Transition to terminal state
             if new_is_terminal {
                 // Verify ownership if task was claimed (unless force)
-                if let Some(ref current_owner) = task.worker_id {
-                    if current_owner != agent_id && !force {
+                if let Some(ref current_owner) = task.worker_id
+                    && current_owner != agent_id && !force {
                         return Err(anyhow!("Task is not owned by this agent"));
                     }
-                }
 
                 // Check for incomplete children (via 'contains' dependencies)
                 let incomplete_children: i32 = tx.query_row(
@@ -806,7 +812,7 @@ impl Database {
             let (unblocked, auto_advanced) = if status_changed {
                 let was_blocking = states_config.is_blocking_state(&task.status);
                 let is_blocking = states_config.is_blocking_state(&new_status);
-                
+
                 if was_blocking && !is_blocking {
                     super::deps::propagate_unblock_effects(
                         &tx,
@@ -872,14 +878,13 @@ impl Database {
                 .ok_or_else(|| anyhow!("Task not found"))?;
 
             // Check ownership - reject if claimed by another worker (unless force)
-            if let Some(ref owner) = task.worker_id {
-                if owner != worker_id && !force {
+            if let Some(ref owner) = task.worker_id
+                && owner != worker_id && !force {
                     return Err(anyhow!(
                         "Task is claimed by worker '{}'. Use force=true to override.",
                         owner
                     ));
                 }
-            }
 
             if obliterate {
                 // Hard delete - permanently remove from database
@@ -1561,7 +1566,8 @@ impl Database {
     /// Get all tasks. Excludes soft-deleted tasks.
     pub fn get_all_tasks(&self) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY created_at")?;
+            let mut stmt =
+                conn.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY created_at")?;
             let tasks = stmt
                 .query_map([], parse_task_row)?
                 .filter_map(|r| r.ok())
