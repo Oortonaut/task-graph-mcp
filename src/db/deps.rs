@@ -455,6 +455,7 @@ impl Database {
 
     /// Get tasks that are blocked by incomplete start dependencies.
     /// A task is blocked if any of its start-blocking dependencies are in a blocking state.
+    /// Excludes soft-deleted tasks.
     pub fn get_blocked_tasks(
         &self,
         states_config: &StatesConfig,
@@ -497,6 +498,7 @@ impl Database {
                  WHERE d.dep_type IN ({})
                  AND blocker.status IN ({})
                  AND t.status = ?1
+                 AND t.deleted_at IS NULL
                  ORDER BY {}",
                 type_clause, state_clause, order_clause
             );
@@ -526,7 +528,8 @@ impl Database {
 
     /// Get tasks that are ready to be claimed (all start dependencies satisfied).
     /// A task is ready if it's in the initial state, unclaimed, and all start-blocking deps are not blocking.
-    /// When agent_id is provided, also filters by agent's tag qualifications.
+    /// When agent_id is provided, also filters by agent's tag qualifications using junction tables.
+    /// Excludes soft-deleted tasks.
     pub fn get_ready_tasks(
         &self,
         agent_id: Option<&str>,
@@ -537,7 +540,7 @@ impl Database {
     ) -> Result<Vec<Task>> {
         let start_blocking_types = deps_config.start_blocking_types();
 
-        // Get agent tags if agent_id is provided
+        // Get agent tags if agent_id is provided (for junction table filtering)
         let agent_tags: Option<Vec<String>> = if let Some(aid) = agent_id {
             Some(self.get_agent_tags(aid)?)
         } else {
@@ -563,8 +566,6 @@ impl Database {
                 .collect();
             let type_clause = type_placeholders.join(", ");
 
-            let next_param_pos = type_start + start_blocking_types.len();
-
             // Build ORDER BY clause - for ready tasks, default is priority then created_at
             let order_clause = if sort_by.is_some() {
                 build_order_clause(sort_by, sort_order)
@@ -573,27 +574,67 @@ impl Database {
                 "CAST(t.priority AS INTEGER) DESC, t.created_at DESC".to_string()
             };
 
-            // Build agent qualification filter if agent_tags is provided
-            let agent_qual_clause = if agent_tags.is_some() {
-                let clause = format!(
-                    " AND (
-                        -- Agent has ALL agent_tags_all (or task has no agent_tags_all)
-                        (t.agent_tags_all IS NULL OR t.agent_tags_all = '[]' OR (
-                            SELECT COUNT(DISTINCT needed.value) FROM json_each(t.agent_tags_all) AS needed
-                            WHERE needed.value IN (SELECT value FROM json_each(?{}))
-                        ) = json_array_length(t.agent_tags_all))
-                        AND
-                        -- Agent has at least ONE agent_tags_any (or task has no agent_tags_any)
-                        (t.agent_tags_any IS NULL OR t.agent_tags_any = '[]' OR EXISTS (
-                            SELECT 1 FROM json_each(?{}) AS agent_tag
-                            WHERE agent_tag.value IN (SELECT value FROM json_each(t.agent_tags_any))
-                        ))
-                    )", next_param_pos, next_param_pos + 1
-                );
-                // next_param_pos would be incremented here if we needed more params after
-                clause
+            // Track param index for agent tag filters
+            let mut param_idx = type_start + start_blocking_types.len();
+
+            // Build agent qualification filters using junction tables
+            let (agent_needed_clause, agent_wanted_clause) = if let Some(ref tags) = agent_tags {
+                // For agent_tags_all (AND): agent must have ALL needed tags
+                // Count how many of the task's needed_tags match agent's tags
+                // Either the task has no needed_tags, or all must match
+                let needed_placeholders: Vec<String> = tags
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", param_idx + i))
+                    .collect();
+                param_idx += tags.len();
+
+                let needed_clause = if needed_placeholders.is_empty() {
+                    // Agent has no tags - only match tasks with no needed_tags
+                    "AND NOT EXISTS (SELECT 1 FROM task_needed_tags WHERE task_id = t.id)".to_string()
+                } else {
+                    // Task must have no needed_tags OR agent must have all of them
+                    format!(
+                        "AND (
+                            NOT EXISTS (SELECT 1 FROM task_needed_tags WHERE task_id = t.id)
+                            OR (
+                                SELECT COUNT(*) FROM task_needed_tags WHERE task_id = t.id
+                            ) = (
+                                SELECT COUNT(*) FROM task_needed_tags 
+                                WHERE task_id = t.id AND tag IN ({})
+                            )
+                        )",
+                        needed_placeholders.join(", ")
+                    )
+                };
+
+                // For agent_tags_any (OR): agent must have at least ONE wanted tag
+                let wanted_placeholders: Vec<String> = tags
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", param_idx + i))
+                    .collect();
+
+                let wanted_clause = if wanted_placeholders.is_empty() {
+                    // Agent has no tags - only match tasks with no wanted_tags
+                    "AND NOT EXISTS (SELECT 1 FROM task_wanted_tags WHERE task_id = t.id)".to_string()
+                } else {
+                    // Task must have no wanted_tags OR agent must have at least one
+                    format!(
+                        "AND (
+                            NOT EXISTS (SELECT 1 FROM task_wanted_tags WHERE task_id = t.id)
+                            OR EXISTS (
+                                SELECT 1 FROM task_wanted_tags 
+                                WHERE task_id = t.id AND tag IN ({})
+                            )
+                        )",
+                        wanted_placeholders.join(", ")
+                    )
+                };
+
+                (needed_clause, wanted_clause)
             } else {
-                String::new()
+                (String::new(), String::new())
             };
 
             let sql = format!(
@@ -601,20 +642,23 @@ impl Database {
                  FROM tasks t
                  WHERE t.status = ?1
                  AND t.owner_agent IS NULL
+                 AND t.deleted_at IS NULL
                  AND NOT EXISTS (
                      SELECT 1 FROM dependencies d
                      INNER JOIN tasks blocker ON d.from_task_id = blocker.id
                      WHERE d.to_task_id = t.id 
                      AND d.dep_type IN ({})
                      AND blocker.status IN ({})
-                 ){}
+                 )
+                 {}
+                 {}
                  ORDER BY {}",
-                type_clause, state_clause, agent_qual_clause, order_clause
+                type_clause, state_clause, agent_needed_clause, agent_wanted_clause, order_clause
             );
 
             let mut stmt = conn.prepare(&sql)?;
 
-            // Build params: initial state + blocking states + types + agent_tags (if any)
+            // Build params: initial state + blocking states + types + agent tags (twice if present)
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
             params_vec.push(Box::new(states_config.initial.clone()));
             for state in &states_config.blocking_states {
@@ -623,15 +667,19 @@ impl Database {
             for t in &start_blocking_types {
                 params_vec.push(Box::new(t.to_string()));
             }
+            // Add agent tags twice (once for needed_tags check, once for wanted_tags check)
             if let Some(ref tags) = agent_tags {
-                let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string());
-                params_vec.push(Box::new(tags_json.clone()));
-                params_vec.push(Box::new(tags_json));
+                for tag in tags {
+                    params_vec.push(Box::new(tag.clone()));
+                }
+                for tag in tags {
+                    params_vec.push(Box::new(tag.clone()));
+                }
             }
             let params_refs: Vec<&dyn rusqlite::ToSql> =
                 params_vec.iter().map(|b| b.as_ref()).collect();
 
-            let tasks = stmt
+            let tasks: Vec<Task> = stmt
                 .query_map(params_refs.as_slice(), super::tasks::parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();
@@ -737,10 +785,11 @@ impl Database {
         })
     }
 
-    /// Get tasks with tag-based filtering.
+    /// Get tasks with tag-based filtering using junction tables for indexed lookups.
     /// - `tags_any`: Task must have at least one of these tags (OR)
     /// - `tags_all`: Task must have all of these tags (AND)
     /// - `qualified_for_agent_tags`: If provided, only return tasks where these tags satisfy the task's agent_tags_all/agent_tags_any
+    /// Excludes soft-deleted tasks.
     pub fn list_tasks_with_tag_filters(
         &self,
         status: Option<Vec<String>>,
@@ -754,7 +803,7 @@ impl Database {
         sort_order: Option<&str>,
     ) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
-            let mut sql = String::from("SELECT * FROM tasks t WHERE 1=1");
+            let mut sql = String::from("SELECT t.* FROM tasks t WHERE t.deleted_at IS NULL");
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
             let mut param_idx = 1;
 
@@ -800,63 +849,106 @@ impl Database {
                 }
             }
 
-            // tags_any: Task has at least one of these tags
-            if let Some(ref tags) = tags_any {
-                if !tags.is_empty() {
-                    let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string());
+            // tags_any: Task must have at least one of these tags (OR) - uses task_tags junction
+            if let Some(ref any_tags) = tags_any {
+                if !any_tags.is_empty() {
+                    let placeholders: Vec<String> = any_tags
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", param_idx + i))
+                        .collect();
                     sql.push_str(&format!(
-                        " AND EXISTS (
-                            SELECT 1 FROM json_each(t.tags) AS task_tag
-                            WHERE task_tag.value IN (SELECT value FROM json_each(?{}))
-                        )", param_idx
+                        " AND EXISTS (SELECT 1 FROM task_tags WHERE task_id = t.id AND tag IN ({}))",
+                        placeholders.join(", ")
                     ));
-                    params_vec.push(Box::new(tags_json));
-                    param_idx += 1;
+                    for tag in any_tags {
+                        params_vec.push(Box::new(tag.clone()));
+                    }
+                    param_idx += any_tags.len();
                 }
             }
 
-            // tags_all: Task has all of these tags
-            if let Some(ref tags) = tags_all {
-                if !tags.is_empty() {
-                    let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string());
-                    let count = tags.len();
+            // tags_all: Task must have all of these tags (AND) - uses task_tags junction
+            if let Some(ref all_tags) = tags_all {
+                if !all_tags.is_empty() {
+                    let placeholders: Vec<String> = all_tags
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", param_idx + i))
+                        .collect();
+                    // Count matching tags must equal total required tags
+                    sql.push_str(&format!(
+                        " AND (SELECT COUNT(*) FROM task_tags WHERE task_id = t.id AND tag IN ({})) = {}",
+                        placeholders.join(", "),
+                        all_tags.len()
+                    ));
+                    for tag in all_tags {
+                        params_vec.push(Box::new(tag.clone()));
+                    }
+                    param_idx += all_tags.len();
+                }
+            }
+
+            // qualified_for: Agent's tags must satisfy task's requirements - uses junction tables
+            if let Some(ref agent_tags) = qualified_for_agent_tags {
+                // Agent must have ALL of task's agent_tags_all
+                if agent_tags.is_empty() {
+                    // Agent has no tags - only match tasks with no needed_tags
+                    sql.push_str(" AND NOT EXISTS (SELECT 1 FROM task_needed_tags WHERE task_id = t.id)");
+                    // And no wanted_tags
+                    sql.push_str(" AND NOT EXISTS (SELECT 1 FROM task_wanted_tags WHERE task_id = t.id)");
+                } else {
+                    // For needed_tags (AND): task must have no needed_tags OR agent has all
+                    let needed_placeholders: Vec<String> = agent_tags
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", param_idx + i))
+                        .collect();
                     sql.push_str(&format!(
                         " AND (
-                            SELECT COUNT(DISTINCT task_tag.value) FROM json_each(t.tags) AS task_tag
-                            WHERE task_tag.value IN (SELECT value FROM json_each(?{}))
-                        ) = {}", param_idx, count
+                            NOT EXISTS (SELECT 1 FROM task_needed_tags WHERE task_id = t.id)
+                            OR (
+                                SELECT COUNT(*) FROM task_needed_tags WHERE task_id = t.id
+                            ) = (
+                                SELECT COUNT(*) FROM task_needed_tags 
+                                WHERE task_id = t.id AND tag IN ({})
+                            )
+                        )",
+                        needed_placeholders.join(", ")
                     ));
-                    params_vec.push(Box::new(tags_json));
-                    param_idx += 1;
-                }
-            }
+                    for tag in agent_tags {
+                        params_vec.push(Box::new(tag.clone()));
+                    }
+                    param_idx += agent_tags.len();
 
-            // qualified_for: Agent's tags satisfy task's agent_tags_all/agent_tags_any
-            if let Some(ref agent_tags) = qualified_for_agent_tags {
-                let agent_tags_json = serde_json::to_string(agent_tags).unwrap_or_else(|_| "[]".to_string());
-                sql.push_str(&format!(
-                    " AND (
-                        -- Agent has ALL agent_tags_all (or task has no agent_tags_all)
-                        (t.agent_tags_all IS NULL OR t.agent_tags_all = '[]' OR (
-                            SELECT COUNT(DISTINCT needed.value) FROM json_each(t.agent_tags_all) AS needed
-                            WHERE needed.value IN (SELECT value FROM json_each(?{}))
-                        ) = json_array_length(t.agent_tags_all))
-                        AND
-                        -- Agent has at least ONE agent_tags_any (or task has no agent_tags_any)
-                        (t.agent_tags_any IS NULL OR t.agent_tags_any = '[]' OR EXISTS (
-                            SELECT 1 FROM json_each(?{}) AS agent_tag
-                            WHERE agent_tag.value IN (SELECT value FROM json_each(t.agent_tags_any))
-                        ))
-                    )", param_idx, param_idx + 1
-                ));
-                params_vec.push(Box::new(agent_tags_json.clone()));
-                params_vec.push(Box::new(agent_tags_json));
+                    // For wanted_tags (OR): task must have no wanted_tags OR agent has at least one
+                    let wanted_placeholders: Vec<String> = agent_tags
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", param_idx + i))
+                        .collect();
+                    sql.push_str(&format!(
+                        " AND (
+                            NOT EXISTS (SELECT 1 FROM task_wanted_tags WHERE task_id = t.id)
+                            OR EXISTS (
+                                SELECT 1 FROM task_wanted_tags 
+                                WHERE task_id = t.id AND tag IN ({})
+                            )
+                        )",
+                        wanted_placeholders.join(", ")
+                    ));
+                    for tag in agent_tags {
+                        params_vec.push(Box::new(tag.clone()));
+                    }
+                    // param_idx += agent_tags.len(); // not needed, last param set
+                }
             }
 
             // Build ORDER BY clause
             let order_clause = build_order_clause(sort_by, sort_order);
             sql.push_str(&format!(" ORDER BY {}", order_clause));
 
+            // Apply limit in SQL
             if let Some(l) = limit {
                 sql.push_str(&format!(" LIMIT {}", l));
             }
@@ -865,7 +957,7 @@ impl Database {
                 params_vec.iter().map(|b| b.as_ref()).collect();
 
             let mut stmt = conn.prepare(&sql)?;
-            let tasks = stmt
+            let tasks: Vec<Task> = stmt
                 .query_map(params_refs.as_slice(), super::tasks::parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();

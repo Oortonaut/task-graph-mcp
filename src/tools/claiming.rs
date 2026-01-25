@@ -63,16 +63,17 @@ pub fn claim(
     let (task, _unblocked, _auto_advanced) = db.update_task_unified(
         &task_id,
         &worker_id,
-        None,             // title
-        None,             // description
+        None,               // assignee (not assigning to another agent)
+        None,               // title
+        None,               // description
         Some(claim_status), // status - first timed state
-        None,             // priority
-        None,             // points
-        None,             // tags
-        None,             // needed_tags
-        None,             // wanted_tags
-        None,             // time_estimate_ms
-        None,             // reason
+        None,               // priority
+        None,               // points
+        None,               // tags
+        None,               // needed_tags
+        None,               // wanted_tags
+        None,               // time_estimate_ms
+        None,               // reason
         force,
         states_config,
         deps_config,

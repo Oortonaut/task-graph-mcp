@@ -289,8 +289,10 @@ impl Database {
                 .cloned()
                 .collect();
 
-            // For releases, only include if agent saw the original claim.
-            // Use claim_id: include if claim_id <= last_seq OR claim_id is in current batch.
+            // For releases, only include if agent actually polled and received the original claim.
+            // Use claim_id: include if claim_id < last_seq (was in a previous poll) OR claim_id is in current batch.
+            // Note: strictly less than, because last_seq is set to current max on registration,
+            // so claims at exactly last_seq were never actually polled by the agent.
             let new_claim_ids: HashSet<i64> = new_claims.iter()
                 .map(|c| c.id)
                 .collect();
@@ -299,7 +301,7 @@ impl Database {
                 .filter(|e| e.event == ClaimEventType::Released)
                 .filter(|release| {
                     match release.claim_id {
-                        Some(cid) => cid <= last_seq || new_claim_ids.contains(&cid),
+                        Some(cid) => cid < last_seq || new_claim_ids.contains(&cid),
                         None => true, // Legacy releases without claim_id - include them
                     }
                 })

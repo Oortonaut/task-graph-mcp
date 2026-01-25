@@ -160,7 +160,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "update",
-            "Update a task's properties. State changes handle ownership automatically: transitioning to a timed state (e.g., in_progress) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it. Only the owner can update a claimed task unless force=true.",
+            "Update a task's properties. State changes handle ownership automatically: transitioning to a timed state (e.g., in_progress) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it. For push coordination: use assignee to assign a task to another agent (sets owner and transitions to 'assigned' state). Only the owner can update a claimed task unless force=true.",
             json!({
                 "worker_id": {
                     "type": "string",
@@ -169,6 +169,10 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "task": {
                     "type": "string",
                     "description": "Task ID"
+                },
+                "assignee": {
+                    "type": "string",
+                    "description": "Agent ID to assign the task to (push coordination). Sets owner_agent to assignee and transitions to 'assigned' state. The assignee can then claim (transition to in_progress) when ready."
                 },
                 "state": {
                     "type": "string",
@@ -492,18 +496,9 @@ pub fn list_tasks(
                 sort_order.as_deref(),
             )?
         } else {
-            // Use list_tasks but get full Task objects (only supports single status)
+            // Use list_tasks which returns full Task objects (only supports single status)
             let status = status_vec.as_ref().and_then(|v| v.first().map(|s| s.as_str()));
-            let summaries = db.list_tasks(status, owner.as_deref(), parent_id, limit, sort_by.as_deref(), sort_order.as_deref())?;
-
-            // Convert summaries to full tasks
-            let mut full_tasks = Vec::new();
-            for summary in summaries {
-                if let Some(task) = db.get_task(&summary.id)? {
-                    full_tasks.push(task);
-                }
-            }
-            full_tasks
+            db.list_tasks(status, owner.as_deref(), parent_id, limit, sort_by.as_deref(), sort_order.as_deref())?
         }
     };
 
@@ -549,6 +544,7 @@ pub fn update(
         .ok_or_else(|| ToolError::missing_field("worker_id"))?;
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
+    let assignee = get_string(&args, "assignee");
     let title = get_string(&args, "title");
     let description = if args.get("description").is_some() {
         Some(get_string(&args, "description"))
@@ -586,6 +582,7 @@ pub fn update(
     let (task, unblocked, auto_advanced) = db.update_task_unified(
         &task_id,
         &worker_id,
+        assignee.as_deref(),
         title,
         description,
         status,

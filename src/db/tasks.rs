@@ -3,7 +3,7 @@
 use super::state_transitions::record_state_transition;
 use super::{now_ms, Database};
 use crate::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
-use crate::types::{clamp_priority, parse_priority, JoinMode, Priority, Task, TaskSummary, TaskTree, TaskTreeInput, Worker, PRIORITY_DEFAULT};
+use crate::types::{clamp_priority, parse_priority, JoinMode, Priority, Task, TaskTree, TaskTreeInput, Worker, PRIORITY_DEFAULT};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use std::collections::HashMap;
@@ -29,6 +29,47 @@ fn build_order_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String
     };
 
     format!("{} {}", field, order)
+}
+
+// =============================================================================
+// Junction table helpers for tag management
+// =============================================================================
+
+/// Sync task tags to the task_tags junction table.
+/// Replaces all existing tags for the task.
+fn sync_task_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result<()> {
+    conn.execute("DELETE FROM task_tags WHERE task_id = ?1", params![task_id])?;
+    for tag in tags {
+        conn.execute(
+            "INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)",
+            params![task_id, tag],
+        )?;
+    }
+    Ok(())
+}
+
+/// Sync needed tags (agent must have ALL) to the task_needed_tags junction table.
+fn sync_needed_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result<()> {
+    conn.execute("DELETE FROM task_needed_tags WHERE task_id = ?1", params![task_id])?;
+    for tag in tags {
+        conn.execute(
+            "INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)",
+            params![task_id, tag],
+        )?;
+    }
+    Ok(())
+}
+
+/// Sync wanted tags (agent must have ANY) to the task_wanted_tags junction table.
+fn sync_wanted_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result<()> {
+    conn.execute("DELETE FROM task_wanted_tags WHERE task_id = ?1", params![task_id])?;
+    for tag in tags {
+        conn.execute(
+            "INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)",
+            params![task_id, tag],
+        )?;
+    }
+    Ok(())
 }
 
 pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
@@ -205,6 +246,11 @@ impl Database {
                     now,
                 ],
             )?;
+
+            // Sync tags to junction tables
+            sync_task_tags(&tx, &task_id, &tags)?;
+            sync_needed_tags(&tx, &task_id, &agent_tags_all)?;
+            sync_wanted_tags(&tx, &task_id, &agent_tags_any)?;
 
             // Create 'contains' dependency if parent_id is provided
             if let Some(ref pid) = parent_id {
@@ -446,8 +492,9 @@ impl Database {
     /// - Transition to timed state = CLAIM (set owner, validate tags, check limit)
     /// - Transition from timed to non-timed = RELEASE (clear owner)
     /// - Transition to terminal = COMPLETE (check children, release file locks)
+    /// - With assignee = ASSIGN (set owner to assignee, transition to 'assigned' state)
     /// - Only the owner can update a claimed task (unless force=true)
-    /// 
+    ///
     /// Returns (task, unblocked, auto_advanced):
     /// - task: The updated task
     /// - unblocked: Task IDs that are now ready (all dependencies satisfied)
@@ -457,6 +504,7 @@ impl Database {
         &self,
         task_id: &str,
         agent_id: &str,
+        assignee: Option<&str>,
         title: Option<String>,
         description: Option<Option<String>>,
         status: Option<String>,
@@ -492,7 +540,12 @@ impl Database {
 
             let new_title = title.unwrap_or(task.title.clone());
             let new_description = description.unwrap_or(task.description.clone());
-            let new_status = status.unwrap_or(task.status.clone());
+            // If assignee is set but no explicit status, default to 'assigned' state
+            let new_status = if assignee.is_some() && status.is_none() {
+                "assigned".to_string()
+            } else {
+                status.unwrap_or(task.status.clone())
+            };
             let new_priority = priority.unwrap_or(task.priority);
             let new_points = points.unwrap_or(task.points);
             let new_tags = tags.unwrap_or(task.tags.clone());
@@ -531,6 +584,63 @@ impl Database {
 
             let mut new_owner: Option<String> = task.owner_agent.clone();
             let mut new_claimed_at: Option<i64> = task.claimed_at;
+
+            // ASSIGN: Push coordination - coordinator assigns task to another agent
+            // Sets owner without starting the timer (assigned state is untimed)
+            if let Some(target_agent) = assignee {
+                // Verify task is not already claimed (unless force)
+                if is_owned_by_other && !force {
+                    return Err(anyhow!(
+                        "Task is already claimed by agent '{}'. Use force=true to reassign.",
+                        current_owner.unwrap()
+                    ));
+                }
+
+                // Verify the assignee exists
+                let target = get_worker_internal(&tx, target_agent)?
+                    .ok_or_else(|| anyhow!("Assignee agent '{}' not found", target_agent))?;
+
+                // Check the assignee's claim limit
+                let assignee_claims = get_claim_count_internal(&tx, target_agent)?;
+                if !force && assignee_claims >= target.max_claims {
+                    return Err(anyhow!(
+                        "Assignee '{}' has reached claim limit ({})",
+                        target_agent,
+                        target.max_claims
+                    ));
+                }
+
+                // Check tag affinity for the assignee
+                if !task.agent_tags_all.is_empty() {
+                    for needed in &task.agent_tags_all {
+                        if !target.tags.contains(needed) {
+                            return Err(anyhow!(
+                                "Assignee '{}' missing required tag: {}",
+                                target_agent,
+                                needed
+                            ));
+                        }
+                    }
+                }
+
+                if !task.agent_tags_any.is_empty() {
+                    let has_any = task
+                        .agent_tags_any
+                        .iter()
+                        .any(|wanted| target.tags.contains(wanted));
+                    if !has_any {
+                        return Err(anyhow!(
+                            "Assignee '{}' has none of the wanted tags: {:?}",
+                            target_agent,
+                            task.agent_tags_any
+                        ));
+                    }
+                }
+
+                // Set ownership to the assignee
+                new_owner = Some(target_agent.to_string());
+                new_claimed_at = Some(now);
+            }
 
             // CLAIM: Transitioning to a timed state and need to take ownership
             // This handles: non-timed -> timed, OR timed (other owner) -> timed (force claim)
@@ -689,6 +799,17 @@ impl Database {
                 ],
             )?;
 
+            // Sync tags to junction tables if changed
+            if new_tags != task.tags {
+                sync_task_tags(&tx, task_id, &new_tags)?;
+            }
+            if new_needed_tags != task.agent_tags_all {
+                sync_needed_tags(&tx, task_id, &new_needed_tags)?;
+            }
+            if new_wanted_tags != task.agent_tags_any {
+                sync_wanted_tags(&tx, task_id, &new_wanted_tags)?;
+            }
+
             // Check for unblocked tasks if this task transitioned FROM blocking TO non-blocking
             let (unblocked, auto_advanced) = if status_changed {
                 let was_blocking = states_config.is_blocking_state(&task.status);
@@ -839,6 +960,7 @@ impl Database {
     }
 
     /// List tasks with optional filters.
+    /// Returns full Task objects. Excludes soft-deleted tasks.
     pub fn list_tasks(
         &self,
         status: Option<&str>,
@@ -847,11 +969,10 @@ impl Database {
         limit: Option<i32>,
         sort_by: Option<&str>,
         sort_order: Option<&str>,
-    ) -> Result<Vec<TaskSummary>> {
+    ) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             let mut sql = String::from(
-                "SELECT id, title, status, priority, owner_agent, points, current_thought
-                 FROM tasks t WHERE 1=1",
+                "SELECT t.* FROM tasks t WHERE t.deleted_at IS NULL",
             );
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -892,25 +1013,7 @@ impl Database {
 
             let mut stmt = conn.prepare(&sql)?;
             let tasks = stmt
-                .query_map(params_refs.as_slice(), |row| {
-                    let id: String = row.get(0)?;
-                    let title: String = row.get(1)?;
-                    let status: String = row.get(2)?;
-                    let priority: String = row.get(3)?;
-                    let owner_agent: Option<String> = row.get(4)?;
-                    let points: Option<i32> = row.get(5)?;
-                    let current_thought: Option<String> = row.get(6)?;
-
-                    Ok(TaskSummary {
-                        id,
-                        title,
-                        status,
-                        priority: parse_priority(&priority),
-                        owner_agent,
-                        points,
-                        current_thought,
-                    })
-                })?
+                .query_map(params_refs.as_slice(), parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();
 
@@ -1493,10 +1596,10 @@ impl Database {
         })
     }
 
-    /// Get all tasks.
+    /// Get all tasks. Excludes soft-deleted tasks.
     pub fn get_all_tasks(&self) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT * FROM tasks ORDER BY created_at")?;
+            let mut stmt = conn.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY created_at")?;
             let tasks = stmt
                 .query_map([], parse_task_row)?
                 .filter_map(|r| r.ok())
@@ -1519,18 +1622,18 @@ impl Database {
         })
     }
 
-    /// Get claimed tasks.
+    /// Get claimed tasks. Excludes soft-deleted tasks.
     pub fn get_claimed_tasks(&self, agent_id: Option<&str>) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             let tasks = if let Some(aid) = agent_id {
                 let mut stmt = conn
-                    .prepare("SELECT * FROM tasks WHERE owner_agent = ?1 ORDER BY claimed_at")?;
+                    .prepare("SELECT * FROM tasks WHERE owner_agent = ?1 AND deleted_at IS NULL ORDER BY claimed_at")?;
                 stmt.query_map(params![aid], parse_task_row)?
                     .filter_map(|r| r.ok())
                     .collect()
             } else {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM tasks WHERE owner_agent IS NOT NULL ORDER BY claimed_at",
+                    "SELECT * FROM tasks WHERE owner_agent IS NOT NULL AND deleted_at IS NULL ORDER BY claimed_at",
                 )?;
                 stmt.query_map([], parse_task_row)?
                     .filter_map(|r| r.ok())
@@ -1604,6 +1707,11 @@ fn create_tree_recursive(
 
         // Record initial state transition
         record_state_transition(conn, &task_id, initial_status, None, None, states_config)?;
+
+        // Sync tags to junction tables for indexed lookups
+        sync_task_tags(conn, &task_id, &tags)?;
+        sync_needed_tags(conn, &task_id, &agent_tags_all)?;
+        sync_wanted_tags(conn, &task_id, &agent_tags_any)?;
 
         task_id
     };

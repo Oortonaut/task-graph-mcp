@@ -776,6 +776,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("in_progress".to_string()),
                 None, None, None,
@@ -806,9 +807,10 @@ mod task_claiming_tests {
 
         // First claim via update
         db.update_task_unified(
-            &task.id,
-            &agent.id,
-            None, None,
+                &task.id,
+                &agent.id,
+                None, // assignee
+                None, None,
             Some("in_progress".to_string()),
             None, None, None,
             None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
@@ -824,6 +826,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("pending".to_string()),
                 None, None, None,
@@ -860,6 +863,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent2.id,
+                None, // assignee
                 None, None,
                 Some("in_progress".to_string()),
                 None, None, None,
@@ -891,9 +895,10 @@ mod task_claiming_tests {
 
         // Agent2 tries to claim without force - should fail
         let result = db.update_task_unified(
-            &task.id,
-            &agent2.id,
-            None, None,
+                &task.id,
+                &agent2.id,
+                None, // assignee
+                None, None,
             Some("in_progress".to_string()),
             None, None, None,
             None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
@@ -928,9 +933,10 @@ mod task_claiming_tests {
 
         // Update to claim should fail due to missing tag
         let result = db.update_task_unified(
-            &task.id,
-            &agent.id,
-            None, None,
+                &task.id,
+                &agent.id,
+                None, // assignee
+                None, None,
             Some("in_progress".to_string()),
             None, None, None,
             None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
@@ -962,6 +968,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("completed".to_string()),
                 None, None, None,
@@ -1049,6 +1056,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("in_progress".to_string()),
                 None, None, None,
@@ -1068,6 +1076,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("reviewing".to_string()),
                 None, None, None,
@@ -1082,6 +1091,16 @@ mod task_claiming_tests {
         assert_eq!(updated.status, "reviewing");
         assert_eq!(updated.owner_agent, Some(agent.id.clone())); // Still owned
         assert!(updated.claimed_at.is_some()); // Still has claimed_at
+
+        // Verify state history was recorded for both transitions
+        let history = db.get_task_state_history(&task.id).unwrap();
+        // Should have: pending (initial), in_progress, reviewing
+        assert!(history.len() >= 3, "Expected at least 3 history entries, got {}", history.len());
+
+        let states: Vec<&str> = history.iter().map(|e| e.event.as_str()).collect();
+        assert!(states.contains(&"pending"), "History should contain 'pending'");
+        assert!(states.contains(&"in_progress"), "History should contain 'in_progress'");
+        assert!(states.contains(&"reviewing"), "History should contain 'reviewing'");
     }
 
     #[test]
@@ -1106,6 +1125,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("in_progress".to_string()),
                 None, None, None,
@@ -1119,6 +1139,12 @@ mod task_claiming_tests {
 
         assert_eq!(updated.status, "in_progress");
         assert_eq!(updated.owner_agent, Some(agent.id.clone()));
+
+        // Verify no additional history was recorded (status didn't change)
+        let history = db.get_task_state_history(&task.id).unwrap();
+        // Should have: pending (initial), in_progress (from claim) - but NOT another in_progress
+        let in_progress_count = history.iter().filter(|e| e.event == "in_progress").count();
+        assert_eq!(in_progress_count, 1, "Should only have one in_progress entry, not duplicates");
     }
 
     #[test]
@@ -1138,6 +1164,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("failed".to_string()),
                 None, None, None,
@@ -1157,6 +1184,7 @@ mod task_claiming_tests {
             .update_task_unified(
                 &task.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("pending".to_string()),
                 None, None, None,
@@ -1171,6 +1199,17 @@ mod task_claiming_tests {
         assert_eq!(updated.status, "pending");
         assert!(updated.owner_agent.is_none()); // Still no owner
         assert!(updated.claimed_at.is_none());
+
+        // Verify state history was recorded for all transitions
+        let history = db.get_task_state_history(&task.id).unwrap();
+        // Should have: pending (initial), in_progress (claim), failed, pending
+        assert!(history.len() >= 4, "Expected at least 4 history entries, got {}", history.len());
+
+        let states: Vec<&str> = history.iter().map(|e| e.event.as_str()).collect();
+        assert!(states.contains(&"failed"), "History should contain 'failed'");
+        // Check we have pending twice (initial and after failed)
+        let pending_count = states.iter().filter(|&&s| s == "pending").count();
+        assert!(pending_count >= 2, "Should have at least 2 pending entries (initial + after failed)");
     }
 }
 
@@ -1821,6 +1860,7 @@ mod auto_advance_tests {
             .update_task_unified(
                 &task1.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("completed".to_string()),
                 None, None, None,
@@ -1888,6 +1928,7 @@ mod auto_advance_tests {
             .update_task_unified(
                 &task1.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("completed".to_string()),
                 None, None, None,
@@ -1939,6 +1980,7 @@ mod auto_advance_tests {
             .update_task_unified(
                 &task1.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("completed".to_string()),
                 None, None, None,
@@ -1960,6 +2002,7 @@ mod auto_advance_tests {
             .update_task_unified(
                 &task3.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("completed".to_string()),
                 None, None, None,
@@ -2004,6 +2047,7 @@ mod auto_advance_tests {
             .update_task_unified(
                 &task1.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("completed".to_string()),
                 None, None, None,
@@ -2049,6 +2093,7 @@ mod auto_advance_tests {
             .update_task_unified(
                 &task1.id,
                 &agent.id,
+                None, // assignee
                 None, None,
                 Some("completed".to_string()),
                 None, None, None,

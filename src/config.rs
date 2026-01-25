@@ -357,7 +357,7 @@ fn default_disconnect_state() -> String {
 }
 
 fn default_blocking_states() -> Vec<String> {
-    vec!["pending".to_string(), "in_progress".to_string()]
+    vec!["pending".to_string(), "assigned".to_string(), "in_progress".to_string()]
 }
 
 fn default_state_definitions() -> HashMap<String, StateDefinition> {
@@ -366,7 +366,15 @@ fn default_state_definitions() -> HashMap<String, StateDefinition> {
     defs.insert(
         "pending".to_string(),
         StateDefinition {
-            exits: vec!["in_progress".to_string(), "cancelled".to_string()],
+            exits: vec!["assigned".to_string(), "in_progress".to_string(), "cancelled".to_string()],
+            timed: false,
+        },
+    );
+
+    defs.insert(
+        "assigned".to_string(),
+        StateDefinition {
+            exits: vec!["in_progress".to_string(), "pending".to_string(), "cancelled".to_string()],
             timed: false,
         },
     );

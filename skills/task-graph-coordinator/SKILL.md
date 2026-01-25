@@ -221,16 +221,107 @@ claim(agent=other_agent, task=stuck_task, force=true)
 
 ---
 
-## Multi-Agent Patterns
+## Coordination Models: Push vs Pull
 
-### Hub and Spoke
+Task-graph supports two coordination models. Choose based on your workflow:
+
+### Pull Model (Default)
+
+Workers self-select tasks from the pool. Good for:
+- Autonomous agents with clear capabilities
+- Dynamic workloads where capacity varies
+- Minimal coordinator overhead
 
 ```
-Coordinator creates tasks
+┌─────────────────────────────────────────────────────────────┐
+│ PULL: Workers find and claim their own work                 │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Coordinator                    Workers                     │
+│  ───────────                    ───────                     │
+│  1. create_tree(...)            list_tasks(ready=true)      │
+│  2. Monitor progress            claim(task)                 │
+│                                 ... do work ...             │
+│                                 complete(task)              │
+│                                                             │
+│  Tasks use agent_tags_all/any   Workers register with tags  │
+│  to restrict who CAN claim      and claim matching tasks    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Push Model (Assignment)
+
+Coordinator explicitly assigns tasks to specific workers. Good for:
+- Specific expertise requirements beyond tags
+- Load balancing decisions
+- Time-sensitive coordination
+- Workers that need direction
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ PUSH: Coordinator assigns tasks to specific workers         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Coordinator                    Worker                      │
+│  ───────────                    ──────                      │
+│  1. create(task)                                            │
+│  2. update(task, assignee=      list_tasks(owner=self)      │
+│            worker_id)           → sees assigned tasks       │
+│     → task.status = "assigned"                              │
+│     → task.owner = worker_id    claim(task) to start        │
+│                                 → status = "in_progress"    │
+│  3. Monitor progress            ... do work ...             │
+│                                 complete(task)              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Push Assignment Example
+
+```
+# Coordinator assigns task to specific worker
+update(
+  worker_id=coordinator_id,
+  task=task_id,
+  assignee="rust-expert-agent"   # ← Push to this worker
+)
+# Task now has:
+#   status: "assigned"
+#   owner_agent: "rust-expert-agent"
+
+# Worker sees and starts their assigned work
+list_tasks(owner="rust-expert-agent")  # See assigned tasks
+claim(worker_id="rust-expert-agent", task=task_id)  # Start work
+```
+
+### Hybrid Approach
+
+Combine both models for nuanced control:
+- Create tasks with tags for pool eligibility (pull)
+- Assign high-priority/specialized tasks directly (push)
+- Workers check both assigned tasks AND ready pool
+
+---
+
+## Multi-Agent Patterns
+
+### Hub and Spoke (Pull)
+
+```
+Coordinator creates tasks with tags
      │
-     ├──→ Worker A claims matching tasks
-     ├──→ Worker B claims matching tasks
-     └──→ Worker C claims matching tasks
+     ├──→ Worker A claims matching tasks (pull)
+     ├──→ Worker B claims matching tasks (pull)
+     └──→ Worker C claims matching tasks (pull)
+```
+
+### Directed Teams (Push)
+
+```
+Coordinator assigns specific tasks
+     │
+     ├──→ Worker A receives assigned tasks (push)
+     ├──→ Worker B receives assigned tasks (push)
+     └──→ Worker C receives assigned tasks (push)
 ```
 
 ### Hierarchical
@@ -238,11 +329,9 @@ Coordinator creates tasks
 ```
 Lead Coordinator
      │
-     ├──→ Sub-Coordinator (Backend)
-     │         └──→ Backend Workers
+     ├──→ Sub-Coordinator (Backend) → assigns to Backend Workers
      │
-     └──→ Sub-Coordinator (Frontend)
-               └──→ Frontend Workers
+     └──→ Sub-Coordinator (Frontend) → assigns to Frontend Workers
 ```
 
 ### Peer Review
