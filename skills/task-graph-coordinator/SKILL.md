@@ -211,12 +211,44 @@ get(task=parent_id, children=true, format="markdown")
 update(agent=my_id, task=task_id, priority="critical")
 
 # Unblock manually (if blocker is obsolete)
-unblock(blocker=old_task, blocked=waiting_task)
+unlink(from=old_task, to=waiting_task, type="blocks")
 
 # Reassign stuck task
-release(agent=my_id, task=stuck_task, state="pending")
+update(agent=my_id, task=stuck_task, state="pending")
 # Or force-claim for another agent
 claim(agent=other_agent, task=stuck_task, force=true)
+```
+
+### Stale Worker Recovery
+
+When a worker disconnects unexpectedly, their claimed tasks remain in-progress:
+
+```
+# 1. Check for orphaned claims
+list_tasks(status="in_progress", format="markdown")
+list_agents(format="markdown")
+# Compare: tasks in_progress but owner not in agents list
+
+# 2. Release orphaned tasks back to pool
+update(agent=coordinator_id, task=orphaned_task, state="pending", force=true)
+
+# 3. For tasks needing reassignment to specific worker
+update(agent=coordinator_id, task=task_id, assignee="new-worker-id", force=true)
+```
+
+### Reorganizing Task Trees
+
+When scope changes, use `relink` to atomically move children between parents:
+
+```
+# Move children C, D from "Backend" to new "Database" sibling
+relink(
+  prev_from="backend",
+  prev_to=["child-c", "child-d"],
+  from="database",
+  to=["child-c", "child-d"],
+  type="contains"
+)
 ```
 
 ---

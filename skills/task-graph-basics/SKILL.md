@@ -101,8 +101,9 @@ Every worker MUST connect before using task-graph tools:
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `block` | Add dependency | `blocker`, `blocked`, `type` |
-| `unblock` | Remove dependency | `blocker`, `blocked`, `type` |
+| `link` | Add dependency | `from`, `to`, `type` |
+| `unlink` | Remove dependency | `from`, `to`, `type` |
+| `relink` | Atomic move dependencies | `prev_from`, `prev_to`, `from`, `to`, `type` |
 
 **Dependency types:**
 - `blocks` - blocker must complete before blocked starts

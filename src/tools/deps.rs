@@ -79,6 +79,51 @@ pub fn get_tools(prompts: &Prompts, deps_config: &DependenciesConfig) -> Vec<Too
             vec!["from", "to"],
             prompts,
         ),
+        make_tool_with_prompts(
+            "relink",
+            "Atomically move dependencies: unlinks prev_from→prev_to then links from→to in a single transaction. Use for moving children between parents.",
+            json!({
+                "agent": {
+                    "type": "string",
+                    "description": "Agent ID performing the relink"
+                },
+                "prev_from": {
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "array", "items": { "type": "string" } }
+                    ],
+                    "description": "Previous source task ID(s) to unlink from"
+                },
+                "prev_to": {
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "array", "items": { "type": "string" } }
+                    ],
+                    "description": "Previous target task ID(s) to unlink"
+                },
+                "from": {
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "array", "items": { "type": "string" } }
+                    ],
+                    "description": "New source task ID(s) to link"
+                },
+                "to": {
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "array", "items": { "type": "string" } }
+                    ],
+                    "description": "New target task ID(s) to link"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": dep_types,
+                    "description": "Dependency type (default: 'contains')"
+                }
+            }),
+            vec!["prev_from", "prev_to", "from", "to"],
+            prompts,
+        ),
     ]
 }
 
@@ -269,4 +314,97 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
         "removed_count": removed.len(),
         "errors": errors
     }))
+}
+
+
+pub fn relink(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Result<Value> {
+    // Agent parameter is optional - for tracking/audit purposes
+    let _agent_id = get_string(&args, "agent");
+    
+    // Parse prev_from: string or array of strings
+    let prev_from_ids: Vec<String> = if let Some(arr) = args.get("prev_from").and_then(|v| v.as_array()) {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    } else if let Some(id) = get_string(&args, "prev_from") {
+        vec![id]
+    } else {
+        return Err(ToolError::missing_field("prev_from").into());
+    };
+
+    // Parse prev_to: string or array of strings
+    let prev_to_ids: Vec<String> = if let Some(arr) = args.get("prev_to").and_then(|v| v.as_array()) {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    } else if let Some(id) = get_string(&args, "prev_to") {
+        vec![id]
+    } else {
+        return Err(ToolError::missing_field("prev_to").into());
+    };
+
+    // Parse from: string or array of strings
+    let from_ids: Vec<String> = if let Some(arr) = args.get("from").and_then(|v| v.as_array()) {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    } else if let Some(id) = get_string(&args, "from") {
+        vec![id]
+    } else {
+        return Err(ToolError::missing_field("from").into());
+    };
+
+    // Parse to: string or array of strings
+    let to_ids: Vec<String> = if let Some(arr) = args.get("to").and_then(|v| v.as_array()) {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    } else if let Some(id) = get_string(&args, "to") {
+        vec![id]
+    } else {
+        return Err(ToolError::missing_field("to").into());
+    };
+
+    if prev_from_ids.is_empty() {
+        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'prev_from' task ID must be provided").into());
+    }
+    if prev_to_ids.is_empty() {
+        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'prev_to' task ID must be provided").into());
+    }
+    if from_ids.is_empty() {
+        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'from' task ID must be provided").into());
+    }
+    if to_ids.is_empty() {
+        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'to' task ID must be provided").into());
+    }
+
+    // Default to 'contains' for relink (moving children between parents)
+    let dep_type = get_string(&args, "type").unwrap_or_else(|| "contains".to_string());
+
+    match db.relink(&prev_from_ids, &prev_to_ids, &from_ids, &to_ids, &dep_type, deps_config) {
+        Ok(result) => {
+            let unlinked: Vec<Value> = result.unlinked.iter()
+                .map(|(from, to)| json!({"from": from, "to": to}))
+                .collect();
+            let linked: Vec<Value> = result.linked.iter()
+                .map(|(from, to)| json!({"from": from, "to": to}))
+                .collect();
+
+            Ok(json!({
+                "success": true,
+                "unlinked": unlinked,
+                "unlinked_count": unlinked.len(),
+                "linked": linked,
+                "linked_count": linked.len(),
+                "type": dep_type
+            }))
+        }
+        Err(e) => {
+            Ok(json!({
+                "success": false,
+                "error": e.to_string(),
+                "type": dep_type
+            }))
+        }
+    }
 }

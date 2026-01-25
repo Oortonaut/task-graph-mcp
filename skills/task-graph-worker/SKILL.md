@@ -303,6 +303,36 @@ claim(worker_id=worker_id, task=task_2)
 
 ---
 
+## Scope Expansion: Moving Children
+
+When a task's scope expands, you may need to create a sibling task and move some children to it. Use `relink` for atomic dependency updates:
+
+```
+# Scenario: Task "Backend" has children A, B, C, D
+# Need to split: keep A, B in Backend; move C, D to new "Database" sibling
+
+# 1. Create new sibling task
+create(title="Database", parent=grandparent_id)
+→ new_task_id
+
+# 2. Atomic move - unlinks from old parent, links to new parent
+relink(
+  prev_from="backend-task-id",
+  prev_to=["child-c", "child-d"],
+  from=new_task_id,
+  to=["child-c", "child-d"],
+  type="contains"
+)
+# Result: Backend has A, B; Database has C, D
+```
+
+**Why relink vs unlink+link?**
+- Single transaction: either all changes succeed or none do
+- No intermediate state where children are orphaned
+- Validates constraints (single parent, no cycles) before committing
+
+---
+
 ## Finding Tasks with Search
 
 Use `search` for powerful full-text search across tasks and attachments:
