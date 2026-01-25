@@ -51,11 +51,11 @@ cargo build --release
 ```
 
 ```
-# Agent workflow
+# Worker workflow
 connect(worker_id="worker-1", tags=["rust","backend"])  → worker_id
-list_tasks(ready=true, agent="worker-1")                → claimable work
+list_tasks(ready=true, worker_id="worker-1")            → claimable work
 claim(worker_id="worker-1", task="task-123")            → you own it
-thinking(agent="worker-1", thought="Implementing...")   → visible to others
+thinking(worker_id="worker-1", thought="Implementing...") → visible to others
 update(worker_id="worker-1", task="task-123",           → done, deps unblock
        status="completed",
        attachments=[{name:"commit", content:"abc123"}])
@@ -245,32 +245,32 @@ Environment variables:
 
 ## MCP Tools
 
-### Agent Management
+### Worker Management
 
 | Tool | Description |
 |------|-------------|
-| `connect(worker_id?: str, tags?: str[], force?: bool = false)` | Register a worker session. Returns `worker_id`. Use `force` to reconnect a stuck worker. |
-| `disconnect(worker_id: str, final_status?: str = "pending")` | Unregister worker and release all claims/locks. |
-| `list_agents(tags?: str[], file?: str, task?: str, depth?: int)` | List connected workers with filters. |
+| `connect(worker_id?: worker_str, tags?: str[], force?: bool = false)` | Register a worker session. Returns `worker_id`. Use `force` to reconnect a stuck worker. |
+| `disconnect(worker_id: worker_str, final_status?: status_str = "pending")` | Unregister worker and release all claims/locks. |
+| `list_workers(tags?: str[], file?: filename, task?: task_str, depth?: int)` | List connected workers with filters. |
 
 ### Task CRUD
 
 | Tool | Description |
 |------|-------------|
-| `create(description: str, id?: str, parent?: task_id, priority?: int = 5, points?: int, time_estimate_ms?: int, tags?: str[])` | Create a task. Priority 0-10 (higher = more important). |
-| `create_tree(tree: object, parent?: task_id)` | Create nested task tree. Tree nodes have `title`, `children[]`, `join_mode` (then/also), etc. |
-| `get(task: task_id)` | Get task by ID with attachment metadata and counts. |
-| `list_tasks(status?: str[], ready?: bool, blocked?: bool, claimed?: bool, owner?: str, parent?: str, agent?: str, tags_any?: str[], tags_all?: str[], sort_by?: str, sort_order?: str, limit?: int)` | Query tasks with filters. Use `ready=true` for claimable tasks. |
-| `update(worker_id: str, task: task_id, status?: str, assignee?: str, title?: str, description?: str, priority?: int, points?: int, tags?: str[], needed_tags?: str[], wanted_tags?: str[], time_estimate_ms?: int, reason?: str, force?: bool, attachments?: object[])` | Update task. Status changes auto-manage ownership. Include `attachments` to record commits/changelists. |
-| `delete(worker_id: str, task: task_id, cascade?: bool, reason?: str, obliterate?: bool, force?: bool)` | Delete task. Soft delete by default; `obliterate=true` for permanent. |
-| `scan(task: task_id, before?: int, after?: int, above?: int, below?: int)` | Scan task graph in multiple directions. Depth: 0=none, N=levels, -1=all. |
-| `search(query: str, limit?: int = 20, include_attachments?: bool, status_filter?: str)` | FTS5 search. Supports phrases, prefix*, AND/OR/NOT, title:word. |
+| `create(description: str, id?: task_str, parent?: task_str, priority?: int = 5, points?: int, time_estimate_ms?: int, tags?: str[])` | Create a task. Priority 0-10 (higher = more important). |
+| `create_tree(tree: object, parent?: task_str)` | Create nested task tree. Tree nodes have `title`, `children[]`, `join_mode` (then/also), etc. |
+| `get(task: task_str)` | Get task by ID with attachment metadata and counts. |
+| `list_tasks(status?: status_str[], ready?: bool, blocked?: bool, claimed?: bool, owner?: worker_str, parent?: task_str, worker_id?: worker_str, tags_any?: str[], tags_all?: str[], sort_by?: str, sort_order?: str, limit?: int)` | Query tasks with filters. Use `ready=true` for claimable tasks. |
+| `update(worker_id: worker_str, task: task_str, status?: status_str, assignee?: worker_str, title?: str, description?: str, priority?: int, points?: int, tags?: str[], needed_tags?: str[], wanted_tags?: str[], time_estimate_ms?: int, reason?: str, force?: bool, attachments?: object[])` | Update task. Status changes auto-manage ownership. Include `attachments` to record commits/changelists. |
+| `delete(worker_id: worker_str, task: task_str, cascade?: bool, reason?: str, obliterate?: bool, force?: bool)` | Delete task. Soft delete by default; `obliterate=true` for permanent. |
+| `scan(task: task_str, before?: int, after?: int, above?: int, below?: int)` | Scan task graph in multiple directions. Depth: 0=none, N=levels, -1=all. |
+| `search(query: str, limit?: int = 20, include_attachments?: bool, status_filter?: status_str)` | FTS5 search. Supports phrases, prefix*, AND/OR/NOT, title:word. |
 
 ### Task Claiming
 
 | Tool | Description |
 |------|-------------|
-| `claim(worker_id: str, task: task_id, force?: bool)` | Claim a task. Fails if deps unsatisfied, at limit, or lacks tags. Use `force` to steal. |
+| `claim(worker_id: worker_str, task: task_str, force?: bool)` | Claim a task. Fails if deps unsatisfied, at limit, or lacks tags. Use `force` to steal. |
 
 **Note**: Release via `update(status="pending")`. Complete via `update(status="completed")`. Status changes auto-manage ownership.
 
@@ -278,36 +278,36 @@ Environment variables:
 
 | Tool | Description |
 |------|-------------|
-| `link(from: task_id\|task_id[], to: task_id\|task_id[], type?: str = "blocks")` | Create dependencies. Types: blocks, follows, contains, duplicate, see-also. |
-| `unlink(from: task_id\|"*", to: task_id\|"*", type?: str)` | Remove dependencies. Use `*` as wildcard. |
-| `relink(prev_from: task_id[], prev_to: task_id[], from: task_id[], to: task_id[], type?: str = "contains")` | Atomically move dependencies (unlink then link). |
+| `link(from: task_str\|task_str[], to: task_str\|task_str[], type?: dep_str = "blocks")` | Create dependencies. Types: blocks, follows, contains, duplicate, see-also. |
+| `unlink(from: task_str\|"*", to: task_str\|"*", type?: dep_str)` | Remove dependencies. Use `*` as wildcard. |
+| `relink(prev_from: task_str[], prev_to: task_str[], from: task_str[], to: task_str[], type?: dep_str = "contains")` | Atomically move dependencies (unlink then link). |
 
 ### Tracking
 
 | Tool | Description |
 |------|-------------|
-| `thinking(agent: str, thought: str, tasks?: task_id[])` | Broadcast live status. Visible to other agents. Refreshes heartbeat. |
-| `task_history(task: task_id, states?: str[])` | Get status transition history with time tracking. |
-| `project_history(from?: str, to?: str, states?: str[], limit?: int = 100)` | Project-wide history with date range filters. |
-| `log_metrics(agent: str, task: task_id, cost_usd?: float, values?: int[8], user_metrics?: object)` | Log metrics (aggregated). |
-| `get_metrics(task: task_id\|task_id[])` | Get metrics for task(s). |
+| `thinking(worker_id: worker_str, thought: str, tasks?: task_str[])` | Broadcast live status. Visible to other workers. Refreshes heartbeat. |
+| `task_history(task: task_str, states?: status_str[])` | Get status transition history with time tracking. |
+| `project_history(from?: datetime_str, to?: datetime_str, states?: status_str[], limit?: int = 100)` | Project-wide history with date range filters. |
+| `log_metrics(worker_id: worker_str, task: task_str, cost_usd?: float, values?: int[8], user_metrics?: object)` | Log metrics (aggregated). |
+| `get_metrics(task: task_str\|task_str[])` | Get metrics for task(s). |
 
 ### File Coordination
 
 | Tool | Description |
 |------|-------------|
-| `mark_file(agent: str, file: str\|str[], task?: task_id, reason?: str)` | Mark file(s) to signal intent. Advisory, non-blocking. |
-| `unmark_file(agent: str, file?: str\|str[]\|"*", task?: task_id, reason?: str)` | Remove marks. Use `*` for all. |
-| `list_marks(files?: str[], agent?: str, task?: task_id)` | Get current file marks. |
-| `mark_updates(agent: str)` | Poll for mark changes since last call. |
+| `mark_file(worker_id: worker_str, file: filename\|filename[], task?: task_str, reason?: str)` | Mark file(s) to signal intent. Advisory, non-blocking. |
+| `unmark_file(worker_id: worker_str, file?: filename\|filename[]\|"*", task?: task_str, reason?: str)` | Remove marks. Use `*` for all. |
+| `list_marks(files?: filename[], worker_id?: worker_str, task?: task_str)` | Get current file marks. |
+| `mark_updates(worker_id: worker_str)` | Poll for mark changes since last call. |
 
 ### Attachments
 
 | Tool | Description |
 |------|-------------|
-| `attach(task: task_id\|task_id[], name: str, content?: str, mime?: str, file?: str, store_as_file?: bool, mode?: str)` | Add attachment. Use `file` for reference, `store_as_file` for media storage. |
-| `attachments(task: task_id, name?: str, mime?: str)` | Get attachment metadata. Glob patterns supported for name. |
-| `detach(agent: str, task: task_id, name: str, delete_file?: bool)` | Delete attachment by name. |
+| `attach(task: task_str\|task_str[], name: str, content?: str, mime?: mime_str, file?: filename, store_as_file?: bool, mode?: str)` | Add attachment. Use `file` for reference, `store_as_file` for media storage. |
+| `attachments(task: task_str, name?: str, mime?: mime_str)` | Get attachment metadata. Glob patterns supported for name. |
+| `detach(worker_id: worker_str, task: task_str, name: str, delete_file?: bool)` | Delete attachment by name. |
 
 ### Advanced
 
@@ -323,10 +323,10 @@ Environment variables:
 | `tasks://ready` | Tasks ready to claim |
 | `tasks://blocked` | Tasks blocked by dependencies |
 | `tasks://claimed` | All claimed tasks |
-| `tasks://agent/{id}` | Tasks owned by an agent |
+| `tasks://worker/{id}` | Tasks owned by a worker |
 | `tasks://tree/{id}` | Task with all descendants |
 | `files://marks` | All file marks |
-| `agents://all` | Registered agents |
+| `workers://all` | Registered workers |
 | `plan://acp` | ACP-compatible plan export |
 | `stats://summary` | Aggregate statistics |
 
@@ -373,13 +373,13 @@ Tasks can specify required capabilities with a non-empty list. Use either for on
 Agents can coordinate file edits using advisory marks with change tracking:
 
 ```
-Agent A: connect() -> "agent-a"
-Agent A: mark_file("agent-a", "src/main.rs", "refactoring")
-Agent B: connect() -> "agent-b"
-Agent B: mark_updates("agent-b", ["src/main.rs"]) -> sees agent-a's mark
-Agent A: unmark_file("agent-a", "src/main.rs", "ready for review")
-Agent B: mark_updates("agent-b") -> sees removal with reason
-Agent B: mark_file("agent-b", "src/main.rs", "adding tests")
+Worker A: connect() -> "worker-a"
+Worker A: mark_file("worker-a", "src/main.rs", "refactoring")
+Worker B: connect() -> "worker-b"
+Worker B: mark_updates("worker-b") -> sees worker-a's mark
+Worker A: unmark_file("worker-a", "src/main.rs", "ready for review")
+Worker B: mark_updates("worker-b") -> sees removal with reason
+Worker B: mark_file("worker-b", "src/main.rs", "adding tests")
 ```
 
 ## Architecture
@@ -405,7 +405,7 @@ Agent B: mark_file("agent-b", "src/main.rs", "adding tests")
                   └─────────────────┘
 ```
 
-- **Transport**: Stdio — each agent spawns its own server process
+- **Transport**: Stdio — each worker spawns its own server process
 - **Database**: SQLite with WAL mode for concurrent access across processes
 - **Deployment**: Single binary, no external dependencies, works offline
 
