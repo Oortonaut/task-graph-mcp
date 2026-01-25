@@ -1369,6 +1369,71 @@ fn get_task_by_id_internal(conn: &Connection, task_id: &str) -> Result<Option<Ta
     Ok(task)
 }
 
+
+/// Get the IDs of tasks that block a given task from starting (unsatisfied dependencies).
+/// A task blocks starting if it has a start-blocking dependency type and is in a blocking state.
+/// This is a transaction-safe version for use within existing transactions.
+pub(crate) fn get_unsatisfied_start_blockers_in_tx(
+    conn: &Connection,
+    task_id: &str,
+    states_config: &StatesConfig,
+    deps_config: &DependenciesConfig,
+) -> Result<Vec<String>> {
+    let start_blocking_types = deps_config.start_blocking_types();
+    if start_blocking_types.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Build IN clause from blocking_states
+    let state_placeholders: Vec<String> = states_config
+        .blocking_states
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 2))
+        .collect();
+    let state_clause = state_placeholders.join(", ");
+
+    // Build IN clause from types
+    let type_start = states_config.blocking_states.len() + 2;
+    let type_placeholders: Vec<String> = start_blocking_types
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", type_start + i))
+        .collect();
+    let type_clause = type_placeholders.join(", ");
+
+    let sql = format!(
+        "SELECT blocker.id FROM dependencies d
+         INNER JOIN tasks blocker ON d.from_task_id = blocker.id
+         WHERE d.to_task_id = ?1 
+         AND d.dep_type IN ({})
+         AND blocker.status IN ({})",
+        type_clause, state_clause
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    params_vec.push(Box::new(task_id.to_string()));
+    for state in &states_config.blocking_states {
+        params_vec.push(Box::new(state.clone()));
+    }
+    for t in &start_blocking_types {
+        params_vec.push(Box::new(t.to_string()));
+    }
+    let params_refs: Vec<&dyn rusqlite::ToSql> =
+        params_vec.iter().map(|b| b.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let blockers = stmt
+        .query_map(params_refs.as_slice(), |row| {
+            let id: String = row.get(0)?;
+            Ok(id)
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(blockers)
+}
+
 /// Propagate unblock effects when a task transitions out of a blocking state.
 /// This is called after a task completes to find newly unblocked tasks and
 /// optionally auto-advance them.

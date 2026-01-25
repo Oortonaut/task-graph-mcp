@@ -289,7 +289,7 @@ Environment variables:
 | `thinking(worker_id: worker_str, thought: str, tasks?: task_str[])` | Broadcast live status. Visible to other workers. Refreshes heartbeat. |
 | `task_history(task: task_str, states?: status_str[])` | Get status transition history with time tracking. |
 | `project_history(from?: datetime_str, to?: datetime_str, states?: status_str[], limit?: int = 100)` | Project-wide history with date range filters. |
-| `log_metrics(worker_id: worker_str, task: task_str, cost_usd?: float, values?: int[8], user_metrics?: object)` | Log metrics (aggregated). |
+| `log_metrics(worker_id: worker_str, task: task_str, cost_usd?: float, values?: int[8])` | Log metrics (aggregated). |
 | `get_metrics(task: task_str\|task_str[])` | Get metrics for task(s). |
 
 ### File Coordination

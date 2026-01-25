@@ -133,7 +133,7 @@ impl Database {
 
             if mime_pattern.is_some() {
                 let idx = if name_like.is_some() { 3 } else { 2 };
-                sql.push_str(&format!(" AND mime_type LIKE ?{} ESCAPE '\\\\'", idx));
+                sql.push_str(&format!(" AND mime_type LIKE ?{} ESCAPE '\\'", idx));
             }
 
             sql.push_str(" ORDER BY order_index, created_at");

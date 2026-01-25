@@ -332,9 +332,9 @@ pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
     let points = get_i32(&args, "points");
     let time_estimate_ms = get_i64(&args, "time_estimate_ms");
     let tags = get_string_array(&args, "tags");
+    let needed_tags = get_string_array(&args, "needed_tags");
+    let wanted_tags = get_string_array(&args, "wanted_tags");
 
-    // Deferred: agent_tags_all and agent_tags_any are not exposed in the API for now
-    // They can still be set via update or task tree
     let task = db.create_task(
         id,
         description,
@@ -342,8 +342,8 @@ pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
         priority,
         points,
         time_estimate_ms,
-        None, // agent_tags_all - deferred
-        None, // agent_tags_any - deferred
+        needed_tags,
+        wanted_tags,
         tags,
         states_config,
     )?;

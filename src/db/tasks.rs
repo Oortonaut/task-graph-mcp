@@ -6,7 +6,6 @@ use crate::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
 use crate::types::{clamp_priority, parse_priority, JoinMode, Priority, Task, TaskTree, TaskTreeInput, Worker, PRIORITY_DEFAULT};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Build an ORDER BY clause from sort_by and sort_order parameters.
@@ -102,7 +101,6 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let metric_5: i64 = row.get("metric_5")?;
     let metric_6: i64 = row.get("metric_6")?;
     let metric_7: i64 = row.get("metric_7")?;
-    let user_metrics_json: Option<String> = row.get("user_metrics")?;
 
     let created_at: i64 = row.get("created_at")?;
     let updated_at: i64 = row.get("updated_at")?;
@@ -132,7 +130,6 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         current_thought,
         cost_usd,
         metrics: [metric_0, metric_1, metric_2, metric_3, metric_4, metric_5, metric_6, metric_7],
-        user_metrics: user_metrics_json.map(|s| serde_json::from_str(&s).unwrap_or_default()),
         created_at,
         updated_at,
     })
@@ -271,7 +268,6 @@ impl Database {
                 current_thought: None,
                 cost_usd: 0.0,
                 metrics: [0; 8],
-                user_metrics: None,
                 created_at: now,
                 updated_at: now,
             })
@@ -1079,7 +1075,6 @@ impl Database {
         task_id: &str,
         cost_usd: Option<f64>,
         values: &[i64],
-        user_metrics: Option<HashMap<String, serde_json::Value>>,
     ) -> Result<Task> {
         let now = now_ms();
 
@@ -1095,27 +1090,12 @@ impl Database {
 
             let new_cost_usd = task.cost_usd + cost_usd.unwrap_or(0.0);
 
-            // Merge user_metrics
-            let new_user_metrics = if let Some(new_mets) = user_metrics {
-                let mut merged = task.user_metrics.clone().unwrap_or_default();
-                for (k, v) in new_mets {
-                    merged.insert(k, v);
-                }
-                Some(merged)
-            } else {
-                task.user_metrics.clone()
-            };
-
-            let user_metrics_json = new_user_metrics
-                .as_ref()
-                .map(|m| serde_json::to_string(m).unwrap());
-
             conn.execute(
                 "UPDATE tasks SET
                     metric_0 = ?1, metric_1 = ?2, metric_2 = ?3, metric_3 = ?4,
                     metric_4 = ?5, metric_5 = ?6, metric_6 = ?7, metric_7 = ?8,
-                    cost_usd = ?9, user_metrics = ?10, updated_at = ?11
-                WHERE id = ?12",
+                    cost_usd = ?9, updated_at = ?10
+                WHERE id = ?11",
                 params![
                     new_metrics[0],
                     new_metrics[1],
@@ -1126,7 +1106,6 @@ impl Database {
                     new_metrics[6],
                     new_metrics[7],
                     new_cost_usd,
-                    user_metrics_json,
                     now,
                     task_id,
                 ],
@@ -1135,7 +1114,6 @@ impl Database {
             Ok(Task {
                 cost_usd: new_cost_usd,
                 metrics: new_metrics,
-                user_metrics: new_user_metrics,
                 updated_at: now,
                 ..task
             })

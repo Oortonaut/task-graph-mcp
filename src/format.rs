@@ -460,7 +460,6 @@ mod tests {
             current_thought: None,
             cost_usd: 0.0,
             metrics: [0; 8],
-            user_metrics: None,
             created_at: 0,
             updated_at: 0,
         }

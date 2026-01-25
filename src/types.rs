@@ -74,7 +74,6 @@ pub struct Task {
     pub cost_usd: f64,
     /// Fixed array of 8 integer metrics [metric_0..metric_7], aggregated on update
     pub metrics: [i64; 8],
-    pub user_metrics: Option<HashMap<String, serde_json::Value>>,
 
     pub created_at: i64,
     pub updated_at: i64,

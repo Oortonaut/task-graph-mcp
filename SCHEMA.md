@@ -59,7 +59,6 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 | `tokens_image` | INTEGER | NOT NULL DEFAULT 0 | Image tokens processed |
 | `tokens_audio` | INTEGER | NOT NULL DEFAULT 0 | Audio tokens processed |
 | `cost_usd` | REAL | NOT NULL DEFAULT 0.0 | Total cost in USD |
-| `user_metrics` | TEXT | | JSON object for custom metrics |
 | `created_at` | INTEGER | NOT NULL | Unix timestamp of creation |
 | `updated_at` | INTEGER | NOT NULL | Unix timestamp of last update |
 
@@ -384,7 +383,7 @@ tasks >──────< tasks (via dependencies table, DAG)
 ## Notes
 
 - All timestamps are Unix epoch integers (seconds)
-- JSON fields (`tags`, `needed_tags`, `wanted_tags`, `user_metrics`) are stored as TEXT
+- JSON fields (`tags`, `needed_tags`, `wanted_tags`) are stored as TEXT
 - File paths in `file_locks` and `claim_sequence` are relative to the project root
 - Attachment `file_path` references files in `.task-graph/media/` directory
 - Foreign keys use `ON DELETE CASCADE` for automatic cleanup

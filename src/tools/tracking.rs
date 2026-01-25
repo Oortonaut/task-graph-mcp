@@ -99,10 +99,6 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "array",
                     "items": { "type": "integer" },
                     "description": "Array of up to 8 integer metric values [metric_0..metric_7] to aggregate"
-                },
-                "user_metrics": {
-                    "type": "object",
-                    "description": "Custom metrics to merge"
                 }
             }),
             vec!["agent", "task"],
@@ -307,15 +303,10 @@ pub fn log_metrics(db: &Database, args: Value) -> Result<Value> {
         })
         .unwrap_or_default();
 
-    let user_metrics: Option<HashMap<String, serde_json::Value>> = args
-        .get("user_metrics")
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
-
     let task = db.log_metrics(
         &task_id,
         cost_usd,
         &values,
-        user_metrics,
     )?;
 
     Ok(json!({
@@ -491,7 +482,6 @@ pub fn get_metrics(db: &Database, args: Value) -> Result<Value> {
     // Get metrics for all specified tasks
     let mut total_cost_usd: f64 = 0.0;
     let mut total_metrics: [i64; 8] = [0; 8];
-    let mut user_metrics_combined: HashMap<String, serde_json::Value> = HashMap::new();
     let mut found_count = 0;
 
     for task_id in &task_ids {
@@ -499,12 +489,6 @@ pub fn get_metrics(db: &Database, args: Value) -> Result<Value> {
             total_cost_usd += task.cost_usd;
             for i in 0..8 {
                 total_metrics[i] += task.metrics[i];
-            }
-            // Merge user_metrics
-            if let Some(ref um) = task.user_metrics {
-                for (k, v) in um {
-                    user_metrics_combined.insert(k.clone(), v.clone());
-                }
             }
             found_count += 1;
         }
@@ -519,8 +503,7 @@ pub fn get_metrics(db: &Database, args: Value) -> Result<Value> {
         json!({
             "task": task_ids[0],
             "cost_usd": total_cost_usd,
-            "metrics": total_metrics,
-            "user_metrics": if user_metrics_combined.is_empty() { None } else { Some(&user_metrics_combined) }
+            "metrics": total_metrics
         })
     } else {
         // Multiple tasks - return aggregated response
@@ -528,8 +511,7 @@ pub fn get_metrics(db: &Database, args: Value) -> Result<Value> {
             "tasks": task_ids,
             "task_count": found_count,
             "cost_usd": total_cost_usd,
-            "metrics": total_metrics,
-            "user_metrics": if user_metrics_combined.is_empty() { None } else { Some(&user_metrics_combined) }
+            "metrics": total_metrics
         })
     };
 

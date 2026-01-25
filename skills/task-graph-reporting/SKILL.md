@@ -90,7 +90,6 @@ Analyze resource consumption:
 │ • tokens_in, tokens_out, tokens_cached  │
 │ • tokens_thinking, tokens_image/audio   │
 │ • cost_usd total and per-task           │
-│ • user_metrics custom fields            │
 └─────────────────────────────────────────┘
 ```
 
@@ -158,7 +157,6 @@ Analyze agent activity:
 | `tokens_image` | int | Image tokens |
 | `tokens_audio` | int | Audio tokens |
 | `cost_usd` | float | Total USD cost |
-| `user_metrics` | JSON | Custom metrics |
 
 ### Agent Metrics
 
@@ -352,29 +350,6 @@ attach(
   content=report_markdown,
   mime="text/markdown"
 )
-```
-
----
-
-## Custom Metrics
-
-Use `user_metrics` for project-specific tracking:
-
-```
-# Worker logs custom metric
-log_cost(
-  agent=agent_id,
-  task=task_id,
-  user_metrics={
-    "lines_of_code": 150,
-    "test_coverage": 0.85,
-    "complexity_score": 12
-  }
-)
-
-# Reporter aggregates
-tasks = get(task=root, children=true)
-# Sum/average user_metrics across tasks
 ```
 
 ---

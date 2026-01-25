@@ -39,7 +39,7 @@ mod agent_tests {
             .expect("Failed to register agent");
 
         assert!(agent.tags.is_empty());
-        assert_eq!(agent.max_claims, 5); // default
+        assert_eq!(agent.max_claims, i32::MAX); // unlimited by default
         assert!(agent.registered_at > 0);
         assert!(agent.last_heartbeat > 0);
     }
@@ -57,7 +57,7 @@ mod agent_tests {
             .expect("Failed to register agent");
 
         assert_eq!(agent.tags, vec!["rust", "backend"]);
-        assert_eq!(agent.max_claims, 5); // default
+        assert_eq!(agent.max_claims, i32::MAX); // unlimited by default
     }
 
     #[test]
@@ -1867,20 +1867,18 @@ mod tracking_tests {
             .create_task(None, "Cost Me".to_string(), None, None, None, None, None, None, None, &states_config)
             .unwrap();
 
-        // log_metrics(task_id, cost_usd, values, user_metrics)
+        // log_metrics(task_id, cost_usd, values)
         // values: [metric_0, metric_1, ...]
         db.log_metrics(
             &task.id,
             Some(0.001),
             &[100, 0, 50],  // metric_0=100, metric_2=50
-            None,
         )
         .unwrap();
         db.log_metrics(
             &task.id,
             Some(0.002),
             &[200, 0, 100], // metric_0=200, metric_2=100
-            None,
         )
         .unwrap();
 
