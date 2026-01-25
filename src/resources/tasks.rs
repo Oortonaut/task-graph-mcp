@@ -3,7 +3,7 @@
 use crate::config::{DependenciesConfig, StatesConfig};
 use crate::db::Database;
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_all_tasks(db: &Database) -> Result<Value> {
     let tasks = db.get_all_tasks()?;

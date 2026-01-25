@@ -196,6 +196,7 @@ impl Database {
     /// Create a new task.
     /// If id is provided, uses it as the task ID; otherwise generates UUID7.
     /// If parent_id is provided, creates a 'contains' dependency from parent to this task.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_task(
         &self,
         id: Option<String>,
@@ -380,6 +381,7 @@ impl Database {
     }
 
     /// Update a task.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_task(
         &self,
         task_id: &str,
@@ -1617,6 +1619,7 @@ impl Database {
 /// Creates dependencies from parent to children using child_type.
 /// Creates dependencies between siblings using sibling_type.
 /// Supports referencing existing tasks via ref_id.
+#[allow(clippy::too_many_arguments)]
 fn create_tree_recursive(
     conn: &Connection,
     input: &TaskTreeInput,

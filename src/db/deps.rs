@@ -3,8 +3,8 @@
 use super::Database;
 use crate::config::{AutoAdvanceConfig, DependenciesConfig, DependencyDisplay, StatesConfig};
 use crate::types::{Dependency, Task};
-use anyhow::{anyhow, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use anyhow::{Result, anyhow};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::{HashSet, VecDeque};
 
 /// Result of a relink operation.
@@ -48,7 +48,7 @@ fn would_create_cycle_in_tx(
             let mut stmt = tx.prepare(
                 "SELECT to_task_id FROM dependencies d
                  JOIN (SELECT value FROM json_each(?1)) types
-                 WHERE d.from_task_id = ?2 AND d.dep_type = types.value"
+                 WHERE d.from_task_id = ?2 AND d.dep_type = types.value",
             )?;
             let vertical_types: Vec<&str> = deps_config.vertical_types();
             let types_json = serde_json::to_string(&vertical_types)?;
@@ -60,7 +60,7 @@ fn would_create_cycle_in_tx(
             let mut stmt = tx.prepare(
                 "SELECT to_task_id FROM dependencies d
                  JOIN (SELECT value FROM json_each(?1)) types
-                 WHERE d.from_task_id = ?2 AND d.dep_type = types.value"
+                 WHERE d.from_task_id = ?2 AND d.dep_type = types.value",
             )?;
             let start_blocking: Vec<&str> = deps_config.start_blocking_types();
             let types_json = serde_json::to_string(&start_blocking)?;
@@ -121,17 +121,15 @@ impl Database {
 
         // For vertical (contains) dependencies, check single-parent constraint
         let def = deps_config.get_definition(dep_type).unwrap();
-        if def.display == DependencyDisplay::Vertical {
-            if let Some(existing_parent) = self.get_parent(to_task_id)? {
-                if existing_parent != from_task_id {
+        if def.display == DependencyDisplay::Vertical
+            && let Some(existing_parent) = self.get_parent(to_task_id)?
+                && existing_parent != from_task_id {
                     return Err(anyhow!(
                         "Task {} already has parent {}",
                         to_task_id,
                         existing_parent
                     ));
                 }
-            }
-        }
 
         // Check for cycle in the appropriate graph
         if self.would_create_cycle(from_task_id, to_task_id, dep_type, deps_config)? {
@@ -182,7 +180,7 @@ impl Database {
                     let mut stmt = conn.prepare(
                         "SELECT to_task_id FROM dependencies d
                          JOIN (SELECT value FROM json_each(?1)) types
-                         WHERE d.from_task_id = ?2 AND d.dep_type = types.value"
+                         WHERE d.from_task_id = ?2 AND d.dep_type = types.value",
                     )?;
                     let vertical_types: Vec<&str> = deps_config.vertical_types();
                     let types_json = serde_json::to_string(&vertical_types)?;
@@ -194,7 +192,7 @@ impl Database {
                     let mut stmt = conn.prepare(
                         "SELECT to_task_id FROM dependencies d
                          JOIN (SELECT value FROM json_each(?1)) types
-                         WHERE d.from_task_id = ?2 AND d.dep_type = types.value"
+                         WHERE d.from_task_id = ?2 AND d.dep_type = types.value",
                     )?;
                     let start_blocking: Vec<&str> = deps_config.start_blocking_types();
                     let types_json = serde_json::to_string(&start_blocking)?;
@@ -673,7 +671,8 @@ impl Database {
 
                 let needed_clause = if needed_placeholders.is_empty() {
                     // Agent has no tags - only match tasks with no needed_tags
-                    "AND NOT EXISTS (SELECT 1 FROM task_needed_tags WHERE task_id = t.id)".to_string()
+                    "AND NOT EXISTS (SELECT 1 FROM task_needed_tags WHERE task_id = t.id)"
+                        .to_string()
                 } else {
                     // Task must have no needed_tags OR agent must have all of them
                     format!(
@@ -699,7 +698,8 @@ impl Database {
 
                 let wanted_clause = if wanted_placeholders.is_empty() {
                     // Agent has no tags - only match tasks with no wanted_tags
-                    "AND NOT EXISTS (SELECT 1 FROM task_wanted_tags WHERE task_id = t.id)".to_string()
+                    "AND NOT EXISTS (SELECT 1 FROM task_wanted_tags WHERE task_id = t.id)"
+                        .to_string()
                 } else {
                     // Task must have no wanted_tags OR agent must have at least one
                     format!(
@@ -871,7 +871,9 @@ impl Database {
     /// - `tags_any`: Task must have at least one of these tags (OR)
     /// - `tags_all`: Task must have all of these tags (AND)
     /// - `qualified_for_agent_tags`: If provided, only return tasks where these tags satisfy the task's agent_tags_all/agent_tags_any
+    ///
     /// Excludes soft-deleted tasks.
+    #[allow(clippy::too_many_arguments)]
     pub fn list_tasks_with_tag_filters(
         &self,
         status: Option<Vec<String>>,
@@ -932,8 +934,8 @@ impl Database {
             }
 
             // tags_any: Task must have at least one of these tags (OR) - uses task_tags junction
-            if let Some(ref any_tags) = tags_any {
-                if !any_tags.is_empty() {
+            if let Some(ref any_tags) = tags_any
+                && !any_tags.is_empty() {
                     let placeholders: Vec<String> = any_tags
                         .iter()
                         .enumerate()
@@ -948,11 +950,10 @@ impl Database {
                     }
                     param_idx += any_tags.len();
                 }
-            }
 
             // tags_all: Task must have all of these tags (AND) - uses task_tags junction
-            if let Some(ref all_tags) = tags_all {
-                if !all_tags.is_empty() {
+            if let Some(ref all_tags) = tags_all
+                && !all_tags.is_empty() {
                     let placeholders: Vec<String> = all_tags
                         .iter()
                         .enumerate()
@@ -969,7 +970,6 @@ impl Database {
                     }
                     param_idx += all_tags.len();
                 }
-            }
 
             // qualified_for: Agent's tags must satisfy task's requirements - uses junction tables
             if let Some(ref agent_tags) = qualified_for_agent_tags {
@@ -1082,7 +1082,6 @@ impl Database {
         Ok(())
     }
 
-
     /// Atomically relink dependencies: unlink all prev_from→prev_to, then link all from→to.
     /// This is a transaction-safe operation for moving children between parents.
     /// Returns a result with unlinked and linked pairs.
@@ -1138,15 +1137,14 @@ impl Database {
                             |row| row.get(0),
                         ).optional()?;
 
-                        if let Some(ref parent) = existing_parent {
-                            if parent != from_id {
+                        if let Some(ref parent) = existing_parent
+                            && parent != from_id {
                                 errors.push(format!(
                                     "Task {} already has parent {}",
                                     to_id, parent
                                 ));
                                 continue;
                             }
-                        }
                     }
 
                     // Check for cycles using temporary view within transaction
@@ -1201,7 +1199,7 @@ impl Database {
                     // Get tasks that block this one (from_task_id blocks to_task_id)
                     let mut stmt = conn.prepare(
                         "SELECT DISTINCT d.from_task_id FROM dependencies d
-                         WHERE d.to_task_id = ?1 AND d.dep_type IN ('blocks', 'follows')"
+                         WHERE d.to_task_id = ?1 AND d.dep_type IN ('blocks', 'follows')",
                     )?;
 
                     let predecessors: Vec<String> = stmt
@@ -1248,7 +1246,7 @@ impl Database {
                     // Get tasks that this one blocks (from_task_id blocks to_task_id)
                     let mut stmt = conn.prepare(
                         "SELECT DISTINCT d.to_task_id FROM dependencies d
-                         WHERE d.from_task_id = ?1 AND d.dep_type IN ('blocks', 'follows')"
+                         WHERE d.from_task_id = ?1 AND d.dep_type IN ('blocks', 'follows')",
                     )?;
 
                     let successors: Vec<String> = stmt
@@ -1357,7 +1355,6 @@ impl Database {
             Ok(result)
         })
     }
-
 }
 
 /// Helper to get a task by ID within a connection context.
@@ -1368,7 +1365,6 @@ fn get_task_by_id_internal(conn: &Connection, task_id: &str) -> Result<Option<Ta
         .optional()?;
     Ok(task)
 }
-
 
 /// Get the IDs of tasks that block a given task from starting (unsatisfied dependencies).
 /// A task blocks starting if it has a start-blocking dependency type and is in a blocking state.
@@ -1419,8 +1415,7 @@ pub(crate) fn get_unsatisfied_start_blockers_in_tx(
     for t in &start_blocking_types {
         params_vec.push(Box::new(t.to_string()));
     }
-    let params_refs: Vec<&dyn rusqlite::ToSql> =
-        params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
 
     let mut stmt = conn.prepare(&sql)?;
     let blockers = stmt
@@ -1482,8 +1477,7 @@ pub(crate) fn propagate_unblock_effects(
     for t in &start_blocking_types {
         params_vec.push(Box::new(t.to_string()));
     }
-    let params_refs: Vec<&dyn rusqlite::ToSql> =
-        params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
 
     let mut stmt = conn.prepare(&sql)?;
     let dependent_task_ids: Vec<String> = stmt
@@ -1581,7 +1575,7 @@ pub(crate) fn propagate_unblock_effects(
         // Auto-advance if enabled and transition is valid
         if should_auto_advance {
             let ts = target_state.as_ref().unwrap();
-            
+
             // Validate transition from initial to target_state
             if !states_config.is_valid_transition(&states_config.initial, ts) {
                 // Skip auto-advance for this task - transition not allowed
@@ -1595,10 +1589,7 @@ pub(crate) fn propagate_unblock_effects(
             )?;
 
             // Record state transition
-            let reason = format!(
-                "auto-advanced: blocker '{}' completed",
-                completed_task_id
-            );
+            let reason = format!("auto-advanced: blocker '{}' completed", completed_task_id);
             super::state_transitions::record_state_transition(
                 conn,
                 &task_id,
@@ -1614,4 +1605,3 @@ pub(crate) fn propagate_unblock_effects(
 
     Ok((unblocked, auto_advanced))
 }
-

@@ -1,13 +1,13 @@
 //! Attachment management tools.
 
 use super::{get_bool, get_string, make_tool_with_prompts};
-use crate::format::{format_attachments_markdown, markdown_to_json, OutputFormat};
 use crate::config::{AttachmentsConfig, Prompts, UnknownKeyBehavior};
 use crate::db::Database;
 use crate::error::{ErrorCode, ToolError};
+use crate::format::{OutputFormat, format_attachments_markdown, markdown_to_json};
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 
 pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
@@ -131,7 +131,13 @@ fn generate_media_filename(task_id: &str, name: &str, mime_type: &str) -> String
     // Sanitize name for filename
     let safe_name: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     format!("{}_{}_{}.{}", task_id, safe_name, timestamp, ext)
@@ -150,28 +156,37 @@ fn is_in_media_dir(file_path: &str, media_dir: &Path) -> bool {
     }
 }
 
-pub fn attach(db: &Database, media_dir: &Path, attachments_config: &AttachmentsConfig, args: Value) -> Result<Value> {
+pub fn attach(
+    db: &Database,
+    media_dir: &Path,
+    attachments_config: &AttachmentsConfig,
+    args: Value,
+) -> Result<Value> {
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
 
     // Task can be string or array of strings
-    let task_ids: Vec<String> = if let Some(task_array) = args.get("task").and_then(|v| v.as_array()) {
-        task_array
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(task_id) = get_string(&args, "task") {
-        vec![task_id]
-    } else {
-        return Err(ToolError::missing_field("task").into());
-    };
+    let task_ids: Vec<String> =
+        if let Some(task_array) = args.get("task").and_then(|v| v.as_array()) {
+            task_array
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        } else if let Some(task_id) = get_string(&args, "task") {
+            vec![task_id]
+        } else {
+            return Err(ToolError::missing_field("task").into());
+        };
 
     if task_ids.is_empty() {
-        return Err(ToolError::new(ErrorCode::InvalidFieldValue, "At least one task ID must be provided").into());
+        return Err(ToolError::new(
+            ErrorCode::InvalidFieldValue,
+            "At least one task ID must be provided",
+        )
+        .into());
     }
 
-    let name = get_string(&args, "name")
-        .ok_or_else(|| ToolError::missing_field("name"))?;
+    let name = get_string(&args, "name").ok_or_else(|| ToolError::missing_field("name"))?;
     let content = get_string(&args, "content");
     let file_path = get_string(&args, "file");
     let store_as_file = get_bool(&args, "store_as_file").unwrap_or(false);
@@ -186,9 +201,7 @@ pub fn attach(db: &Database, media_dir: &Path, attachments_config: &AttachmentsC
                     format!("Unknown attachment key '{}'. Configure it in attachments.definitions or set unknown_key to 'allow' or 'warn'.", name)
                 ).into());
             }
-            UnknownKeyBehavior::Warn => {
-                Some(format!("Unknown attachment key '{}'", name))
-            }
+            UnknownKeyBehavior::Warn => Some(format!("Unknown attachment key '{}'", name)),
             UnknownKeyBehavior::Allow => None,
         }
     } else {
@@ -203,12 +216,20 @@ pub fn attach(db: &Database, media_dir: &Path, attachments_config: &AttachmentsC
 
     // Validate mode
     if mode != "append" && mode != "replace" {
-        return Err(ToolError::new(ErrorCode::InvalidFieldValue, "mode must be 'append' or 'replace'").into());
+        return Err(ToolError::new(
+            ErrorCode::InvalidFieldValue,
+            "mode must be 'append' or 'replace'",
+        )
+        .into());
     }
 
     // Validate: need either content or file
     if content.is_none() && file_path.is_none() {
-        return Err(ToolError::new(ErrorCode::InvalidFieldValue, "Either 'content' or 'file' must be provided").into());
+        return Err(ToolError::new(
+            ErrorCode::InvalidFieldValue,
+            "Either 'content' or 'file' must be provided",
+        )
+        .into());
     }
 
     // Handle different attachment modes - prepare content/file once for all tasks
@@ -216,7 +237,9 @@ pub fn attach(db: &Database, media_dir: &Path, attachments_config: &AttachmentsC
         // File reference mode: verify file exists
         let path = Path::new(fp);
         if !path.exists() {
-            return Err(ToolError::new(ErrorCode::FileNotFound, format!("File not found: {}", fp)).into());
+            return Err(
+                ToolError::new(ErrorCode::FileNotFound, format!("File not found: {}", fp)).into(),
+            );
         }
         (String::new(), Some(fp.clone()))
     } else if store_as_file {
@@ -231,34 +254,40 @@ pub fn attach(db: &Database, media_dir: &Path, attachments_config: &AttachmentsC
 
     for task_id in &task_ids {
         // Replace mode: delete existing attachment with same name before adding new one
-        if mode == "replace" {
-            if let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name) {
+        if mode == "replace"
+            && let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name) {
                 // Clean up old media file if it was in media dir
                 if is_in_media_dir(&old_file_path, media_dir) {
                     let _ = std::fs::remove_file(&old_file_path);
                 }
             }
-        }
 
         // Determine final content and file path for this task
-        let (final_content, final_file_path): (String, Option<String>) = if store_as_file && file_path.is_none() {
-            // Store content to media directory (per-task file)
-            let filename = generate_media_filename(task_id, &name, &mime_type);
-            let media_file_path = media_dir.join(&filename);
+        let (final_content, final_file_path): (String, Option<String>) =
+            if store_as_file && file_path.is_none() {
+                // Store content to media directory (per-task file)
+                let filename = generate_media_filename(task_id, &name, &mime_type);
+                let media_file_path = media_dir.join(&filename);
 
-            // Ensure media directory exists
-            std::fs::create_dir_all(media_dir)?;
+                // Ensure media directory exists
+                std::fs::create_dir_all(media_dir)?;
 
-            // Write content to file
-            std::fs::write(&media_file_path, &base_content)?;
+                // Write content to file
+                std::fs::write(&media_file_path, &base_content)?;
 
-            let file_path_str = media_file_path.to_string_lossy().to_string();
-            (String::new(), Some(file_path_str))
-        } else {
-            (base_content.clone(), base_file_path.clone())
-        };
+                let file_path_str = media_file_path.to_string_lossy().to_string();
+                (String::new(), Some(file_path_str))
+            } else {
+                (base_content.clone(), base_file_path.clone())
+            };
 
-        let order_index = db.add_attachment(task_id, name.clone(), final_content, Some(mime_type.clone()), final_file_path.clone())?;
+        let order_index = db.add_attachment(
+            task_id,
+            name.clone(),
+            final_content,
+            Some(mime_type.clone()),
+            final_file_path.clone(),
+        )?;
 
         let mut result = json!({
             "task_id": task_id,
@@ -287,21 +316,22 @@ pub fn attach(db: &Database, media_dir: &Path, attachments_config: &AttachmentsC
     Ok(response)
 }
 
-pub fn attachments(db: &Database, _media_dir: &Path, default_format: OutputFormat, args: Value) -> Result<Value> {
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+pub fn attachments(
+    db: &Database,
+    _media_dir: &Path,
+    default_format: OutputFormat,
+    args: Value,
+) -> Result<Value> {
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let name_pattern = get_string(&args, "name");
     let mime_pattern = get_string(&args, "mime");
     let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
+        .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
 
     // Get filtered attachments (metadata only)
-    let attachments = db.get_attachments_filtered(
-        &task_id,
-        name_pattern.as_deref(),
-        mime_pattern.as_deref(),
-    )?;
+    let attachments =
+        db.get_attachments_filtered(&task_id, name_pattern.as_deref(), mime_pattern.as_deref())?;
 
     match format {
         OutputFormat::Markdown => Ok(markdown_to_json(format_attachments_markdown(&attachments))),
@@ -333,11 +363,9 @@ pub fn attachments(db: &Database, _media_dir: &Path, default_format: OutputForma
 pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
-    
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
-    let name = get_string(&args, "name")
-        .ok_or_else(|| ToolError::missing_field("name"))?;
+
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
+    let name = get_string(&args, "name").ok_or_else(|| ToolError::missing_field("name"))?;
     let delete_file = get_bool(&args, "delete_file").unwrap_or(false);
 
     // Delete from database (returns whether deleted and file_path if one was set)
@@ -345,18 +373,15 @@ pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
 
     // If attachment had a file in media dir and delete_file is true, delete it
     let mut file_deleted = false;
-    if delete_file {
-        if let Some(fp) = &file_path {
-            if is_in_media_dir(fp, media_dir) {
+    if delete_file
+        && let Some(fp) = &file_path
+            && is_in_media_dir(fp, media_dir) {
                 let path = Path::new(fp);
-                if path.exists() {
-                    if let Ok(()) = std::fs::remove_file(path) {
+                if path.exists()
+                    && let Ok(()) = std::fs::remove_file(path) {
                         file_deleted = true;
                     }
-                }
             }
-        }
-    }
 
     Ok(json!({
         "success": deleted,

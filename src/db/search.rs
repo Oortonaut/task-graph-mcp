@@ -216,7 +216,13 @@ mod tests {
             .create_task(
                 None,
                 "Test FTS indexing with keywords".to_string(),
-                None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 &states(),
             )
             .unwrap();
@@ -236,7 +242,13 @@ mod tests {
             .create_task(
                 None,
                 "Original title original".to_string(),
-                None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 &states(),
             )
             .unwrap();
@@ -277,7 +289,13 @@ mod tests {
             .create_task(
                 None,
                 "Deletable task content".to_string(),
-                None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 &states(),
             )
             .unwrap();
@@ -287,7 +305,8 @@ mod tests {
         assert_eq!(results.len(), 1);
 
         // Delete the task
-        db.delete_task(&task.id, "test-worker", false, None, true, true).unwrap();
+        db.delete_task(&task.id, "test-worker", false, None, true, true)
+            .unwrap();
 
         // Search should find nothing
         let results = db.search_tasks("Deletable", None, false, None).unwrap();
@@ -299,9 +318,45 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
 
         // Create tasks with varying relevance
-        db.create_task(None, "Bug fix for minor bug".to_string(), None, None, None, None, None, None, None, &states()).unwrap();
-        db.create_task(None, "Bug bug bug multiple bugs".to_string(), None, None, None, None, None, None, None, &states()).unwrap();
-        db.create_task(None, "Feature implementation".to_string(), None, None, None, None, None, None, None, &states()).unwrap();
+        db.create_task(
+            None,
+            "Bug fix for minor bug".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &states(),
+        )
+        .unwrap();
+        db.create_task(
+            None,
+            "Bug bug bug multiple bugs".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &states(),
+        )
+        .unwrap();
+        db.create_task(
+            None,
+            "Feature implementation".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &states(),
+        )
+        .unwrap();
 
         // Search for "bug" - higher frequency should rank better
         let results = db.search_tasks("bug", None, false, None).unwrap();
@@ -319,7 +374,13 @@ mod tests {
             .create_task(
                 None,
                 "Task with attachment".to_string(),
-                None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 &states(),
             )
             .unwrap();

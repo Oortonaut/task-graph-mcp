@@ -1,14 +1,20 @@
 //! Task CRUD tools.
 
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
-use crate::config::{AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig, UnknownKeyBehavior};
+use crate::config::{
+    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig,
+    UnknownKeyBehavior,
+};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::{format_scan_result_markdown, format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
-use crate::types::{parse_priority, ScanResult, TaskTreeInput};
+use crate::format::{
+    OutputFormat, format_scan_result_markdown, format_task_markdown, format_tasks_markdown,
+    markdown_to_json,
+};
+use crate::types::{ScanResult, TaskTreeInput, parse_priority};
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
     // Generate state enum from config
@@ -330,8 +336,8 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
 
 pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
     let id = get_string(&args, "id");
-    let description = get_string(&args, "description")
-        .ok_or_else(|| ToolError::missing_field("description"))?;
+    let description =
+        get_string(&args, "description").ok_or_else(|| ToolError::missing_field("description"))?;
     let parent_id = get_string(&args, "parent");
     // Support both integer and string priority
     let priority = get_i32(&args, "priority")
@@ -374,11 +380,16 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
     let child_type = get_string(&args, "child_type");
     let sibling_type = get_string(&args, "sibling_type");
 
-    let (root_id, all_ids) = db.create_task_tree(tree, parent_id, child_type, sibling_type, states_config)?;
+    let (root_id, all_ids) =
+        db.create_task_tree(tree, parent_id, child_type, sibling_type, states_config)?;
 
     // Fetch the root task to return full details
-    let root_task = db.get_task(&root_id)?
-        .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Root task not found after creation"))?;
+    let root_task = db.get_task(&root_id)?.ok_or_else(|| {
+        ToolError::new(
+            crate::error::ErrorCode::TaskNotFound,
+            "Root task not found after creation",
+        )
+    })?;
 
     Ok(json!({
         "root": {
@@ -395,13 +406,13 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
 }
 
 pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
+        .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
 
-    let task = db.get_task(&task_id)?
+    let task = db
+        .get_task(&task_id)?
         .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
 
     let blocked_by = db.get_blockers(&task_id)?;
@@ -410,7 +421,8 @@ pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<V
     let attachments = db.get_attachments(&task_id)?;
 
     // Calculate attachment counts by MIME type
-    let mut attachment_counts: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+    let mut attachment_counts: std::collections::HashMap<String, i32> =
+        std::collections::HashMap::new();
     for att in &attachments {
         *attachment_counts.entry(att.mime_type.clone()).or_insert(0) += 1;
     }
@@ -423,8 +435,15 @@ pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<V
             if !attachments.is_empty() {
                 md.push_str("\n### Attachments\n");
                 for att in &attachments {
-                    let file_indicator = if att.file_path.is_some() { " (file)" } else { "" };
-                    md.push_str(&format!("- **{}** [{}]{}\n", att.name, att.mime_type, file_indicator));
+                    let file_indicator = if att.file_path.is_some() {
+                        " (file)"
+                    } else {
+                        ""
+                    };
+                    md.push_str(&format!(
+                        "- **{}** [{}]{}\n",
+                        att.name, att.mime_type, file_indicator
+                    ));
                 }
 
                 // Add counts by type
@@ -440,8 +459,14 @@ pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<V
             let mut task_json = serde_json::to_value(&task)?;
             if let Some(obj) = task_json.as_object_mut() {
                 obj.insert("blocked_by".to_string(), json!(blocked_by));
-                obj.insert("attachments".to_string(), serde_json::to_value(&attachments)?);
-                obj.insert("attachment_counts".to_string(), serde_json::to_value(&attachment_counts)?);
+                obj.insert(
+                    "attachments".to_string(),
+                    serde_json::to_value(&attachments)?,
+                );
+                obj.insert(
+                    "attachment_counts".to_string(),
+                    serde_json::to_value(&attachment_counts)?,
+                );
             }
             Ok(task_json)
         }
@@ -456,7 +481,7 @@ pub fn list_tasks(
     args: Value,
 ) -> Result<Value> {
     let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
+        .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
 
     let ready = get_bool(&args, "ready").unwrap_or(false);
@@ -467,10 +492,10 @@ pub fn list_tasks(
     // Extract tag filtering parameters
     let tags_any = get_string_array(&args, "tags_any");
     let tags_all = get_string_array(&args, "tags_all");
-    
+
     // 'agent' replaces both 'worker_id' and 'qualified_for' - single param for agent-related filtering
     let agent_id = get_string(&args, "agent");
-    
+
     // Sorting parameters
     let sort_by = get_string(&args, "sort_by");
     let sort_order = get_string(&args, "sort_order");
@@ -479,10 +504,21 @@ pub fn list_tasks(
     let mut tasks = if ready {
         // Ready tasks: in initial state, unclaimed, all deps satisfied
         // If agent is provided, also filter by agent's tag qualifications
-        db.get_ready_tasks(agent_id.as_deref(), states_config, deps_config, sort_by.as_deref(), sort_order.as_deref())?
+        db.get_ready_tasks(
+            agent_id.as_deref(),
+            states_config,
+            deps_config,
+            sort_by.as_deref(),
+            sort_order.as_deref(),
+        )?
     } else if blocked {
         // Blocked tasks: have unsatisfied deps
-        db.get_blocked_tasks(states_config, deps_config, sort_by.as_deref(), sort_order.as_deref())?
+        db.get_blocked_tasks(
+            states_config,
+            deps_config,
+            sort_by.as_deref(),
+            sort_order.as_deref(),
+        )?
     } else if claimed {
         // Claimed tasks: currently owned by any agent
         db.get_claimed_tasks(None)?
@@ -492,11 +528,9 @@ pub fn list_tasks(
         let status_vec: Option<Vec<String>> = if let Some(status_val) = args.get("status") {
             if let Some(s) = status_val.as_str() {
                 Some(vec![s.to_string()])
-            } else if let Some(arr) = status_val.as_array() {
-                Some(arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-            } else {
-                None
-            }
+            } else { status_val.as_array().map(|arr| arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()) }
         } else {
             None
         };
@@ -533,8 +567,17 @@ pub fn list_tasks(
             )?
         } else {
             // Use list_tasks which returns full Task objects (only supports single status)
-            let status = status_vec.as_ref().and_then(|v| v.first().map(|s| s.as_str()));
-            db.list_tasks(status, owner.as_deref(), parent_id, limit, sort_by.as_deref(), sort_order.as_deref())?
+            let status = status_vec
+                .as_ref()
+                .and_then(|v| v.first().map(|s| s.as_str()));
+            db.list_tasks(
+                status,
+                owner.as_deref(),
+                parent_id,
+                limit,
+                sort_by.as_deref(),
+                sort_order.as_deref(),
+            )?
         }
     };
 
@@ -577,10 +620,9 @@ pub fn update(
     auto_advance: &AutoAdvanceConfig,
     args: Value,
 ) -> Result<Value> {
-    let worker_id = get_string(&args, "worker_id")
-        .ok_or_else(|| ToolError::missing_field("worker_id"))?;
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    let worker_id =
+        get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let assignee = get_string(&args, "assignee");
     let title = get_string(&args, "title");
     let description = if args.get("description").is_some() {
@@ -630,7 +672,8 @@ pub fn update(
             let name = match name {
                 Some(n) => n,
                 None => {
-                    attachment_warnings.push("Skipped attachment: missing 'name' field".to_string());
+                    attachment_warnings
+                        .push("Skipped attachment: missing 'name' field".to_string());
                     continue;
                 }
             };
@@ -684,7 +727,13 @@ pub fn update(
             }
 
             // Add the attachment
-            match db.add_attachment(&task_id, name.to_string(), content.to_string(), Some(mime_type.clone()), None) {
+            match db.add_attachment(
+                &task_id,
+                name.to_string(),
+                content.to_string(),
+                Some(mime_type.clone()),
+                None,
+            ) {
                 Ok(order_index) => {
                     attachment_results.push(json!({
                         "name": name,
@@ -693,10 +742,7 @@ pub fn update(
                     }));
                 }
                 Err(e) => {
-                    attachment_warnings.push(format!(
-                        "Failed to add attachment '{}': {}",
-                        name, e
-                    ));
+                    attachment_warnings.push(format!("Failed to add attachment '{}': {}", name, e));
                 }
             }
         }
@@ -740,7 +786,10 @@ pub fn update(
         }
         // Include warnings if any
         if !attachment_warnings.is_empty() {
-            map.insert("attachment_warnings".to_string(), json!(attachment_warnings));
+            map.insert(
+                "attachment_warnings".to_string(),
+                json!(attachment_warnings),
+            );
         }
     }
 
@@ -748,10 +797,9 @@ pub fn update(
 }
 
 pub fn delete(db: &Database, args: Value) -> Result<Value> {
-    let worker_id = get_string(&args, "worker_id")
-        .ok_or_else(|| ToolError::missing_field("worker_id"))?;
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    let worker_id =
+        get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let cascade = get_bool(&args, "cascade").unwrap_or(false);
     let reason = get_string(&args, "reason");
     let obliterate = get_bool(&args, "obliterate").unwrap_or(false);
@@ -766,10 +814,9 @@ pub fn delete(db: &Database, args: Value) -> Result<Value> {
 }
 
 pub fn scan(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
+        .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
 
     // Depth parameters: 0=none, N=levels, -1=all
@@ -779,7 +826,8 @@ pub fn scan(db: &Database, default_format: OutputFormat, args: Value) -> Result<
     let below_depth = get_i32(&args, "below").unwrap_or(0);
 
     // Verify the task exists
-    let root_task = db.get_task(&task_id)?
+    let root_task = db
+        .get_task(&task_id)?
         .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
 
     // Traverse in each direction

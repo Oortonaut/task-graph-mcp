@@ -1,7 +1,7 @@
 //! Configuration loading and management.
 
 use crate::format::OutputFormat;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -199,6 +199,7 @@ impl AttachmentsConfig {
 
 /// Server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Config {
     #[serde(default)]
     pub server: ServerConfig,
@@ -219,18 +220,6 @@ pub struct Config {
     pub attachments: AttachmentsConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            paths: PathsConfig::default(),
-            states: StatesConfig::default(),
-            dependencies: DependenciesConfig::default(),
-            auto_advance: AutoAdvanceConfig::default(),
-            attachments: AttachmentsConfig::default(),
-        }
-    }
-}
 
 /// Paths configured for the server, returned by connect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -303,7 +292,6 @@ fn default_skills_dir() -> PathBuf {
     PathBuf::from(".task-graph/skills")
 }
 
-
 fn default_log_dir() -> PathBuf {
     PathBuf::from(".task-graph/logs")
 }
@@ -335,18 +323,15 @@ impl Default for PathsConfig {
 /// Path style for file locks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PathStyle {
     /// Relative paths (e.g., src/main.rs)
+    #[default]
     Relative,
     /// Project-prefixed paths (e.g., ${project}/src/main.rs)
     ProjectPrefixed,
 }
 
-impl Default for PathStyle {
-    fn default() -> Self {
-        PathStyle::Relative
-    }
-}
 
 /// Task state configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -388,7 +373,11 @@ fn default_disconnect_state() -> String {
 }
 
 fn default_blocking_states() -> Vec<String> {
-    vec!["pending".to_string(), "assigned".to_string(), "in_progress".to_string()]
+    vec![
+        "pending".to_string(),
+        "assigned".to_string(),
+        "in_progress".to_string(),
+    ]
 }
 
 fn default_state_definitions() -> HashMap<String, StateDefinition> {
@@ -397,7 +386,11 @@ fn default_state_definitions() -> HashMap<String, StateDefinition> {
     defs.insert(
         "pending".to_string(),
         StateDefinition {
-            exits: vec!["assigned".to_string(), "in_progress".to_string(), "cancelled".to_string()],
+            exits: vec![
+                "assigned".to_string(),
+                "in_progress".to_string(),
+                "cancelled".to_string(),
+            ],
             timed: false,
         },
     );
@@ -405,7 +398,11 @@ fn default_state_definitions() -> HashMap<String, StateDefinition> {
     defs.insert(
         "assigned".to_string(),
         StateDefinition {
-            exits: vec!["in_progress".to_string(), "pending".to_string(), "cancelled".to_string()],
+            exits: vec![
+                "in_progress".to_string(),
+                "pending".to_string(),
+                "cancelled".to_string(),
+            ],
             timed: false,
         },
     );
@@ -460,7 +457,6 @@ pub struct StateDefinition {
     #[serde(default)]
     pub timed: bool,
 }
-
 
 /// Dependency type configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -618,7 +614,10 @@ impl DependenciesConfig {
         }
 
         // Check for at least one start-blocking type (for task sequencing)
-        let has_start_blocking = self.definitions.values().any(|d| d.blocks == BlockTarget::Start);
+        let has_start_blocking = self
+            .definitions
+            .values()
+            .any(|d| d.blocks == BlockTarget::Start);
         if !has_start_blocking {
             return Err(anyhow::anyhow!(
                 "At least one dependency type with blocks: start must be defined"
@@ -757,11 +756,10 @@ impl Config {
     /// Load configuration from default locations or return defaults.
     pub fn load_or_default() -> Self {
         // Try TASK_GRAPH_CONFIG_PATH environment variable first
-        if let Ok(config_path) = std::env::var("TASK_GRAPH_CONFIG_PATH") {
-            if let Ok(config) = Self::load(&config_path) {
+        if let Ok(config_path) = std::env::var("TASK_GRAPH_CONFIG_PATH")
+            && let Ok(config) = Self::load(&config_path) {
                 return config;
             }
-        }
 
         // Try .task-graph/config.yaml
         if let Ok(config) = Self::load(".task-graph/config.yaml") {

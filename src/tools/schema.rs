@@ -4,7 +4,7 @@ use super::{get_bool, get_string, make_tool};
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Get the schema introspection tools.
 pub fn get_tools() -> Vec<Tool> {
@@ -43,9 +43,11 @@ pub fn get_schema(db: &Database, args: Value) -> Result<Value> {
         schema.tables
     };
 
-    if table_filter.is_some() && tables.is_empty() {
+    if let Some(table_name) = table_filter
+        && tables.is_empty()
+    {
         return Ok(json!({
-            "error": format!("Table '{}' not found", table_filter.unwrap()),
+            "error": format!("Table '{}' not found", table_name),
             "available_tables": db.get_table_names()?
         }));
     }

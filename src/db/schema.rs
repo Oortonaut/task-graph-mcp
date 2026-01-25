@@ -56,11 +56,8 @@ impl Database {
     pub fn get_schema(&self, include_sql: bool) -> Result<DatabaseSchema> {
         self.with_conn(|conn| {
             // Get SQLite version
-            let sqlite_version: String = conn.query_row(
-                "SELECT sqlite_version()",
-                [],
-                |row| row.get(0),
-            )?;
+            let sqlite_version: String =
+                conn.query_row("SELECT sqlite_version()", [], |row| row.get(0))?;
 
             // Get all tables and views (excluding internal sqlite_ tables and refinery schema)
             let mut stmt = conn.prepare(
@@ -68,7 +65,7 @@ impl Database {
                  WHERE type IN ('table', 'view') 
                  AND name NOT LIKE 'sqlite_%'
                  AND name NOT LIKE 'refinery_%'
-                 ORDER BY type DESC, name"
+                 ORDER BY type DESC, name",
             )?;
 
             let table_names: Vec<(String, String, Option<String>)> = stmt
@@ -111,7 +108,11 @@ impl Database {
     }
 
     /// Get column information for a table.
-    fn get_table_columns(&self, conn: &rusqlite::Connection, table_name: &str) -> Result<Vec<ColumnInfo>> {
+    fn get_table_columns(
+        &self,
+        conn: &rusqlite::Connection,
+        table_name: &str,
+    ) -> Result<Vec<ColumnInfo>> {
         let mut stmt = conn.prepare(&format!("PRAGMA table_info('{}')", table_name))?;
 
         let columns: Vec<ColumnInfo> = stmt
@@ -130,7 +131,11 @@ impl Database {
     }
 
     /// Get index information for a table.
-    fn get_table_indexes(&self, conn: &rusqlite::Connection, table_name: &str) -> Result<Vec<IndexInfo>> {
+    fn get_table_indexes(
+        &self,
+        conn: &rusqlite::Connection,
+        table_name: &str,
+    ) -> Result<Vec<IndexInfo>> {
         // Get list of indexes
         let mut stmt = conn.prepare(&format!("PRAGMA index_list('{}')", table_name))?;
 
@@ -170,7 +175,11 @@ impl Database {
     }
 
     /// Get foreign key information for a table.
-    fn get_table_foreign_keys(&self, conn: &rusqlite::Connection, table_name: &str) -> Result<Vec<ForeignKeyInfo>> {
+    fn get_table_foreign_keys(
+        &self,
+        conn: &rusqlite::Connection,
+        table_name: &str,
+    ) -> Result<Vec<ForeignKeyInfo>> {
         let mut stmt = conn.prepare(&format!("PRAGMA foreign_key_list('{}')", table_name))?;
 
         let foreign_keys: Vec<ForeignKeyInfo> = stmt
@@ -196,7 +205,7 @@ impl Database {
                  WHERE type = 'table' 
                  AND name NOT LIKE 'sqlite_%'
                  AND name NOT LIKE 'refinery_%'
-                 ORDER BY name"
+                 ORDER BY name",
             )?;
 
             let names: Vec<String> = stmt

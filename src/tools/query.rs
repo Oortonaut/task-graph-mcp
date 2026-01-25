@@ -13,7 +13,7 @@ use crate::error::{ErrorCode, ToolError};
 use crate::format::{OutputFormat, ToolResult};
 use anyhow::Result;
 use rmcp::model::{Tool, ToolAnnotations};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 /// Default row limit for query results.
@@ -95,24 +95,9 @@ fn validate_readonly_sql(sql: &str) -> Result<(), ToolError> {
 
     // Check for forbidden statements
     let forbidden_prefixes = [
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "DROP",
-        "CREATE",
-        "ALTER",
-        "TRUNCATE",
-        "REPLACE",
-        "UPSERT",
-        "MERGE",
-        "GRANT",
-        "REVOKE",
-        "ATTACH",
-        "DETACH",
-        "VACUUM",
-        "REINDEX",
-        "ANALYZE",
-        "PRAGMA",  // Some PRAGMAs can modify settings
+        "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "REPLACE", "UPSERT",
+        "MERGE", "GRANT", "REVOKE", "ATTACH", "DETACH", "VACUUM", "REINDEX", "ANALYZE",
+        "PRAGMA", // Some PRAGMAs can modify settings
     ];
 
     // Get the first word (statement type)
@@ -193,7 +178,7 @@ pub fn query(db: &Database, default_format: OutputFormat, args: Value) -> Result
     // Use explicit format if provided, otherwise use config default
     let format = get_string(&args, "format")
         .and_then(|f| QueryFormat::from_str(&f))
-        .unwrap_or_else(|| match default_format {
+        .unwrap_or(match default_format {
             OutputFormat::Json => QueryFormat::Json,
             OutputFormat::Markdown => QueryFormat::Markdown,
         });
@@ -216,10 +201,8 @@ pub fn query(db: &Database, default_format: OutputFormat, args: Value) -> Result
             .collect();
 
         // Bind parameters
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params
-            .iter()
-            .map(|s| s as &dyn rusqlite::ToSql)
-            .collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
 
         // Execute and collect rows
         let mut rows_data: Vec<Vec<Value>> = Vec::new();
@@ -426,7 +409,10 @@ mod tests {
         assert_eq!(QueryFormat::from_str("json"), Some(QueryFormat::Json));
         assert_eq!(QueryFormat::from_str("JSON"), Some(QueryFormat::Json));
         assert_eq!(QueryFormat::from_str("csv"), Some(QueryFormat::Csv));
-        assert_eq!(QueryFormat::from_str("markdown"), Some(QueryFormat::Markdown));
+        assert_eq!(
+            QueryFormat::from_str("markdown"),
+            Some(QueryFormat::Markdown)
+        );
         assert_eq!(QueryFormat::from_str("md"), Some(QueryFormat::Markdown));
         assert_eq!(QueryFormat::from_str("invalid"), None);
     }

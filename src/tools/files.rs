@@ -4,10 +4,10 @@ use super::{get_string, get_string_array, get_string_or_array, make_tool_with_pr
 use crate::config::Prompts;
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::{markdown_to_json, OutputFormat};
+use crate::format::{OutputFormat, markdown_to_json};
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Component, Path, PathBuf};
 
 /// Normalize a file path to an absolute, canonical form.
@@ -208,10 +208,9 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 }
 
 pub fn mark_file(db: &Database, args: Value) -> Result<Value> {
-    let worker_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
-    let file_paths = get_string_or_array(&args, "file")
-        .ok_or_else(|| ToolError::missing_field("file"))?;
+    let worker_id = get_string(&args, "agent").ok_or_else(|| ToolError::missing_field("agent"))?;
+    let file_paths =
+        get_string_or_array(&args, "file").ok_or_else(|| ToolError::missing_field("file"))?;
     let task_id = get_string(&args, "task");
     let reason = get_string(&args, "reason");
 
@@ -222,7 +221,12 @@ pub fn mark_file(db: &Database, args: Value) -> Result<Value> {
     let mut warnings = Vec::new();
 
     for file_path in &normalized_paths {
-        let warning = db.lock_file(file_path.clone(), &worker_id, reason.clone(), task_id.clone())?;
+        let warning = db.lock_file(
+            file_path.clone(),
+            &worker_id,
+            reason.clone(),
+            task_id.clone(),
+        )?;
 
         if let Some(other_agent) = warning {
             warnings.push(json!({
@@ -246,8 +250,7 @@ pub fn mark_file(db: &Database, args: Value) -> Result<Value> {
 }
 
 pub fn unmark_file(db: &Database, args: Value) -> Result<Value> {
-    let worker_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
+    let worker_id = get_string(&args, "agent").ok_or_else(|| ToolError::missing_field("agent"))?;
     let reason = get_string(&args, "reason");
     let task_id = get_string(&args, "task");
 
@@ -306,15 +309,16 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
     let worker_id = get_string(&args, "agent");
     let task_id = get_string(&args, "task");
     let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
+        .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
 
     // Require at least one filter
     if files.is_none() && worker_id.is_none() && task_id.is_none() {
         return Err(ToolError::invalid_value(
             "filter",
-            "At least one filter required: agent, task, or files"
-        ).into());
+            "At least one filter required: agent, task, or files",
+        )
+        .into());
     }
 
     // Normalize file paths in the filter if provided
@@ -369,15 +373,12 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
 
 /// Async version of mark_updates.
 pub async fn mark_updates_async(db: std::sync::Arc<Database>, args: Value) -> Result<Value> {
-    let worker_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
+    let worker_id = get_string(&args, "agent").ok_or_else(|| ToolError::missing_field("agent"))?;
 
     // Run on blocking thread pool since db operations are synchronous
-    let updates = tokio::task::spawn_blocking(move || {
-        db.claim_updates(&worker_id)
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))??;
+    let updates = tokio::task::spawn_blocking(move || db.claim_updates(&worker_id))
+        .await
+        .map_err(|e| anyhow::anyhow!("Task join error: {}", e))??;
 
     Ok(json!({
         "new_marks": updates.new_claims.iter().map(|e| json!({
@@ -398,8 +399,7 @@ pub async fn mark_updates_async(db: std::sync::Arc<Database>, args: Value) -> Re
 
 /// Synchronous version of mark_updates.
 pub fn mark_updates(db: &Database, args: Value) -> Result<Value> {
-    let worker_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
+    let worker_id = get_string(&args, "agent").ok_or_else(|| ToolError::missing_field("agent"))?;
 
     let updates = db.claim_updates(&worker_id)?;
 
@@ -456,10 +456,7 @@ mod tests {
     #[test]
     fn test_normalize_file_paths() {
         // Test that normalization is applied to all paths in a vector
-        let paths = vec![
-            "src/main.rs".to_string(),
-            "./src/lib.rs".to_string(),
-        ];
+        let paths = vec!["src/main.rs".to_string(), "./src/lib.rs".to_string()];
         let normalized = normalize_file_paths(paths);
 
         // All paths should be absolute (start with / or drive letter on Windows)

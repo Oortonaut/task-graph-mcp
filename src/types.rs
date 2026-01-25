@@ -87,8 +87,6 @@ pub struct TaskTree {
     pub children: Vec<TaskTree>,
 }
 
-
-
 /// Input for creating a task tree.
 /// Supports all fields from task creation, plus tree-specific fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,36 +96,36 @@ pub struct TaskTreeInput {
     /// Other fields are ignored when ref is set.
     #[serde(rename = "ref")]
     pub ref_id: Option<String>,
-    
+
     /// Custom task ID (optional, UUID7 generated if not provided).
     /// Ignored if ref is set.
     pub id: Option<String>,
-    
+
     /// Task title (required for new tasks, optional if ref is set).
     #[serde(default)]
     pub title: String,
-    
+
     /// Task description.
     pub description: Option<String>,
-    
+
     /// Task priority.
     pub priority: Option<Priority>,
-    
+
     /// Story points / complexity estimate.
     pub points: Option<i32>,
-    
+
     /// Estimated duration in milliseconds.
     pub time_estimate_ms: Option<i64>,
-    
+
     /// Tags that claiming agent must have ALL of (AND logic).
     pub needed_tags: Option<Vec<String>>,
 
     /// Tags that claiming agent must have AT LEAST ONE of (OR logic).
     pub wanted_tags: Option<Vec<String>>,
-    
+
     /// Categorization/discovery tags for the task.
     pub tags: Option<Vec<String>>,
-    
+
     /// Child nodes in the tree.
     #[serde(default)]
     pub children: Vec<TaskTreeInput>,
@@ -195,7 +193,7 @@ impl ClaimEventType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "claimed" => Some(ClaimEventType::Claimed),
             "released" => Some(ClaimEventType::Released),
@@ -286,7 +284,6 @@ pub struct ScanResult {
     pub below: Vec<Task>,
 }
 
-
 /// Summary of disconnect operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisconnectSummary {
@@ -316,7 +313,4 @@ pub struct CleanupSummary {
 #[cfg(test)]
 mod tests {
     // Priority tests removed - Priority is now a type alias for i32
-
-
-
 }

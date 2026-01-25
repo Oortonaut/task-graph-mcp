@@ -2,11 +2,11 @@
 //!
 //! These tests verify the read-only SQL query functionality.
 
+use serde_json::{Value, json};
 use task_graph_mcp::config::StatesConfig;
 use task_graph_mcp::db::Database;
 use task_graph_mcp::format::{OutputFormat, ToolResult};
 use task_graph_mcp::tools::query;
-use serde_json::{json, Value};
 
 /// Helper to extract JSON from ToolResult.
 fn unwrap_json(result: ToolResult) -> Value {
@@ -44,22 +44,41 @@ fn query_select_all_tasks() {
         None,
         "Task 1".to_string(),
         None,
-        None, None, None, None, None, None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         &states_config,
-    ).unwrap();
+    )
+    .unwrap();
 
     db.create_task(
         None,
         "Task 2".to_string(),
         None,
-        None, None, None, None, None, None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         &states_config,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Query all tasks
-    let result = unwrap_json(query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT id, title FROM tasks ORDER BY created_at"
-    })).unwrap());
+    let result = unwrap_json(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "SELECT id, title FROM tasks ORDER BY created_at"
+            }),
+        )
+        .unwrap(),
+    );
 
     assert_eq!(result["row_count"], 2);
     assert!(!result["truncated"].as_bool().unwrap());
@@ -77,27 +96,47 @@ fn query_with_parameters() {
     let states_config = default_states_config();
 
     // Create test tasks
-    let task = db.create_task(
-        None,
-        "Find Me".to_string(),
-        None,
-        None, None, None, None, None, None,
-        &states_config,
-    ).unwrap();
+    let task = db
+        .create_task(
+            None,
+            "Find Me".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
 
     db.create_task(
         None,
         "Other Task".to_string(),
         None,
-        None, None, None, None, None, None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         &states_config,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Query with parameter
-    let result = unwrap_json(query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT id, title FROM tasks WHERE id = ?",
-        "params": [task.id]
-    })).unwrap());
+    let result = unwrap_json(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "SELECT id, title FROM tasks WHERE id = ?",
+                "params": [task.id]
+            }),
+        )
+        .unwrap(),
+    );
 
     assert_eq!(result["row_count"], 1);
     let rows = result["rows"].as_array().unwrap();
@@ -115,16 +154,29 @@ fn query_enforces_row_limit() {
             None,
             format!("Task {}", i),
             None,
-            None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             &states_config,
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     // Query with limit of 5
-    let result = unwrap_json(query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT id, title FROM tasks",
-        "limit": 5
-    })).unwrap());
+    let result = unwrap_json(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "SELECT id, title FROM tasks",
+                "limit": 5
+            }),
+        )
+        .unwrap(),
+    );
 
     assert_eq!(result["row_count"], 5);
     assert!(result["truncated"].as_bool().unwrap());
@@ -140,14 +192,28 @@ fn query_csv_format() {
     db.create_task(
         None,
         "CSV Task".to_string(),
-        None, None, None, None, None, None, None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         &states_config,
-    ).unwrap();
+    )
+    .unwrap();
 
-    let csv_data = unwrap_raw(query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT title, status FROM tasks",
-        "format": "csv"
-    })).unwrap());
+    let csv_data = unwrap_raw(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "SELECT title, status FROM tasks",
+                "format": "csv"
+            }),
+        )
+        .unwrap(),
+    );
 
     assert!(csv_data.contains("title,status"));
     assert!(csv_data.contains("CSV Task"));
@@ -163,14 +229,27 @@ fn query_markdown_format() {
         None,
         "Markdown Task".to_string(),
         None,
-        None, None, None, None, None, None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         &states_config,
-    ).unwrap();
+    )
+    .unwrap();
 
-    let md_data = unwrap_raw(query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT title FROM tasks",
-        "format": "markdown"
-    })).unwrap());
+    let md_data = unwrap_raw(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "SELECT title FROM tasks",
+                "format": "markdown"
+            }),
+        )
+        .unwrap(),
+    );
 
     assert!(md_data.contains("| title |"));
     assert!(md_data.contains("| --- |"));
@@ -181,9 +260,13 @@ fn query_markdown_format() {
 fn query_rejects_insert() {
     let db = setup_db();
 
-    let result = query::query(&db, OutputFormat::Json, json!({
-        "sql": "INSERT INTO tasks (id, title) VALUES ('x', 'bad')"
-    }));
+    let result = query::query(
+        &db,
+        OutputFormat::Json,
+        json!({
+            "sql": "INSERT INTO tasks (id, title) VALUES ('x', 'bad')"
+        }),
+    );
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -194,9 +277,13 @@ fn query_rejects_insert() {
 fn query_rejects_update() {
     let db = setup_db();
 
-    let result = query::query(&db, OutputFormat::Json, json!({
-        "sql": "UPDATE tasks SET title = 'hacked'"
-    }));
+    let result = query::query(
+        &db,
+        OutputFormat::Json,
+        json!({
+            "sql": "UPDATE tasks SET title = 'hacked'"
+        }),
+    );
 
     assert!(result.is_err());
 }
@@ -205,9 +292,13 @@ fn query_rejects_update() {
 fn query_rejects_delete() {
     let db = setup_db();
 
-    let result = query::query(&db, OutputFormat::Json, json!({
-        "sql": "DELETE FROM tasks"
-    }));
+    let result = query::query(
+        &db,
+        OutputFormat::Json,
+        json!({
+            "sql": "DELETE FROM tasks"
+        }),
+    );
 
     assert!(result.is_err());
 }
@@ -216,9 +307,13 @@ fn query_rejects_delete() {
 fn query_rejects_drop() {
     let db = setup_db();
 
-    let result = query::query(&db, OutputFormat::Json, json!({
-        "sql": "DROP TABLE tasks"
-    }));
+    let result = query::query(
+        &db,
+        OutputFormat::Json,
+        json!({
+            "sql": "DROP TABLE tasks"
+        }),
+    );
 
     assert!(result.is_err());
 }
@@ -227,9 +322,13 @@ fn query_rejects_drop() {
 fn query_rejects_multiple_statements() {
     let db = setup_db();
 
-    let result = query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT 1; DROP TABLE tasks;"
-    }));
+    let result = query::query(
+        &db,
+        OutputFormat::Json,
+        json!({
+            "sql": "SELECT 1; DROP TABLE tasks;"
+        }),
+    );
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -241,9 +340,13 @@ fn query_allows_column_names_with_keywords() {
     let db = setup_db();
 
     // This should work - "deleted_at" contains "DELETE" but it's a column name
-    let result = query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT id, status FROM tasks WHERE status = 'pending'"
-    }));
+    let result = query::query(
+        &db,
+        OutputFormat::Json,
+        json!({
+            "sql": "SELECT id, status FROM tasks WHERE status = 'pending'"
+        }),
+    );
 
     assert!(result.is_ok());
 }
@@ -257,13 +360,26 @@ fn query_with_cte() {
         None,
         "CTE Task".to_string(),
         None,
-        None, None, None, None, None, None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         &states_config,
-    ).unwrap();
+    )
+    .unwrap();
 
-    let result = unwrap_json(query::query(&db, OutputFormat::Json, json!({
-        "sql": "WITH task_list AS (SELECT id, title FROM tasks) SELECT * FROM task_list"
-    })).unwrap());
+    let result = unwrap_json(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "WITH task_list AS (SELECT id, title FROM tasks) SELECT * FROM task_list"
+            }),
+        )
+        .unwrap(),
+    );
 
     assert_eq!(result["row_count"], 1);
 }
@@ -273,10 +389,17 @@ fn query_max_limit_enforced() {
     let db = setup_db();
 
     // Try to set limit above max (1000)
-    let result = unwrap_json(query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT 1",
-        "limit": 5000
-    })).unwrap());
+    let result = unwrap_json(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "SELECT 1",
+                "limit": 5000
+            }),
+        )
+        .unwrap(),
+    );
 
     // Should be clamped to 1000
     assert_eq!(result["limit"], 1000);
@@ -287,9 +410,16 @@ fn query_default_limit() {
     let db = setup_db();
 
     // Without explicit limit, should use default (100)
-    let result = unwrap_json(query::query(&db, OutputFormat::Json, json!({
-        "sql": "SELECT 1"
-    })).unwrap());
+    let result = unwrap_json(
+        query::query(
+            &db,
+            OutputFormat::Json,
+            json!({
+                "sql": "SELECT 1"
+            }),
+        )
+        .unwrap(),
+    );
 
     assert_eq!(result["limit"], 100);
 }

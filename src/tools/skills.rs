@@ -7,7 +7,7 @@ use super::make_tool;
 use crate::resources::skills::{get_skill_resource, is_skill_approved, list_skills};
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 
 /// Get all skill-related tools.

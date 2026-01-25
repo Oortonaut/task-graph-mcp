@@ -6,7 +6,7 @@ use crate::db::Database;
 use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_tools(prompts: &Prompts, deps_config: &DependenciesConfig) -> Vec<Tool> {
     // Build enum of dependency types from config
@@ -130,18 +130,19 @@ pub fn get_tools(prompts: &Prompts, deps_config: &DependenciesConfig) -> Vec<Too
 pub fn link(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Result<Value> {
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
-    
+
     // Parse from: string or array of strings
-    let from_ids: Vec<String> = if let Some(from_array) = args.get("from").and_then(|v| v.as_array()) {
-        from_array
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(from_id) = get_string(&args, "from") {
-        vec![from_id]
-    } else {
-        return Err(ToolError::missing_field("from").into());
-    };
+    let from_ids: Vec<String> =
+        if let Some(from_array) = args.get("from").and_then(|v| v.as_array()) {
+            from_array
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        } else if let Some(from_id) = get_string(&args, "from") {
+            vec![from_id]
+        } else {
+            return Err(ToolError::missing_field("from").into());
+        };
 
     // Parse to: string or array of strings
     let to_ids: Vec<String> = if let Some(to_array) = args.get("to").and_then(|v| v.as_array()) {
@@ -156,10 +157,18 @@ pub fn link(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Res
     };
 
     if from_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'from' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'from' task ID must be provided",
+        )
+        .into());
     }
     if to_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'to' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'to' task ID must be provided",
+        )
+        .into());
     }
 
     let dep_type = get_string(&args, "type").unwrap_or_else(|| "blocks".to_string());
@@ -196,18 +205,19 @@ pub fn link(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Res
 pub fn unlink(db: &Database, args: Value) -> Result<Value> {
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
-    
+
     // Parse from: string or array of strings
-    let from_ids: Vec<String> = if let Some(from_array) = args.get("from").and_then(|v| v.as_array()) {
-        from_array
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(from_id) = get_string(&args, "from") {
-        vec![from_id]
-    } else {
-        return Err(ToolError::missing_field("from").into());
-    };
+    let from_ids: Vec<String> =
+        if let Some(from_array) = args.get("from").and_then(|v| v.as_array()) {
+            from_array
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        } else if let Some(from_id) = get_string(&args, "from") {
+            vec![from_id]
+        } else {
+            return Err(ToolError::missing_field("from").into());
+        };
 
     // Parse to: string or array of strings
     let to_ids: Vec<String> = if let Some(to_array) = args.get("to").and_then(|v| v.as_array()) {
@@ -222,10 +232,18 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
     };
 
     if from_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'from' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'from' task ID must be provided",
+        )
+        .into());
     }
     if to_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'to' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'to' task ID must be provided",
+        )
+        .into());
     }
 
     let dep_type = get_string(&args, "type").unwrap_or_else(|| "blocks".to_string());
@@ -240,8 +258,9 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
     if from_is_wildcard && to_is_wildcard {
         return Err(ToolError::new(
             crate::error::ErrorCode::InvalidFieldValue,
-            "Cannot use wildcard '*' for both 'from' and 'to'"
-        ).into());
+            "Cannot use wildcard '*' for both 'from' and 'to'",
+        )
+        .into());
     }
 
     if to_is_wildcard {
@@ -316,24 +335,25 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
     }))
 }
 
-
 pub fn relink(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Result<Value> {
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
-    
+
     // Parse prev_from: string or array of strings
-    let prev_from_ids: Vec<String> = if let Some(arr) = args.get("prev_from").and_then(|v| v.as_array()) {
-        arr.iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(id) = get_string(&args, "prev_from") {
-        vec![id]
-    } else {
-        return Err(ToolError::missing_field("prev_from").into());
-    };
+    let prev_from_ids: Vec<String> =
+        if let Some(arr) = args.get("prev_from").and_then(|v| v.as_array()) {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        } else if let Some(id) = get_string(&args, "prev_from") {
+            vec![id]
+        } else {
+            return Err(ToolError::missing_field("prev_from").into());
+        };
 
     // Parse prev_to: string or array of strings
-    let prev_to_ids: Vec<String> = if let Some(arr) = args.get("prev_to").and_then(|v| v.as_array()) {
+    let prev_to_ids: Vec<String> = if let Some(arr) = args.get("prev_to").and_then(|v| v.as_array())
+    {
         arr.iter()
             .filter_map(|v| v.as_str().map(String::from))
             .collect()
@@ -366,27 +386,54 @@ pub fn relink(db: &Database, deps_config: &DependenciesConfig, args: Value) -> R
     };
 
     if prev_from_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'prev_from' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'prev_from' task ID must be provided",
+        )
+        .into());
     }
     if prev_to_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'prev_to' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'prev_to' task ID must be provided",
+        )
+        .into());
     }
     if from_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'from' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'from' task ID must be provided",
+        )
+        .into());
     }
     if to_ids.is_empty() {
-        return Err(ToolError::new(crate::error::ErrorCode::InvalidFieldValue, "At least one 'to' task ID must be provided").into());
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "At least one 'to' task ID must be provided",
+        )
+        .into());
     }
 
     // Default to 'contains' for relink (moving children between parents)
     let dep_type = get_string(&args, "type").unwrap_or_else(|| "contains".to_string());
 
-    match db.relink(&prev_from_ids, &prev_to_ids, &from_ids, &to_ids, &dep_type, deps_config) {
+    match db.relink(
+        &prev_from_ids,
+        &prev_to_ids,
+        &from_ids,
+        &to_ids,
+        &dep_type,
+        deps_config,
+    ) {
         Ok(result) => {
-            let unlinked: Vec<Value> = result.unlinked.iter()
+            let unlinked: Vec<Value> = result
+                .unlinked
+                .iter()
                 .map(|(from, to)| json!({"from": from, "to": to}))
                 .collect();
-            let linked: Vec<Value> = result.linked.iter()
+            let linked: Vec<Value> = result
+                .linked
+                .iter()
                 .map(|(from, to)| json!({"from": from, "to": to}))
                 .collect();
 
@@ -399,12 +446,10 @@ pub fn relink(db: &Database, deps_config: &DependenciesConfig, args: Value) -> R
                 "type": dep_type
             }))
         }
-        Err(e) => {
-            Ok(json!({
-                "success": false,
-                "error": e.to_string(),
-                "type": dep_type
-            }))
-        }
+        Err(e) => Ok(json!({
+            "success": false,
+            "error": e.to_string(),
+            "type": dep_type
+        })),
     }
 }

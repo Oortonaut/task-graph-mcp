@@ -161,6 +161,5 @@ impl From<anyhow::Error> for ToolError {
     }
 }
 
-
 /// Result type for tool operations.
 pub type ToolResult<T> = std::result::Result<T, ToolError>;

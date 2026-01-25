@@ -1,8 +1,8 @@
 //! Attachment storage operations.
 
-use super::{now_ms, Database};
+use super::{Database, now_ms};
 use crate::types::{Attachment, AttachmentMeta};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rusqlite::params;
 
 impl Database {
@@ -65,7 +65,11 @@ impl Database {
 
     /// Get attachments for a task, optionally including content.
     /// Note: For file-based attachments, content is NOT loaded here - use get_attachment for that.
-    pub fn get_attachments_full(&self, task_id: &str, include_content: bool) -> Result<Vec<Attachment>> {
+    pub fn get_attachments_full(
+        &self,
+        task_id: &str,
+        include_content: bool,
+    ) -> Result<Vec<Attachment>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT task_id, order_index, name, mime_type, content, file_path, created_at
@@ -87,7 +91,11 @@ impl Database {
                         order_index,
                         name,
                         mime_type,
-                        content: if include_content { content } else { String::new() },
+                        content: if include_content {
+                            content
+                        } else {
+                            String::new()
+                        },
                         file_path,
                         created_at,
                     })
@@ -104,7 +112,6 @@ impl Database {
         self.get_attachments_filtered(task_id, None, None)
     }
 
-
     /// Get attachments for a task with optional filtering (metadata only).
     /// - name_pattern: Optional glob pattern (with * wildcard) to filter by attachment name
     /// - mime_pattern: Optional prefix to filter by MIME type (e.g., "image/" matches "image/png")
@@ -118,7 +125,7 @@ impl Database {
             // Build query with optional filters
             let mut sql = String::from(
                 "SELECT task_id, order_index, name, mime_type, file_path, created_at
-                 FROM attachments WHERE task_id = ?1"
+                 FROM attachments WHERE task_id = ?1",
             );
 
             // For name pattern, convert glob to SQL LIKE pattern
@@ -150,13 +157,10 @@ impl Database {
                     .filter_map(|r| r.ok())
                     .collect()
                 }
-                (Some(name), None) => {
-                    stmt.query_map(params![task_id, name], |row| {
-                        Self::map_attachment_meta(row)
-                    })?
+                (Some(name), None) => stmt
+                    .query_map(params![task_id, name], Self::map_attachment_meta)?
                     .filter_map(|r| r.ok())
-                    .collect()
-                }
+                    .collect(),
                 (None, Some(mime)) => {
                     let mime_like = format!("{}%", mime);
                     stmt.query_map(params![task_id, mime_like], |row| {
@@ -165,13 +169,10 @@ impl Database {
                     .filter_map(|r| r.ok())
                     .collect()
                 }
-                (None, None) => {
-                    stmt.query_map(params![task_id], |row| {
-                        Self::map_attachment_meta(row)
-                    })?
+                (None, None) => stmt
+                    .query_map(params![task_id], Self::map_attachment_meta)?
                     .filter_map(|r| r.ok())
-                    .collect()
-                }
+                    .collect(),
             };
 
             Ok(attachments)
@@ -229,7 +230,11 @@ impl Database {
     }
 
     /// Get just the file_path for an attachment (useful before deletion).
-    pub fn get_attachment_file_path(&self, task_id: &str, order_index: i32) -> Result<Option<String>> {
+    pub fn get_attachment_file_path(
+        &self,
+        task_id: &str,
+        order_index: i32,
+    ) -> Result<Option<String>> {
         self.with_conn(|conn| {
             let result = conn.query_row(
                 "SELECT file_path FROM attachments WHERE task_id = ?1 AND order_index = ?2",
@@ -257,7 +262,6 @@ impl Database {
         })
     }
 
-
     /// Delete an attachment by name (for replace behavior).
     /// Returns the file_path if one was set (for cleanup).
     pub fn delete_attachment_by_name(&self, task_id: &str, name: &str) -> Result<Option<String>> {
@@ -284,7 +288,11 @@ impl Database {
 
     /// Delete an attachment by name and return whether it was deleted plus the file_path.
     /// Returns (was_deleted, file_path).
-    pub fn delete_attachment_by_name_ex(&self, task_id: &str, name: &str) -> Result<(bool, Option<String>)> {
+    pub fn delete_attachment_by_name_ex(
+        &self,
+        task_id: &str,
+        name: &str,
+    ) -> Result<(bool, Option<String>)> {
         self.with_conn(|conn| {
             // First get the file_path if any
             let file_path: Option<String> = conn

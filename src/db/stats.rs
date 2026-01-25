@@ -115,6 +115,7 @@ impl Database {
             };
 
             // Query base stats - returns 14 columns now
+            #[allow(clippy::type_complexity)]
             let (
                 total_tasks,
                 total_points,
@@ -122,33 +123,84 @@ impl Database {
                 total_time_estimate_ms,
                 total_time_actual_ms,
                 total_cost_usd,
-                m0, m1, m2, m3, m4, m5, m6, m7,
-            ): (i64, i64, i64, i64, i64, f64, i64, i64, i64, i64, i64, i64, i64, i64) = if params_vec.is_empty()
-            {
+                m0,
+                m1,
+                m2,
+                m3,
+                m4,
+                m5,
+                m6,
+                m7,
+            ): (
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                f64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+            ) = if params_vec.is_empty() {
                 conn.query_row(&base_sql, [], |row| {
                     Ok((
-                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-                        row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
-                        row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
-                        row.get(12)?, row.get(13)?,
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                        row.get(13)?,
                     ))
                 })?
             } else if params_vec.len() == 1 {
                 conn.query_row(&base_sql, params![params_vec[0]], |row| {
                     Ok((
-                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-                        row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
-                        row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
-                        row.get(12)?, row.get(13)?,
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                        row.get(13)?,
                     ))
                 })?
             } else {
                 conn.query_row(&base_sql, params![params_vec[0], params_vec[1]], |row| {
                     Ok((
-                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-                        row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
-                        row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
-                        row.get(12)?, row.get(13)?,
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                        row.get(13)?,
                     ))
                 })?
             };
@@ -197,19 +249,28 @@ impl Database {
                     let status: String = row.get(0)?;
                     let count: i64 = row.get(1)?;
                     Ok((status, count))
-                })?.filter_map(|r| r.ok()).collect()
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
             } else if params_vec.len() == 1 {
                 stmt.query_map(params![params_vec[0].clone()], |row| {
                     let status: String = row.get(0)?;
                     let count: i64 = row.get(1)?;
                     Ok((status, count))
-                })?.filter_map(|r| r.ok()).collect()
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
             } else {
-                stmt.query_map(params![params_vec[0].clone(), params_vec[1].clone()], |row| {
-                    let status: String = row.get(0)?;
-                    let count: i64 = row.get(1)?;
-                    Ok((status, count))
-                })?.filter_map(|r| r.ok()).collect()
+                stmt.query_map(
+                    params![params_vec[0].clone(), params_vec[1].clone()],
+                    |row| {
+                        let status: String = row.get(0)?;
+                        let count: i64 = row.get(1)?;
+                        Ok((status, count))
+                    },
+                )?
+                .filter_map(|r| r.ok())
+                .collect()
             };
 
             for (status, count) in status_counts {

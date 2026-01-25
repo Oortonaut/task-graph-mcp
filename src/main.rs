@@ -5,27 +5,29 @@
 
 use anyhow::Result;
 use clap::Parser;
-use task_graph_mcp::config::{AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, Prompts, ServerPaths, StatesConfig};
-use task_graph_mcp::format::OutputFormat;
-use task_graph_mcp::error::ToolError;
-use task_graph_mcp::db::Database;
-use task_graph_mcp::resources::ResourceHandler;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResult, Content, InitializeResult,
-        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
-        PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResult,
-        ResourceContents, ServerCapabilities,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
     },
     service::RequestContext,
     transport::io::stdio,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs::OpenOptions;
 use std::sync::Arc;
+use task_graph_mcp::config::{
+    AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, Prompts, ServerPaths,
+    StatesConfig,
+};
+use task_graph_mcp::db::Database;
+use task_graph_mcp::error::ToolError;
+use task_graph_mcp::format::OutputFormat;
+use task_graph_mcp::resources::ResourceHandler;
 use task_graph_mcp::tools::ToolHandler;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 /// Task Graph MCP Server
@@ -66,6 +68,7 @@ struct TaskGraphServer {
 }
 
 impl TaskGraphServer {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         db: Arc<Database>,
         media_dir: std::path::PathBuf,
@@ -106,7 +109,9 @@ Use get_skill(\"basics\") for full documentation.";
 
 impl ServerHandler for TaskGraphServer {
     fn get_info(&self) -> InitializeResult {
-        let instructions = self.prompts.instructions
+        let instructions = self
+            .prompts
+            .instructions
             .clone()
             .unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string());
 
@@ -125,8 +130,7 @@ impl ServerHandler for TaskGraphServer {
                 }),
                 ..Default::default()
             },
-            instructions: Some(instructions.into()),
-            ..Default::default()
+            instructions: Some(instructions),
         }
     }
 
@@ -158,9 +162,8 @@ impl ServerHandler for TaskGraphServer {
             Err(e) => {
                 // Try to downcast to ToolError for structured response
                 let error_json = match e.downcast::<ToolError>() {
-                    Ok(tool_err) => serde_json::to_string(&tool_err).unwrap_or_else(|_| {
-                        json!({ "error": tool_err.to_string() }).to_string()
-                    }),
+                    Ok(tool_err) => serde_json::to_string(&tool_err)
+                        .unwrap_or_else(|_| json!({ "error": tool_err.to_string() }).to_string()),
                     Err(e) => json!({
                         "code": "INTERNAL_ERROR",
                         "message": e.to_string()
@@ -227,7 +230,11 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging based on --log option
-    let level = if args.verbose { Level::DEBUG } else { Level::INFO };
+    let level = if args.verbose {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
     match args.log.as_str() {
         "0" | "off" => {
             // No logging
@@ -292,7 +299,10 @@ async fn main() -> Result<()> {
     // Load prompts
     let prompts = Arc::new(Prompts::load_or_default());
 
-    info!("Starting Task Graph MCP Server v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting Task Graph MCP Server v{}",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("Database: {:?}", config.server.db_path);
     info!("Media dir: {:?}", config.server.media_dir);
     info!("Log dir: {:?}", config.server.log_dir);

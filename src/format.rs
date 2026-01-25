@@ -1,7 +1,7 @@
 //! Output formatting utilities for markdown and JSON.
 
 use crate::config::StatesConfig;
-use crate::types::{ScanResult, Task, TaskTree, WorkerInfo, PRIORITY_DEFAULT};
+use crate::types::{PRIORITY_DEFAULT, ScanResult, Task, TaskTree, WorkerInfo};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -15,7 +15,7 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "json" => Some(OutputFormat::Json),
             "markdown" | "md" => Some(OutputFormat::Markdown),
@@ -86,22 +86,20 @@ pub fn format_tasks_markdown(
 
     // First, output blocking states (excluding initial state)
     for state in &states_config.blocking_states {
-        if state != &states_config.initial {
-            if let Some(state_tasks) = by_status.get(state) {
-                if !state_tasks.is_empty() {
+        if state != &states_config.initial
+            && let Some(state_tasks) = by_status.get(state)
+                && !state_tasks.is_empty() {
                     md.push_str(&format!("## {}\n\n", format_state_name(state)));
                     for (task, blocked_by) in state_tasks {
                         md.push_str(&format_task_short(task, blocked_by));
                     }
                     md.push('\n');
                 }
-            }
-        }
     }
 
     // Then initial state
-    if let Some(state_tasks) = by_status.get(&states_config.initial) {
-        if !state_tasks.is_empty() {
+    if let Some(state_tasks) = by_status.get(&states_config.initial)
+        && !state_tasks.is_empty() {
             md.push_str(&format!(
                 "## {}\n\n",
                 format_state_name(&states_config.initial)
@@ -111,21 +109,18 @@ pub fn format_tasks_markdown(
             }
             md.push('\n');
         }
-    }
 
     // Then non-blocking states (terminal states like completed, failed, cancelled)
     for state in states_config.state_names() {
-        if !states_config.is_blocking_state(state) && state != &states_config.initial {
-            if let Some(state_tasks) = by_status.get(state) {
-                if !state_tasks.is_empty() {
+        if !states_config.is_blocking_state(state) && state != states_config.initial
+            && let Some(state_tasks) = by_status.get(state)
+                && !state_tasks.is_empty() {
                     md.push_str(&format!("## {}\n\n", format_state_name(state)));
                     for (task, blocked_by) in state_tasks {
                         md.push_str(&format_task_short(task, blocked_by));
                     }
                     md.push('\n');
                 }
-            }
-        }
     }
 
     md
@@ -148,11 +143,7 @@ fn format_state_name(state: &str) -> String {
 
 /// Format a task in short form for lists.
 fn format_task_short(task: &Task, blocked_by: &[String]) -> String {
-    let priority_marker = if task.priority > 0 {
-        "!!! "
-    } else {
-        ""
-    };
+    let priority_marker = if task.priority > 0 { "!!! " } else { "" };
 
     let blocked = if blocked_by.is_empty() {
         String::new()
@@ -160,11 +151,15 @@ fn format_task_short(task: &Task, blocked_by: &[String]) -> String {
         format!(" [blocked by {}]", blocked_by.len())
     };
 
-    let owner = task.worker_id.as_ref()
+    let owner = task
+        .worker_id
+        .as_ref()
         .map(|o| format!(" @{}", o))
         .unwrap_or_default();
 
-    let thought = task.current_thought.as_ref()
+    let thought = task
+        .current_thought
+        .as_ref()
         .map(|t| format!(" - _{}_", t))
         .unwrap_or_default();
 
@@ -188,12 +183,15 @@ pub fn format_workers_markdown(workers: &[WorkerInfo]) -> String {
     for worker in workers {
         md.push_str(&format!("## {}\n", worker.id));
         md.push_str(&format!("- **id**: `{}`\n", worker.id));
-        
+
         if !worker.tags.is_empty() {
             md.push_str(&format!("- **tags**: {}\n", worker.tags.join(", ")));
         }
 
-        md.push_str(&format!("- **claims**: {}/{}\n", worker.claim_count, worker.max_claims));
+        md.push_str(&format!(
+            "- **claims**: {}/{}\n",
+            worker.claim_count, worker.max_claims
+        ));
 
         if let Some(ref thought) = worker.current_thought {
             md.push_str(&format!("- **doing**: {}\n", thought));
@@ -204,7 +202,6 @@ pub fn format_workers_markdown(workers: &[WorkerInfo]) -> String {
 
     md
 }
-
 
 /// Format attachments as markdown.
 pub fn format_attachments_markdown(attachments: &[crate::types::AttachmentMeta]) -> String {
@@ -221,15 +218,15 @@ pub fn format_attachments_markdown(attachments: &[crate::types::AttachmentMeta])
         md.push_str(&format!("## {}\n", attachment.name));
         md.push_str(&format!("- **index**: {}\n", attachment.order_index));
         md.push_str(&format!("- **mime**: {}\n", attachment.mime_type));
-        
+
         if let Some(ref fp) = attachment.file_path {
             md.push_str(&format!("- **file**: `{}`\n", fp));
         }
-        
+
         // Format created_at as relative time if possible
         let created_secs = attachment.created_at / 1000;
         md.push_str(&format!("- **created**: {}\n", created_secs));
-        
+
         md.push('\n');
     }
 
@@ -338,7 +335,10 @@ fn format_tree_children(children: &[TaskTree], prefix: &str, md: &mut String) {
             String::new()
         };
 
-        md.push_str(&format!("{}{}{}{}\n", prefix, connector, child.task.title, meta_str));
+        md.push_str(&format!(
+            "{}{}{}{}\n",
+            prefix, connector, child.task.title, meta_str
+        ));
 
         // Recursively format grandchildren
         if !child.children.is_empty() {
@@ -356,11 +356,11 @@ pub fn format_scan_result_markdown(result: &ScanResult) -> String {
     md.push_str(&format!("- **id**: `{}`\\n", result.root.id));
     md.push_str(&format!("- **status**: {}\\n", result.root.status));
     md.push_str(&format!("- **priority**: {}\\n", result.root.priority));
-    
+
     if let Some(ref owner) = result.root.worker_id {
         md.push_str(&format!("- **owner**: {}\\n", owner));
     }
-    
+
     if let Some(ref desc) = result.root.description {
         md.push_str(&format!("\\n{}\\n", desc));
     }
@@ -410,17 +410,16 @@ pub fn format_scan_result_markdown(result: &ScanResult) -> String {
 
 /// Format a task in short form for scan results.
 fn format_scan_task_short(task: &Task) -> String {
-    let priority_marker = if task.priority > 0 {
-        "!!! "
-    } else {
-        ""
-    };
+    let priority_marker = if task.priority > 0 { "!!! " } else { "" };
 
-    let owner = task.worker_id.as_ref()
+    let owner = task
+        .worker_id
+        .as_ref()
         .map(|o| format!(" @{}", o))
         .unwrap_or_default();
 
-    let points = task.points
+    let points = task
+        .points
         .map(|p| format!(" ({} pts)", p))
         .unwrap_or_default();
 
@@ -438,9 +437,15 @@ fn format_scan_task_short(task: &Task) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Priority, Task, TaskTree, PRIORITY_DEFAULT};
+    use crate::types::{PRIORITY_DEFAULT, Priority, Task, TaskTree};
 
-    fn make_test_task(id: &str, title: &str, status: &str, priority: Priority, points: Option<i32>) -> Task {
+    fn make_test_task(
+        id: &str,
+        title: &str,
+        status: &str,
+        priority: Priority,
+        points: Option<i32>,
+    ) -> Task {
         Task {
             id: id.to_string(),
             title: title.to_string(),
@@ -482,23 +487,47 @@ mod tests {
     #[test]
     fn test_format_task_tree_markdown_with_children() {
         let tree = TaskTree {
-            task: make_test_task("root-1", "API Refactoring Sprint", "in_progress", 8, Some(16)),
+            task: make_test_task(
+                "root-1",
+                "API Refactoring Sprint",
+                "in_progress",
+                8,
+                Some(16),
+            ),
             children: vec![
                 TaskTree {
                     task: make_test_task("child-1", "Tier 1: Prerequisites", "pending", 8, Some(9)),
                     children: vec![
                         TaskTree {
-                            task: make_test_task("grandchild-1", "Refactor connect", "completed", PRIORITY_DEFAULT, Some(3)),
+                            task: make_test_task(
+                                "grandchild-1",
+                                "Refactor connect",
+                                "completed",
+                                PRIORITY_DEFAULT,
+                                Some(3),
+                            ),
                             children: vec![],
                         },
                         TaskTree {
-                            task: make_test_task("grandchild-2", "Merge claim/release", "pending", PRIORITY_DEFAULT, Some(5)),
+                            task: make_test_task(
+                                "grandchild-2",
+                                "Merge claim/release",
+                                "pending",
+                                PRIORITY_DEFAULT,
+                                Some(5),
+                            ),
                             children: vec![],
                         },
                     ],
                 },
                 TaskTree {
-                    task: make_test_task("child-2", "Tier 2: Navigation", "pending", PRIORITY_DEFAULT, Some(7)),
+                    task: make_test_task(
+                        "child-2",
+                        "Tier 2: Navigation",
+                        "pending",
+                        PRIORITY_DEFAULT,
+                        Some(7),
+                    ),
                     children: vec![],
                 },
             ],
@@ -523,22 +552,16 @@ mod tests {
     fn test_format_task_tree_markdown_deep_nesting() {
         let tree = TaskTree {
             task: make_test_task("root", "Root", "pending", PRIORITY_DEFAULT, None),
-            children: vec![
-                TaskTree {
-                    task: make_test_task("l1", "Level 1", "pending", PRIORITY_DEFAULT, None),
-                    children: vec![
-                        TaskTree {
-                            task: make_test_task("l2", "Level 2", "pending", PRIORITY_DEFAULT, None),
-                            children: vec![
-                                TaskTree {
-                                    task: make_test_task("l3", "Level 3", "pending", PRIORITY_DEFAULT, None),
-                                    children: vec![],
-                                },
-                            ],
-                        },
-                    ],
-                },
-            ],
+            children: vec![TaskTree {
+                task: make_test_task("l1", "Level 1", "pending", PRIORITY_DEFAULT, None),
+                children: vec![TaskTree {
+                    task: make_test_task("l2", "Level 2", "pending", PRIORITY_DEFAULT, None),
+                    children: vec![TaskTree {
+                        task: make_test_task("l3", "Level 3", "pending", PRIORITY_DEFAULT, None),
+                        children: vec![],
+                    }],
+                }],
+            }],
         };
 
         let result = format_task_tree_markdown(&tree);

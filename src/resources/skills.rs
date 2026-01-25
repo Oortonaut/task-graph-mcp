@@ -14,7 +14,7 @@
 //! Built-in skills and overrides of built-in skills are trusted by default.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -113,8 +113,8 @@ pub fn load_approved_skills(skills_dir: Option<&Path>) -> HashSet<String> {
 
     if let Some(dir) = skills_dir {
         let approvals_path = get_approvals_path(dir);
-        if approvals_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&approvals_path) {
+        if approvals_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&approvals_path) {
                 for line in content.lines() {
                     let name = line.trim();
                     if !name.is_empty() && !name.starts_with('#') {
@@ -122,7 +122,6 @@ pub fn load_approved_skills(skills_dir: Option<&Path>) -> HashSet<String> {
                     }
                 }
             }
-        }
     }
 
     approved
@@ -204,11 +203,16 @@ fn validate_skill_name(name: &str) -> Result<()> {
 
     // Check for path traversal attempts
     if name.contains("..") || name.contains('/') || name.contains('\\') {
-        return Err(anyhow::anyhow!("Invalid skill name: path traversal not allowed"));
+        return Err(anyhow::anyhow!(
+            "Invalid skill name: path traversal not allowed"
+        ));
     }
 
     // Only allow safe characters: alphanumeric, hyphen, underscore
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(anyhow::anyhow!(
             "Invalid skill name: only alphanumeric, hyphen, and underscore allowed"
         ));
@@ -246,15 +250,12 @@ pub fn get_skill(skills_dir: Option<&Path>, name: &str) -> Result<String> {
         let override_path = get_override_path(dir, name);
 
         // Additional safety: ensure the resolved path is within skills_dir
-        if let Ok(canonical_override) = override_path.canonicalize() {
-            if let Ok(canonical_dir) = dir.canonicalize() {
-                if canonical_override.starts_with(&canonical_dir) && override_path.exists() {
-                    return std::fs::read_to_string(&override_path).map_err(|e| {
-                        anyhow::anyhow!("Failed to read skill override: {}", e)
-                    });
+        if let Ok(canonical_override) = override_path.canonicalize()
+            && let Ok(canonical_dir) = dir.canonicalize()
+                && canonical_override.starts_with(&canonical_dir) && override_path.exists() {
+                    return std::fs::read_to_string(&override_path)
+                        .map_err(|e| anyhow::anyhow!("Failed to read skill override: {}", e));
                 }
-            }
-        }
     }
 
     // Fall back to embedded
@@ -295,9 +296,9 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
         .collect();
 
     // Also check for custom skills in the override directory
-    if let Some(dir) = skills_dir {
-        if dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(dir) {
+    if let Some(dir) = skills_dir
+        && dir.exists()
+            && let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
@@ -307,7 +308,10 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
                             let normalized = normalize_name(&name);
 
                             // Skip if it's an override of a known skill
-                            if SKILLS.iter().any(|s| s.name == normalized || s.full_name == name) {
+                            if SKILLS
+                                .iter()
+                                .any(|s| s.name == normalized || s.full_name == name)
+                            {
                                 continue;
                             }
 
@@ -330,8 +334,6 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
                     }
                 }
             }
-        }
-    }
 
     Ok(json!({
         "skills": skills_list,

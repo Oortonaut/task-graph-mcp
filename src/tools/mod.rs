@@ -12,7 +12,9 @@ pub mod skills;
 pub mod tasks;
 pub mod tracking;
 
-use crate::config::{AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, ServerPaths, StatesConfig};
+use crate::config::{
+    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, ServerPaths, StatesConfig,
+};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{OutputFormat, ToolResult};
@@ -37,6 +39,7 @@ pub struct ToolHandler {
 }
 
 impl ToolHandler {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Arc<Database>,
         media_dir: PathBuf,
@@ -113,30 +116,55 @@ impl ToolHandler {
             // Worker tools
             "connect" => json(agents::connect(&self.db, &self.server_paths, arguments)),
             "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
-            "list_agents" => agents::list_agents(&self.db, &self.states_config, self.default_format, arguments),
-            "cleanup_stale" => json(agents::cleanup_stale(&self.db, &self.states_config, arguments)),
+            "list_agents" => agents::list_agents(
+                &self.db,
+                &self.states_config,
+                self.default_format,
+                arguments,
+            ),
+            "cleanup_stale" => json(agents::cleanup_stale(
+                &self.db,
+                &self.states_config,
+                arguments,
+            )),
 
             // Task tools
             "create" => json(tasks::create(&self.db, &self.states_config, arguments)),
             "create_tree" => json(tasks::create_tree(&self.db, &self.states_config, arguments)),
             "get" => json(tasks::get(&self.db, self.default_format, arguments)),
-            "list_tasks" => {
-                json(tasks::list_tasks(&self.db, &self.states_config, &self.deps_config, self.default_format, arguments))
-            }
-            "update" => json(tasks::update(&self.db, &self.attachments_config, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),
+            "list_tasks" => json(tasks::list_tasks(
+                &self.db,
+                &self.states_config,
+                &self.deps_config,
+                self.default_format,
+                arguments,
+            )),
+            "update" => json(tasks::update(
+                &self.db,
+                &self.attachments_config,
+                &self.states_config,
+                &self.deps_config,
+                &self.auto_advance,
+                arguments,
+            )),
             "delete" => json(tasks::delete(&self.db, arguments)),
             "scan" => json(tasks::scan(&self.db, self.default_format, arguments)),
 
             // Tracking tools
             "thinking" => json(tracking::thinking(&self.db, arguments)),
-            "task_history" => {
-                json(tracking::task_history(&self.db, &self.states_config, self.default_format, arguments))
-            }
+            "task_history" => json(tracking::task_history(
+                &self.db,
+                &self.states_config,
+                self.default_format,
+                arguments,
+            )),
             "log_metrics" => json(tracking::log_metrics(&self.db, arguments)),
             "get_metrics" => json(tracking::get_metrics(&self.db, arguments)),
-            "project_history" => {
-                json(tracking::project_history(&self.db, self.default_format, arguments))
-            }
+            "project_history" => json(tracking::project_history(
+                &self.db,
+                self.default_format,
+                arguments,
+            )),
 
             // Dependency tools
             "link" => json(deps::link(&self.db, &self.deps_config, arguments)),
@@ -144,17 +172,35 @@ impl ToolHandler {
             "relink" => json(deps::relink(&self.db, &self.deps_config, arguments)),
 
             // Claiming tools
-            "claim" => json(claiming::claim(&self.db, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),
+            "claim" => json(claiming::claim(
+                &self.db,
+                &self.states_config,
+                &self.deps_config,
+                &self.auto_advance,
+                arguments,
+            )),
 
             // File coordination tools
             "mark_file" => json(files::mark_file(&self.db, arguments)),
             "unmark_file" => json(files::unmark_file(&self.db, arguments)),
             "list_marks" => json(files::list_marks(&self.db, self.default_format, arguments)),
-            "mark_updates" => json(files::mark_updates_async(std::sync::Arc::clone(&self.db), arguments).await),
+            "mark_updates" => {
+                json(files::mark_updates_async(std::sync::Arc::clone(&self.db), arguments).await)
+            }
 
             // Attachment tools
-            "attach" => json(attachments::attach(&self.db, &self.media_dir, &self.attachments_config, arguments)),
-            "attachments" => json(attachments::attachments(&self.db, &self.media_dir, self.default_format, arguments)),
+            "attach" => json(attachments::attach(
+                &self.db,
+                &self.media_dir,
+                &self.attachments_config,
+                arguments,
+            )),
+            "attachments" => json(attachments::attachments(
+                &self.db,
+                &self.media_dir,
+                self.default_format,
+                arguments,
+            )),
             "detach" => json(attachments::detach(&self.db, &self.media_dir, arguments)),
 
             // Skill tools
@@ -181,10 +227,7 @@ pub fn make_tool(name: &str, description: &str, properties: Value, required: Vec
     let input_schema = rmcp::model::JsonObject::from_iter([
         ("type".to_string(), serde_json::json!("object")),
         ("properties".to_string(), properties),
-        (
-            "required".to_string(),
-            serde_json::json!(required),
-        ),
+        ("required".to_string(), serde_json::json!(required)),
     ]);
 
     Tool::new(name.to_string(), description.to_string(), input_schema)
@@ -248,15 +291,8 @@ pub fn get_string_or_array(args: &Value, key: &str) -> Option<Vec<String>> {
         if let Some(s) = v.as_str() {
             // Single string - wrap in vec
             Some(vec![s.to_string()])
-        } else if let Some(arr) = v.as_array() {
-            // Array of strings
-            Some(
-                arr.iter()
+        } else { v.as_array().map(|arr| arr.iter()
                     .filter_map(|item| item.as_str().map(String::from))
-                    .collect(),
-            )
-        } else {
-            None
-        }
+                    .collect()) }
     })
 }

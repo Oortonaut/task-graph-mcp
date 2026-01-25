@@ -1,10 +1,10 @@
 //! State transition tracking for automatic time accumulation.
 
 use crate::config::StatesConfig;
-use crate::db::{now_ms, Database};
+use crate::db::{Database, now_ms};
 use crate::types::TaskStateEvent;
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 /// Record a state transition and accumulate time if transitioning from a timed state.
 ///
@@ -145,7 +145,7 @@ impl Database {
             // Build query dynamically based on filters
             let mut sql = String::from(
                 "SELECT id, task_id, worker_id, event, reason, timestamp, end_timestamp
-                 FROM task_state_sequence WHERE 1=1"
+                 FROM task_state_sequence WHERE 1=1",
             );
             let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -159,9 +159,11 @@ impl Database {
                 param_values.push(Box::new(to_ts));
             }
 
-            if let Some(states) = state_filter {
-                if !states.is_empty() {
-                    let placeholders: Vec<String> = states.iter().enumerate()
+            if let Some(states) = state_filter
+                && !states.is_empty() {
+                    let placeholders: Vec<String> = states
+                        .iter()
+                        .enumerate()
                         .map(|(i, _)| format!("?{}", param_values.len() + i + 1))
                         .collect();
                     sql.push_str(&format!(" AND event IN ({})", placeholders.join(", ")));
@@ -169,7 +171,6 @@ impl Database {
                         param_values.push(Box::new(state.clone()));
                     }
                 }
-            }
 
             sql.push_str(" ORDER BY timestamp DESC, id DESC");
 
@@ -181,7 +182,8 @@ impl Database {
             let mut stmt = conn.prepare(&sql)?;
 
             // Convert Vec<Box<dyn ToSql>> to slice of references
-            let param_refs: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+            let param_refs: Vec<&dyn rusqlite::ToSql> =
+                param_values.iter().map(|b| b.as_ref()).collect();
 
             let events = stmt
                 .query_map(param_refs.as_slice(), |row| {

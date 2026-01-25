@@ -3,7 +3,7 @@
 use crate::config::StatesConfig;
 use crate::db::Database;
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_stats_summary(db: &Database, states_config: &StatesConfig) -> Result<Value> {
     let stats = db.get_stats(None, None, states_config)?;
@@ -31,7 +31,8 @@ pub fn get_acp_plan(db: &Database) -> Result<Value> {
     let deps = db.get_all_dependencies()?;
 
     // Build dependency map
-    let mut blockers_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut blockers_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for dep in &deps {
         blockers_map
             .entry(dep.to_task_id.to_string())
@@ -40,36 +41,42 @@ pub fn get_acp_plan(db: &Database) -> Result<Value> {
     }
 
     // Convert tasks to ACP format
-    let acp_tasks: Vec<Value> = tasks.iter().map(|t| {
-        let blockers = blockers_map.get(&t.id.to_string()).cloned().unwrap_or_default();
+    let acp_tasks: Vec<Value> = tasks
+        .iter()
+        .map(|t| {
+            let blockers = blockers_map
+                .get(&t.id.to_string())
+                .cloned()
+                .unwrap_or_default();
 
-        // Map status to ACP format
-        let status = match t.status.as_str() {
-            "pending" => "todo",
-            "in_progress" => "in_progress",
-            "completed" => "done",
-            _ => &t.status, // Pass through other states
-        };
+            // Map status to ACP format
+            let status = match t.status.as_str() {
+                "pending" => "todo",
+                "in_progress" => "in_progress",
+                "completed" => "done",
+                _ => &t.status, // Pass through other states
+            };
 
-        json!({
-            "id": t.id.to_string(),
-            "title": t.title,
-            "description": t.description,
-            "status": status,
-            "priority": t.priority,
-            "blockedBy": blockers,
-            "assignee": &t.worker_id,
-            "metadata": {
-                "points": t.points,
-                "timeEstimateMs": t.time_estimate_ms,
-                "timeActualMs": t.time_actual_ms,
-                "cost": {
-                    "metrics": t.metrics,
-                    "usd": t.cost_usd
+            json!({
+                "id": t.id.to_string(),
+                "title": t.title,
+                "description": t.description,
+                "status": status,
+                "priority": t.priority,
+                "blockedBy": blockers,
+                "assignee": &t.worker_id,
+                "metadata": {
+                    "points": t.points,
+                    "timeEstimateMs": t.time_estimate_ms,
+                    "timeActualMs": t.time_actual_ms,
+                    "cost": {
+                        "metrics": t.metrics,
+                        "usd": t.cost_usd
+                    }
                 }
-            }
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(json!({
         "version": "1.0",

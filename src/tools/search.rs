@@ -6,7 +6,7 @@ use crate::db::Database;
 use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     vec![make_tool_with_prompts(
@@ -36,18 +36,12 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 }
 
 pub fn search(db: &Database, args: Value) -> Result<Value> {
-    let query = get_string(&args, "query")
-        .ok_or_else(|| ToolError::missing_field("query"))?;
+    let query = get_string(&args, "query").ok_or_else(|| ToolError::missing_field("query"))?;
     let limit = get_i32(&args, "limit");
     let include_attachments = get_bool(&args, "include_attachments").unwrap_or(false);
     let status_filter = get_string(&args, "status_filter");
 
-    let results = db.search_tasks(
-        &query,
-        limit,
-        include_attachments,
-        status_filter.as_deref(),
-    )?;
+    let results = db.search_tasks(&query, limit, include_attachments, status_filter.as_deref())?;
 
     Ok(json!({
         "query": query,

@@ -49,11 +49,7 @@ mod agent_tests {
         let db = setup_db();
 
         let agent = db
-            .register_worker(
-                None,
-                vec!["rust".to_string(), "backend".to_string()],
-                false,
-            )
+            .register_worker(None, vec!["rust".to_string(), "backend".to_string()], false)
             .expect("Failed to register agent");
 
         assert_eq!(agent.tags, vec!["rust", "backend"]);
@@ -65,11 +61,7 @@ mod agent_tests {
         let db = setup_db();
 
         let agent = db
-            .register_worker(
-                Some("my-custom-agent".to_string()),
-                vec![],
-                false,
-            )
+            .register_worker(Some("my-custom-agent".to_string()), vec![], false)
             .expect("Failed to register agent with custom ID");
 
         assert_eq!(agent.id, "my-custom-agent");
@@ -102,21 +94,18 @@ mod agent_tests {
         let db = setup_db();
 
         // First registration should succeed
-        let result = db.register_worker(
-            Some("duplicate-agent".to_string()),
-            vec![],
-            false,
-        );
+        let result = db.register_worker(Some("duplicate-agent".to_string()), vec![], false);
         assert!(result.is_ok());
 
         // Second registration with same ID should fail
-        let result = db.register_worker(
-            Some("duplicate-agent".to_string()),
-            vec![],
-            false,
-        );
+        let result = db.register_worker(Some("duplicate-agent".to_string()), vec![], false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already registered"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("already registered")
+        );
     }
 
     #[test]
@@ -124,11 +113,13 @@ mod agent_tests {
         let db = setup_db();
 
         // First registration
-        let agent1 = db.register_worker(
-            Some("force-agent".to_string()),
-            vec!["old-tag".to_string()],
-            false,
-        ).unwrap();
+        let agent1 = db
+            .register_worker(
+                Some("force-agent".to_string()),
+                vec!["old-tag".to_string()],
+                false,
+            )
+            .unwrap();
         assert_eq!(agent1.tags, vec!["old-tag"]);
 
         // Second registration without force should fail
@@ -140,11 +131,13 @@ mod agent_tests {
         assert!(result.is_err());
 
         // Third registration with force=true should succeed and update tags
-        let agent2 = db.register_worker(
-            Some("force-agent".to_string()),
-            vec!["new-tag".to_string()],
-            true,
-        ).unwrap();
+        let agent2 = db
+            .register_worker(
+                Some("force-agent".to_string()),
+                vec!["new-tag".to_string()],
+                true,
+            )
+            .unwrap();
         assert_eq!(agent2.tags, vec!["new-tag"]);
     }
 
@@ -176,11 +169,7 @@ mod agent_tests {
         let agent = db.register_worker(None, vec![], false).unwrap();
 
         let updated = db
-            .update_worker(
-                &agent.id,
-                Some(vec!["new-tag".to_string()]),
-                Some(3),
-            )
+            .update_worker(&agent.id, Some(vec!["new-tag".to_string()]), Some(3))
             .unwrap();
 
         assert_eq!(updated.tags, vec!["new-tag"]);
@@ -239,7 +228,7 @@ mod agent_tests {
     #[test]
     fn auto_generated_worker_ids_are_unique_petnames() {
         let db = setup_db();
-        
+
         // Register multiple workers without specifying IDs
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
@@ -251,11 +240,23 @@ mod agent_tests {
         assert_ne!(agent1.id, agent3.id);
 
         // IDs should be human-readable (contain hyphens, not UUID format)
-        assert!(agent1.id.contains('-'), "Expected petname format with hyphens, got: {}", agent1.id);
-        assert!(!agent1.id.contains("0000"), "ID looks like UUID, expected petname: {}", agent1.id);
-        
+        assert!(
+            agent1.id.contains('-'),
+            "Expected petname format with hyphens, got: {}",
+            agent1.id
+        );
+        assert!(
+            !agent1.id.contains("0000"),
+            "ID looks like UUID, expected petname: {}",
+            agent1.id
+        );
+
         // IDs should be reasonably short (petnames are typically < 30 chars)
-        assert!(agent1.id.len() < 36, "ID too long, expected petname: {}", agent1.id);
+        assert!(
+            agent1.id.len() < 36,
+            "ID too long, expected petname: {}",
+            agent1.id
+        );
     }
 }
 
@@ -269,15 +270,15 @@ mod task_tests {
 
         let task = db
             .create_task(
-                None, // id
+                None,                    // id
                 "Test Task".to_string(), // description
-                None, // parent_id
-                None, // priority
-                None, // points
-                None, // time_estimate
-                None, // needed_tags
-                None, // wanted_tags
-                None, // tags
+                None,                    // parent_id
+                None,                    // priority
+                None,                    // points
+                None,                    // time_estimate
+                None,                    // needed_tags
+                None,                    // wanted_tags
+                None,                    // tags
                 &states_config,
             )
             .unwrap();
@@ -296,21 +297,24 @@ mod task_tests {
 
         let task = db
             .create_task(
-                None, // id
+                None,                                  // id
                 "Full Task - Description".to_string(), // description
-                None, // parent_id
+                None,                                  // parent_id
                 Some(8),
                 Some(5),
                 Some(3600000),
-                Some(vec!["rust".to_string()]), // needed_tags
+                Some(vec!["rust".to_string()]),    // needed_tags
                 Some(vec!["backend".to_string()]), // wanted_tags
-                None, // tags
+                None,                              // tags
                 &states_config,
             )
             .unwrap();
 
         assert_eq!(task.title, "Full Task - Description");
-        assert_eq!(task.description, Some("Full Task - Description".to_string()));
+        assert_eq!(
+            task.description,
+            Some("Full Task - Description".to_string())
+        );
         assert_eq!(task.priority, 8);
         assert_eq!(task.points, Some(5));
         assert_eq!(task.time_estimate_ms, Some(3600000));
@@ -323,7 +327,18 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let parent = db
-            .create_task(None, "Parent".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         let child1 = db
@@ -367,7 +382,18 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Find Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Find Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         let found = db.get_task(&task.id).unwrap();
@@ -391,7 +417,18 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Original".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Original".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         let updated = db
@@ -418,15 +455,44 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Complete Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Complete Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         assert!(task.completed_at.is_none());
 
         // Need to transition through in_progress first (pending -> in_progress -> completed)
-        db.update_task(&task.id, None, None, Some("in_progress".to_string()), None, None, None, &states_config)
-            .unwrap();
+        db.update_task(
+            &task.id,
+            None,
+            None,
+            Some("in_progress".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
         let updated = db
-            .update_task(&task.id, None, None, Some("completed".to_string()), None, None, None, &states_config)
+            .update_task(
+                &task.id,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         assert!(updated.completed_at.is_some());
@@ -437,11 +503,23 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Delete Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Delete Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Hard delete with obliterate=true
-        db.delete_task(&task.id, "test-worker", false, None, true, false).unwrap();
+        db.delete_task(&task.id, "test-worker", false, None, true, false)
+            .unwrap();
 
         let found = db.get_task(&task.id).unwrap();
         assert!(found.is_none());
@@ -452,7 +530,18 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let parent = db
-            .create_task(None, "Parent".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         db.create_task(
             None,
@@ -479,7 +568,18 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let parent = db
-            .create_task(None, "Parent".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let child = db
             .create_task(
@@ -497,7 +597,8 @@ mod task_tests {
             .unwrap();
 
         // Delete parent with cascade - should delete both parent and child
-        db.delete_task(&parent.id, "test-worker", true, None, true, false).unwrap();
+        db.delete_task(&parent.id, "test-worker", true, None, true, false)
+            .unwrap();
 
         assert!(db.get_task(&parent.id).unwrap().is_none());
         assert!(db.get_task(&child.id).unwrap().is_none());
@@ -508,7 +609,18 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let parent = db
-            .create_task(None, "Parent".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         db.create_task(
             None,
@@ -548,16 +660,56 @@ mod task_tests {
     fn list_tasks_filters_by_status() {
         let db = setup_db();
         let states_config = default_states_config();
-        db.create_task(None, "Pending".to_string(), None, None, None, None, None, None, None, &states_config)
-            .unwrap();
+        db.create_task(
+            None,
+            "Pending".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
         let task2 = db
-            .create_task(None, "Completed".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Completed".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         // Transition through in_progress to completed
-        db.update_task(&task2.id, None, None, Some("in_progress".to_string()), None, None, None, &states_config)
-            .unwrap();
-        db.update_task(&task2.id, None, None, Some("completed".to_string()), None, None, None, &states_config)
-            .unwrap();
+        db.update_task(
+            &task2.id,
+            None,
+            None,
+            Some("in_progress".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
+        db.update_task(
+            &task2.id,
+            None,
+            None,
+            Some("completed".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
 
         let pending = db
             .list_tasks(Some("pending"), None, None, None, None, None)
@@ -571,7 +723,6 @@ mod task_tests {
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].title, "Completed");
     }
-
 
     /// Test that the tool-level create function properly handles needed_tags and wanted_tags.
     /// This is a regression test for BUG-001 where these parameters were silently ignored.
@@ -593,7 +744,10 @@ mod task_tests {
         let result = create(&db, &states_config, args).expect("create should succeed");
 
         // Extract the task ID from the result
-        let task_id = result.get("id").and_then(|v| v.as_str()).expect("result should have id");
+        let task_id = result
+            .get("id")
+            .and_then(|v| v.as_str())
+            .expect("result should have id");
 
         // Fetch the task and verify the tags were stored
         let task = db.get_task(task_id).unwrap().expect("task should exist");
@@ -612,7 +766,18 @@ mod task_claiming_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Claim Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Claim Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         let claimed = db.claim_task(&task.id, &agent.id, &states_config).unwrap();
@@ -630,7 +795,18 @@ mod task_claiming_tests {
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Claimed".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Claimed".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
@@ -726,11 +902,23 @@ mod task_claiming_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Release Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Release Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
-        db.release_task(&task.id, &agent.id, &states_config).unwrap();
+        db.release_task(&task.id, &agent.id, &states_config)
+            .unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.worker_id.is_none());
@@ -744,7 +932,18 @@ mod task_claiming_tests {
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Owned".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Owned".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
 
@@ -759,7 +958,18 @@ mod task_claiming_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Force".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Force".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
@@ -778,7 +988,18 @@ mod task_claiming_tests {
         let auto_advance = default_auto_advance();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Update Claim".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Update Claim".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Update to in_progress (timed state) should claim the task
@@ -787,10 +1008,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("in_progress".to_string()),
-                None, None, None,
-                None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // needed_tags, wanted_tags, time_estimate_ms, reason
                 false,
                 &states_config,
                 &deps_config,
@@ -812,18 +1039,35 @@ mod task_claiming_tests {
         let auto_advance = default_auto_advance();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Update Release".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Update Release".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // First claim via update
         db.update_task_unified(
-                &task.id,
-                &agent.id,
-                None, // assignee
-                None, None,
+            &task.id,
+            &agent.id,
+            None, // assignee
+            None,
+            None,
             Some("in_progress".to_string()),
-            None, None, None,
-            None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // needed_tags, wanted_tags, time_estimate_ms, reason
             false,
             &states_config,
             &deps_config,
@@ -837,10 +1081,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("pending".to_string()),
-                None, None, None,
-                None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // needed_tags, wanted_tags, time_estimate_ms, reason
                 false,
                 &states_config,
                 &deps_config,
@@ -862,7 +1112,18 @@ mod task_claiming_tests {
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Force Update".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Force Update".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Agent1 claims the task
@@ -874,10 +1135,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent2.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("in_progress".to_string()),
-                None, None, None,
-                None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // needed_tags, wanted_tags, time_estimate_ms, reason
                 true, // force
                 &states_config,
                 &deps_config,
@@ -897,7 +1164,18 @@ mod task_claiming_tests {
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "No Force".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "No Force".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Agent1 claims the task
@@ -905,13 +1183,19 @@ mod task_claiming_tests {
 
         // Agent2 tries to claim without force - should fail
         let result = db.update_task_unified(
-                &task.id,
-                &agent2.id,
-                None, // assignee
-                None, None,
+            &task.id,
+            &agent2.id,
+            None, // assignee
+            None,
+            None,
             Some("in_progress".to_string()),
-            None, None, None,
-            None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,  // needed_tags, wanted_tags, time_estimate_ms, reason
             false, // no force
             &states_config,
             &deps_config,
@@ -934,22 +1218,32 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Needs Rust".to_string(),
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
                 Some(vec!["rust".to_string()]), // needed_tags
-                None, None,
+                None,
+                None,
                 &states_config,
             )
             .unwrap();
 
         // Update to claim should fail due to missing tag
         let result = db.update_task_unified(
-                &task.id,
-                &agent.id,
-                None, // assignee
-                None, None,
+            &task.id,
+            &agent.id,
+            None, // assignee
+            None,
+            None,
             Some("in_progress".to_string()),
-            None, None, None,
-            None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // needed_tags, wanted_tags, time_estimate_ms, reason
             false,
             &states_config,
             &deps_config,
@@ -967,7 +1261,18 @@ mod task_claiming_tests {
         let auto_advance = default_auto_advance();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Complete Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Complete Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Claim the task
@@ -979,10 +1284,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("completed".to_string()),
-                None, None, None,
-                None, None, None, None, // needed_tags, wanted_tags, time_estimate_ms, reason
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // needed_tags, wanted_tags, time_estimate_ms, reason
                 false,
                 &states_config,
                 &deps_config,
@@ -1016,14 +1327,23 @@ mod task_claiming_tests {
         definitions.insert(
             "in_progress".to_string(),
             StateDefinition {
-                exits: vec!["reviewing".to_string(), "completed".to_string(), "failed".to_string(), "pending".to_string()],
+                exits: vec![
+                    "reviewing".to_string(),
+                    "completed".to_string(),
+                    "failed".to_string(),
+                    "pending".to_string(),
+                ],
                 timed: true,
             },
         );
         definitions.insert(
             "reviewing".to_string(),
             StateDefinition {
-                exits: vec!["in_progress".to_string(), "completed".to_string(), "failed".to_string()],
+                exits: vec![
+                    "in_progress".to_string(),
+                    "completed".to_string(),
+                    "failed".to_string(),
+                ],
                 timed: true, // Second timed state
             },
         );
@@ -1052,13 +1372,28 @@ mod task_claiming_tests {
         let states_config = task_graph_mcp::config::StatesConfig {
             initial: "pending".to_string(),
             disconnect_state: "pending".to_string(),
-            blocking_states: vec!["pending".to_string(), "in_progress".to_string(), "reviewing".to_string()],
+            blocking_states: vec![
+                "pending".to_string(),
+                "in_progress".to_string(),
+                "reviewing".to_string(),
+            ],
             definitions,
         };
 
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Timed to Timed".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Timed to Timed".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Claim via transition to first timed state
@@ -1067,10 +1402,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("in_progress".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -1087,10 +1428,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("reviewing".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -1105,12 +1452,25 @@ mod task_claiming_tests {
         // Verify state history was recorded for both transitions
         let history = db.get_task_state_history(&task.id).unwrap();
         // Should have: pending (initial), in_progress, reviewing
-        assert!(history.len() >= 3, "Expected at least 3 history entries, got {}", history.len());
+        assert!(
+            history.len() >= 3,
+            "Expected at least 3 history entries, got {}",
+            history.len()
+        );
 
         let states: Vec<&str> = history.iter().map(|e| e.event.as_str()).collect();
-        assert!(states.contains(&"pending"), "History should contain 'pending'");
-        assert!(states.contains(&"in_progress"), "History should contain 'in_progress'");
-        assert!(states.contains(&"reviewing"), "History should contain 'reviewing'");
+        assert!(
+            states.contains(&"pending"),
+            "History should contain 'pending'"
+        );
+        assert!(
+            states.contains(&"in_progress"),
+            "History should contain 'in_progress'"
+        );
+        assert!(
+            states.contains(&"reviewing"),
+            "History should contain 'reviewing'"
+        );
     }
 
     #[test]
@@ -1121,7 +1481,18 @@ mod task_claiming_tests {
         let auto_advance = default_auto_advance();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Same State".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Same State".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Claim the task first
@@ -1136,10 +1507,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("in_progress".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -1154,7 +1531,10 @@ mod task_claiming_tests {
         let history = db.get_task_state_history(&task.id).unwrap();
         // Should have: pending (initial), in_progress (from claim) - but NOT another in_progress
         let in_progress_count = history.iter().filter(|e| e.event == "in_progress").count();
-        assert_eq!(in_progress_count, 1, "Should only have one in_progress entry, not duplicates");
+        assert_eq!(
+            in_progress_count, 1,
+            "Should only have one in_progress entry, not duplicates"
+        );
     }
 
     #[test]
@@ -1165,7 +1545,18 @@ mod task_claiming_tests {
         let auto_advance = default_auto_advance();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Untimed to Untimed".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Untimed to Untimed".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Claim and then fail the task to get to 'failed' state
@@ -1175,10 +1566,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("failed".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -1195,10 +1592,16 @@ mod task_claiming_tests {
                 &task.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("pending".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -1213,15 +1616,24 @@ mod task_claiming_tests {
         // Verify state history was recorded for all transitions
         let history = db.get_task_state_history(&task.id).unwrap();
         // Should have: pending (initial), in_progress (claim), failed, pending
-        assert!(history.len() >= 4, "Expected at least 4 history entries, got {}", history.len());
+        assert!(
+            history.len() >= 4,
+            "Expected at least 4 history entries, got {}",
+            history.len()
+        );
 
         let states: Vec<&str> = history.iter().map(|e| e.event.as_str()).collect();
-        assert!(states.contains(&"failed"), "History should contain 'failed'");
+        assert!(
+            states.contains(&"failed"),
+            "History should contain 'failed'"
+        );
         // Check we have pending twice (initial and after failed)
         let pending_count = states.iter().filter(|&&s| s == "pending").count();
-        assert!(pending_count >= 2, "Should have at least 2 pending entries (initial + after failed)");
+        assert!(
+            pending_count >= 2,
+            "Should have at least 2 pending entries (initial + after failed)"
+        );
     }
-
 
     #[test]
     fn claim_fails_if_blocked_by_single_task() {
@@ -1234,29 +1646,62 @@ mod task_claiming_tests {
 
         // Create two tasks: A blocks B
         let task_a = db
-            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task A".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task_b = db
-            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task B".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config)
+            .unwrap();
 
         // Attempt to claim B (which is blocked by A)
         let result = db.update_task_unified(
             &task_b.id,
             &agent.id,
-            None, None, None,
+            None,
+            None,
+            None,
             Some("in_progress".to_string()),
-            None, None, None,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             false,
             &states_config,
             &deps_config,
             &auto_advance,
         );
 
-        assert!(result.is_err(), "Claim should fail when task has unsatisfied dependencies");
+        assert!(
+            result.is_err(),
+            "Claim should fail when task has unsatisfied dependencies"
+        );
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("unsatisfied dependencies") && err_msg.contains(&task_a.id),
@@ -1276,33 +1721,78 @@ mod task_claiming_tests {
 
         // Create chain: A blocks B, B blocks C
         let task_a = db
-            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task A".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task_b = db
-            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task B".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task_c = db
-            .create_task(None, "Task C".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task C".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
-        db.add_dependency(&task_b.id, &task_c.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config)
+            .unwrap();
+        db.add_dependency(&task_b.id, &task_c.id, "blocks", &deps_config)
+            .unwrap();
 
         // Attempt to claim C (which is blocked by B which is blocked by A)
         let result = db.update_task_unified(
             &task_c.id,
             &agent.id,
-            None, None, None,
+            None,
+            None,
+            None,
             Some("in_progress".to_string()),
-            None, None, None,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             false,
             &states_config,
             &deps_config,
             &auto_advance,
         );
 
-        assert!(result.is_err(), "Claim on C should fail when B is still in blocking state");
+        assert!(
+            result.is_err(),
+            "Claim on C should fail when B is still in blocking state"
+        );
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("unsatisfied dependencies") && err_msg.contains(&task_b.id),
@@ -1322,44 +1812,86 @@ mod task_claiming_tests {
 
         // Create two tasks: A blocks B
         let task_a = db
-            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task A".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task_b = db
-            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task B".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config)
+            .unwrap();
 
         // Complete task A
-        db.claim_task(&task_a.id, &agent.id, &states_config).unwrap();
+        db.claim_task(&task_a.id, &agent.id, &states_config)
+            .unwrap();
         db.update_task_unified(
             &task_a.id,
             &agent.id,
-            None, None, None,
+            None,
+            None,
+            None,
             Some("completed".to_string()),
-            None, None, None,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             false,
             &states_config,
             &deps_config,
             &auto_advance,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Now claim B should succeed
         let result = db.update_task_unified(
             &task_b.id,
             &agent.id,
-            None, None, None,
+            None,
+            None,
+            None,
             Some("in_progress".to_string()),
-            None, None, None,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             false,
             &states_config,
             &deps_config,
             &auto_advance,
         );
 
-        assert!(result.is_ok(), "Claim should succeed after blocking task is completed");
+        assert!(
+            result.is_ok(),
+            "Claim should succeed after blocking task is completed"
+        );
         let (task, _, _) = result.unwrap();
         assert_eq!(task.status, "in_progress");
         assert_eq!(task.worker_id.as_deref(), Some(agent.id.as_str()));
@@ -1376,29 +1908,62 @@ mod task_claiming_tests {
 
         // Create two tasks: A blocks B
         let task_a = db
-            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task A".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task_b = db
-            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task B".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config)
+            .unwrap();
 
         // Claim B with force=true should succeed despite being blocked
         let result = db.update_task_unified(
             &task_b.id,
             &agent.id,
-            None, None, None,
+            None,
+            None,
+            None,
             Some("in_progress".to_string()),
-            None, None, None,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             true, // force=true
             &states_config,
             &deps_config,
             &auto_advance,
         );
 
-        assert!(result.is_ok(), "Claim with force=true should succeed even when task has unsatisfied dependencies");
+        assert!(
+            result.is_ok(),
+            "Claim with force=true should succeed even when task has unsatisfied dependencies"
+        );
         let (task, _, _) = result.unwrap();
         assert_eq!(task.status, "in_progress");
     }
@@ -1413,13 +1978,36 @@ mod dependency_tests {
         let states_config = default_states_config();
         let deps_config = default_deps_config();
         let task1 = db
-            .create_task(None, "Task 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Task 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
         let blockers = db.get_blockers(&task2.id).unwrap();
         assert_eq!(blockers.len(), 1);
@@ -1432,13 +2020,36 @@ mod dependency_tests {
         let states_config = default_states_config();
         let deps_config = default_deps_config();
         let task1 = db
-            .create_task(None, "Task 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Task 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap(); // task1 blocks task2
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap(); // task1 blocks task2
 
         let result = db.add_dependency(&task2.id, &task1.id, "blocks", &deps_config); // task2 blocks task1 - cycle!
 
@@ -1451,17 +2062,52 @@ mod dependency_tests {
         let states_config = default_states_config();
         let deps_config = default_deps_config();
         let task1 = db
-            .create_task(None, "Task 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Task 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task3 = db
-            .create_task(None, "Task 3".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 3".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap(); // 1 -> 2
-        db.add_dependency(&task2.id, &task3.id, "blocks", &deps_config).unwrap(); // 2 -> 3
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap(); // 1 -> 2
+        db.add_dependency(&task2.id, &task3.id, "blocks", &deps_config)
+            .unwrap(); // 2 -> 3
 
         let result = db.add_dependency(&task3.id, &task1.id, "blocks", &deps_config); // 3 -> 1 - cycle!
 
@@ -1474,14 +2120,38 @@ mod dependency_tests {
         let states_config = default_states_config();
         let deps_config = default_deps_config();
         let task1 = db
-            .create_task(None, "Task 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Task 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
-        db.remove_dependency(&task1.id, &task2.id, "blocks").unwrap();
+        db.remove_dependency(&task1.id, &task2.id, "blocks")
+            .unwrap();
 
         let blockers = db.get_blockers(&task2.id).unwrap();
         assert!(blockers.is_empty());
@@ -1493,14 +2163,39 @@ mod dependency_tests {
         let states_config = default_states_config();
         let deps_config = default_deps_config();
         let task1 = db
-            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocker".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocked".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
-        let ready = db.get_ready_tasks(None, &states_config, &deps_config, None, None).unwrap();
+        let ready = db
+            .get_ready_tasks(None, &states_config, &deps_config, None, None)
+            .unwrap();
 
         // task1 is ready, task2 is blocked
         assert_eq!(ready.len(), 1);
@@ -1513,20 +2208,63 @@ mod dependency_tests {
         let states_config = default_states_config();
         let deps_config = default_deps_config();
         let task1 = db
-            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocker".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocked".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
         // Complete blocker (need to transition through in_progress first)
-        db.update_task(&task1.id, None, None, Some("in_progress".to_string()), None, None, None, &states_config)
-            .unwrap();
-        db.update_task(&task1.id, None, None, Some("completed".to_string()), None, None, None, &states_config)
-            .unwrap();
+        db.update_task(
+            &task1.id,
+            None,
+            None,
+            Some("in_progress".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
+        db.update_task(
+            &task1.id,
+            None,
+            None,
+            Some("completed".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
 
-        let ready = db.get_ready_tasks(None, &states_config, &deps_config, None, None).unwrap();
+        let ready = db
+            .get_ready_tasks(None, &states_config, &deps_config, None, None)
+            .unwrap();
 
         // Now task2 is ready
         assert_eq!(ready.len(), 1);
@@ -1542,7 +2280,9 @@ mod file_lock_tests {
         let db = setup_db();
         let agent = db.register_worker(None, vec![], false).unwrap();
 
-        let warning = db.lock_file("src/main.rs".to_string(), &agent.id, None, None).unwrap();
+        let warning = db
+            .lock_file("src/main.rs".to_string(), &agent.id, None, None)
+            .unwrap();
 
         assert!(warning.is_none());
         // Query by worker_id since get_file_locks requires at least one filter
@@ -1557,8 +2297,11 @@ mod file_lock_tests {
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
 
-        db.lock_file("src/main.rs".to_string(), &agent1.id, None, None).unwrap();
-        let warning = db.lock_file("src/main.rs".to_string(), &agent2.id, None, None).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
+        let warning = db
+            .lock_file("src/main.rs".to_string(), &agent2.id, None, None)
+            .unwrap();
 
         assert!(warning.is_some());
         assert_eq!(warning.unwrap(), agent1.id);
@@ -1569,9 +2312,12 @@ mod file_lock_tests {
         let db = setup_db();
         let agent = db.register_worker(None, vec![], false).unwrap();
 
-        db.lock_file("src/main.rs".to_string(), &agent.id, None, None).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent.id, None, None)
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let warning = db.lock_file("src/main.rs".to_string(), &agent.id, None, None).unwrap();
+        let warning = db
+            .lock_file("src/main.rs".to_string(), &agent.id, None, None)
+            .unwrap();
 
         assert!(warning.is_none()); // No warning for same agent
     }
@@ -1580,7 +2326,8 @@ mod file_lock_tests {
     fn unlock_file_removes_lock() {
         let db = setup_db();
         let agent = db.register_worker(None, vec![], false).unwrap();
-        db.lock_file("src/main.rs".to_string(), &agent.id, None, None).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent.id, None, None)
+            .unwrap();
 
         let unlocked = db.unlock_file("src/main.rs", &agent.id, None).unwrap();
 
@@ -1594,7 +2341,8 @@ mod file_lock_tests {
         let db = setup_db();
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
-        db.lock_file("src/main.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("src/main.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
 
         let unlocked = db.unlock_file("src/main.rs", &agent2.id, None).unwrap();
 
@@ -1606,8 +2354,10 @@ mod file_lock_tests {
         let db = setup_db();
         let agent1 = db.register_worker(None, vec![], false).unwrap();
         let agent2 = db.register_worker(None, vec![], false).unwrap();
-        db.lock_file("file1.rs".to_string(), &agent1.id, None, None).unwrap();
-        db.lock_file("file2.rs".to_string(), &agent2.id, None, None).unwrap();
+        db.lock_file("file1.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
+        db.lock_file("file2.rs".to_string(), &agent2.id, None, None)
+            .unwrap();
 
         let agent1_locks = db.get_file_locks(None, Some(&agent1.id), None).unwrap();
 
@@ -1619,8 +2369,10 @@ mod file_lock_tests {
     fn release_worker_locks_removes_all_agent_locks() {
         let db = setup_db();
         let agent = db.register_worker(None, vec![], false).unwrap();
-        db.lock_file("file1.rs".to_string(), &agent.id, None, None).unwrap();
-        db.lock_file("file2.rs".to_string(), &agent.id, None, None).unwrap();
+        db.lock_file("file1.rs".to_string(), &agent.id, None, None)
+            .unwrap();
+        db.lock_file("file2.rs".to_string(), &agent.id, None, None)
+            .unwrap();
 
         let released = db.release_worker_locks(&agent.id).unwrap();
 
@@ -1651,14 +2403,19 @@ mod file_lock_tests {
         let agent2 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 claims a file
-        db.lock_file("test.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("test.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
 
         let start = std::time::Instant::now();
         let updates = db.claim_updates(&agent2.id).unwrap();
         let elapsed = start.elapsed();
 
         // Should return immediately
-        assert!(elapsed.as_millis() < 100, "Expected immediate return, but elapsed: {:?}", elapsed);
+        assert!(
+            elapsed.as_millis() < 100,
+            "Expected immediate return, but elapsed: {:?}",
+            elapsed
+        );
         assert_eq!(updates.new_claims.len(), 1);
         assert_eq!(updates.new_claims[0].file_path, "test.rs");
     }
@@ -1672,7 +2429,8 @@ mod file_lock_tests {
         let agent1 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 claims a file
-        db.lock_file("edge.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("edge.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
 
         // Agent2 registers AFTER the claim
         let agent2 = db.register_worker(None, vec![], false).unwrap();
@@ -1684,11 +2442,17 @@ mod file_lock_tests {
         let updates = db.claim_updates(&agent2.id).unwrap();
 
         // Agent2 should NOT see the claim (it was before their registration)
-        assert!(updates.new_claims.is_empty(), "Agent2 should not see the claim");
+        assert!(
+            updates.new_claims.is_empty(),
+            "Agent2 should not see the claim"
+        );
 
         // Agent2 SHOULD see the release - the file became available
-        assert_eq!(updates.dropped_claims.len(), 1,
-            "Agent2 should see release so they know file is available");
+        assert_eq!(
+            updates.dropped_claims.len(),
+            1,
+            "Agent2 should see release so they know file is available"
+        );
         assert_eq!(updates.dropped_claims[0].file_path, "edge.rs");
     }
 
@@ -1700,7 +2464,8 @@ mod file_lock_tests {
         let agent2 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 claims a file
-        db.lock_file("polled.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("polled.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
 
         // Agent2 polls and sees the claim
         let updates1 = db.claim_updates(&agent2.id).unwrap();
@@ -1713,7 +2478,11 @@ mod file_lock_tests {
         // Agent2 polls again - should see the release because they polled and saw the claim
         let updates2 = db.claim_updates(&agent2.id).unwrap();
         assert!(updates2.new_claims.is_empty());
-        assert_eq!(updates2.dropped_claims.len(), 1, "Should see release for previously polled claim");
+        assert_eq!(
+            updates2.dropped_claims.len(),
+            1,
+            "Should see release for previously polled claim"
+        );
         assert_eq!(updates2.dropped_claims[0].file_path, "polled.rs");
     }
 
@@ -1725,7 +2494,8 @@ mod file_lock_tests {
         let agent2 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 claims and releases a file before agent2 polls
-        db.lock_file("batch.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("batch.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
         db.unlock_file("batch.rs", &agent1.id, None).unwrap();
 
         // Agent2 polls - should see both claim and release in same batch
@@ -1733,7 +2503,11 @@ mod file_lock_tests {
 
         assert_eq!(updates.new_claims.len(), 1, "Should see the claim");
         assert_eq!(updates.new_claims[0].file_path, "batch.rs");
-        assert_eq!(updates.dropped_claims.len(), 1, "Should see the release (claim in same batch)");
+        assert_eq!(
+            updates.dropped_claims.len(),
+            1,
+            "Should see the release (claim in same batch)"
+        );
         assert_eq!(updates.dropped_claims[0].file_path, "batch.rs");
     }
 
@@ -1744,21 +2518,26 @@ mod file_lock_tests {
         let agent1 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 claims and releases a file
-        db.lock_file("old.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("old.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
         db.unlock_file("old.rs", &agent1.id, None).unwrap();
 
         // Agent2 registers AFTER the claim+release cycle
         let agent2 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 claims a new file AFTER agent2 registered
-        db.lock_file("new.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("new.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
 
         // Agent2 polls - should only see new.rs
         let updates = db.claim_updates(&agent2.id).unwrap();
 
         assert_eq!(updates.new_claims.len(), 1, "Should only see new.rs");
         assert_eq!(updates.new_claims[0].file_path, "new.rs");
-        assert!(updates.dropped_claims.is_empty(), "Should not see old.rs release");
+        assert!(
+            updates.dropped_claims.is_empty(),
+            "Should not see old.rs release"
+        );
     }
 
     /// Regression test for BUG-003/BUG-004: unmark_file and mark_updates failed
@@ -1770,12 +2549,20 @@ mod file_lock_tests {
         let agent = db.register_worker(None, vec![], false).unwrap();
 
         // Mark (lock) a file
-        let lock_result = db.lock_file("test.rs".to_string(), &agent.id, Some("testing".to_string()), None);
+        let lock_result = db.lock_file(
+            "test.rs".to_string(),
+            &agent.id,
+            Some("testing".to_string()),
+            None,
+        );
         assert!(lock_result.is_ok(), "lock_file should succeed");
 
         // Unmark (unlock) the file - this was failing with end_timestamp error
         let unlock_result = db.unlock_file("test.rs", &agent.id, None);
-        assert!(unlock_result.is_ok(), "unlock_file should succeed (was failing with end_timestamp column error)");
+        assert!(
+            unlock_result.is_ok(),
+            "unlock_file should succeed (was failing with end_timestamp column error)"
+        );
         assert!(unlock_result.unwrap(), "unlock should return true");
     }
 
@@ -1789,11 +2576,20 @@ mod file_lock_tests {
         let agent2 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 marks a file
-        db.lock_file("test.rs".to_string(), &agent1.id, Some("testing".to_string()), None).unwrap();
+        db.lock_file(
+            "test.rs".to_string(),
+            &agent1.id,
+            Some("testing".to_string()),
+            None,
+        )
+        .unwrap();
 
         // Agent2 polls for updates - this was failing with end_timestamp error
         let updates = db.claim_updates(&agent2.id);
-        assert!(updates.is_ok(), "claim_updates should succeed (was failing with end_timestamp column error)");
+        assert!(
+            updates.is_ok(),
+            "claim_updates should succeed (was failing with end_timestamp column error)"
+        );
 
         let updates = updates.unwrap();
         assert_eq!(updates.new_claims.len(), 1, "Should see the new claim");
@@ -1808,7 +2604,8 @@ mod file_lock_tests {
         let agent2 = db.register_worker(None, vec![], false).unwrap();
 
         // Agent1 marks and unmarks a file
-        db.lock_file("test.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.lock_file("test.rs".to_string(), &agent1.id, None, None)
+            .unwrap();
         db.unlock_file("test.rs", &agent1.id, None).unwrap();
 
         // Agent2 polls for updates
@@ -1820,7 +2617,10 @@ mod file_lock_tests {
 
         // The claim event should have an end_timestamp populated
         let claim_event = &updates.new_claims[0];
-        assert!(claim_event.end_timestamp.is_some(), "Claim event should have end_timestamp set after release");
+        assert!(
+            claim_event.end_timestamp.is_some(),
+            "Claim event should have end_timestamp set after release"
+        );
     }
 }
 
@@ -1833,7 +2633,18 @@ mod tracking_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Think".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Think".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
@@ -1849,7 +2660,18 @@ mod tracking_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Time Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Time Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         db.log_time(&task.id, 1000).unwrap();
@@ -1864,7 +2686,18 @@ mod tracking_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Cost Me".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Cost Me".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // log_metrics(task_id, cost_usd, values)
@@ -1872,7 +2705,7 @@ mod tracking_tests {
         db.log_metrics(
             &task.id,
             Some(0.001),
-            &[100, 0, 50],  // metric_0=100, metric_2=50
+            &[100, 0, 50], // metric_0=100, metric_2=50
         )
         .unwrap();
         db.log_metrics(
@@ -1883,8 +2716,8 @@ mod tracking_tests {
         .unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
-        assert_eq!(updated.metrics[0], 300);  // metric_0 aggregated
-        assert_eq!(updated.metrics[2], 150);  // metric_2 aggregated
+        assert_eq!(updated.metrics[0], 300); // metric_0 aggregated
+        assert_eq!(updated.metrics[2], 150); // metric_2 aggregated
         assert!((updated.cost_usd - 0.003).abs() < 0.0001);
     }
 }
@@ -1924,10 +2757,28 @@ mod stats_tests {
             )
             .unwrap();
         // Transition through in_progress to completed
-        db.update_task(&task2.id, None, None, Some("in_progress".to_string()), None, None, None, &states_config)
-            .unwrap();
-        db.update_task(&task2.id, None, None, Some("completed".to_string()), None, None, None, &states_config)
-            .unwrap();
+        db.update_task(
+            &task2.id,
+            None,
+            None,
+            Some("in_progress".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
+        db.update_task(
+            &task2.id,
+            None,
+            None,
+            Some("completed".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
 
         let stats = db.get_stats(None, None, &states_config).unwrap();
 
@@ -2023,7 +2874,9 @@ mod stats_tests {
         )
         .unwrap();
 
-        let stats = db.get_stats(None, Some(&parent.id), &states_config).unwrap();
+        let stats = db
+            .get_stats(None, Some(&parent.id), &states_config)
+            .unwrap();
 
         assert_eq!(stats.total_tasks, 2); // parent + child
         assert_eq!(stats.total_points, 5); // 2 + 3
@@ -2040,7 +2893,18 @@ mod state_transition_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Test".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         let history = db.get_task_state_history(&task.id).unwrap();
@@ -2056,7 +2920,18 @@ mod state_transition_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Test".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
@@ -2075,12 +2950,24 @@ mod state_transition_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Test".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
         sleep(Duration::from_millis(100));
-        db.complete_task(&task.id, &agent.id, &states_config).unwrap();
+        db.complete_task(&task.id, &agent.id, &states_config)
+            .unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.time_actual_ms.unwrap() >= 100);
@@ -2096,18 +2983,32 @@ mod state_transition_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Test".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // First claim cycle
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
         sleep(Duration::from_millis(50));
-        db.release_task_with_state(&task.id, &agent.id, "pending", &states_config).unwrap();
+        db.release_task_with_state(&task.id, &agent.id, "pending", &states_config)
+            .unwrap();
 
         // Second claim cycle
-        db.force_claim_task(&task.id, &agent.id, &states_config).unwrap();
+        db.force_claim_task(&task.id, &agent.id, &states_config)
+            .unwrap();
         sleep(Duration::from_millis(50));
-        db.complete_task(&task.id, &agent.id, &states_config).unwrap();
+        db.complete_task(&task.id, &agent.id, &states_config)
+            .unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
         // Should have accumulated time from both in_progress periods
@@ -2124,12 +3025,24 @@ mod state_transition_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Test".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
         sleep(Duration::from_millis(100));
-        db.release_task_with_state(&task.id, &agent.id, "failed", &states_config).unwrap();
+        db.release_task_with_state(&task.id, &agent.id, "failed", &states_config)
+            .unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.time_actual_ms.unwrap() >= 100);
@@ -2141,18 +3054,33 @@ mod state_transition_tests {
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
         let task = db
-            .create_task(None, "Test".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
         // Before claim, should be None (pending is not a working state)
-        let duration = db.get_current_state_duration(&task.id, &states_config).unwrap();
+        let duration = db
+            .get_current_state_duration(&task.id, &states_config)
+            .unwrap();
         assert!(duration.is_none());
 
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
         sleep(Duration::from_millis(50));
 
         // After claim, should return elapsed time
-        let duration = db.get_current_state_duration(&task.id, &states_config).unwrap();
+        let duration = db
+            .get_current_state_duration(&task.id, &states_config)
+            .unwrap();
         assert!(duration.is_some());
         assert!(duration.unwrap() >= 50);
     }
@@ -2162,10 +3090,31 @@ mod state_transition_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let task = db
-            .create_task(None, "Test".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.update_task(&task.id, None, None, Some("cancelled".to_string()), None, None, None, &states_config).unwrap();
+        db.update_task(
+            &task.id,
+            None,
+            None,
+            Some("cancelled".to_string()),
+            None,
+            None,
+            None,
+            &states_config,
+        )
+        .unwrap();
 
         let history = db.get_task_state_history(&task.id).unwrap();
         assert_eq!(history.len(), 2);
@@ -2195,13 +3144,36 @@ mod auto_advance_tests {
 
         // Create two tasks where task1 blocks task2
         let task1 = db
-            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocker".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocked".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
         // Claim and complete task1
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
@@ -2210,10 +3182,16 @@ mod auto_advance_tests {
                 &task1.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("completed".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -2224,10 +3202,10 @@ mod auto_advance_tests {
         // unblocked should contain task2 (now ready to claim)
         assert_eq!(unblocked.len(), 1);
         assert_eq!(unblocked[0], task2.id);
-        
+
         // auto_advanced should be empty because auto_advance is disabled
         assert!(auto_advanced.is_empty());
-        
+
         // task2 should still be in pending state (not transitioned)
         let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
         assert_eq!(task2_updated.status, "pending");
@@ -2247,15 +3225,15 @@ mod auto_advance_tests {
         // Actually the plan suggests adding a "ready" state, but we should test with existing states.
         // We can test by checking if auto_advance returns the list even if the state is the same.
         // Let's create a custom config for this test.
-        
+
         // For now, let's test that when enabled with no valid target state, nothing happens.
         // In a real scenario, you'd configure states to have a "ready" state.
         // Let's just verify the list is returned when a dependency is satisfied.
-        
+
         // Test with completed as target - but that's terminal and not a valid transition from pending
         // Let's use in_progress as target - but that would claim the task
         // The issue is the default state machine doesn't have a non-timed intermediate state
-        
+
         // For this test, let's just verify the auto_advanced list is populated
         // by using cancelled as target (since pending -> cancelled is valid)
         let auto_advance = auto_advance_enabled("cancelled");
@@ -2263,13 +3241,36 @@ mod auto_advance_tests {
 
         // Create two tasks where task1 blocks task2
         let task1 = db
-            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocker".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocked".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
         // Claim and complete task1
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
@@ -2278,10 +3279,16 @@ mod auto_advance_tests {
                 &task1.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("completed".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -2292,11 +3299,11 @@ mod auto_advance_tests {
         // unblocked should contain task2
         assert_eq!(unblocked.len(), 1);
         assert_eq!(unblocked[0], task2.id);
-        
+
         // auto_advanced should also contain task2 (it was transitioned)
         assert_eq!(auto_advanced.len(), 1);
         assert_eq!(auto_advanced[0], task2.id);
-        
+
         let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
         assert_eq!(task2_updated.status, "cancelled");
     }
@@ -2311,17 +3318,52 @@ mod auto_advance_tests {
 
         // Create three tasks: task1 and task3 both block task2
         let task1 = db
-            .create_task(None, "Blocker 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocker 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocked".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task3 = db
-            .create_task(None, "Blocker 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocker 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
-        db.add_dependency(&task3.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
+        db.add_dependency(&task3.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
         // Complete task1 - task2 should NOT advance yet (task3 still blocking)
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
@@ -2330,10 +3372,16 @@ mod auto_advance_tests {
                 &task1.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("completed".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -2352,10 +3400,16 @@ mod auto_advance_tests {
                 &task3.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("completed".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -2379,13 +3433,36 @@ mod auto_advance_tests {
 
         // Create two tasks where task1 blocks task2
         let task1 = db
-            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocker".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Blocked".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
 
         // Manually move task2 to in_progress (not initial state)
         db.claim_task(&task2.id, &agent.id, &states_config).unwrap();
@@ -2397,10 +3474,16 @@ mod auto_advance_tests {
                 &task1.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("completed".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -2424,17 +3507,52 @@ mod auto_advance_tests {
 
         // Create a chain: task1 -> task2 -> task3
         let task1 = db
-            .create_task(None, "Task 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task2 = db
-            .create_task(None, "Task 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
         let task3 = db
-            .create_task(None, "Task 3".to_string(), None, None, None, None, None, None, None, &states_config)
+            .create_task(
+                None,
+                "Task 3".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
             .unwrap();
 
-        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
-        db.add_dependency(&task2.id, &task3.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
+            .unwrap();
+        db.add_dependency(&task2.id, &task3.id, "blocks", &deps_config)
+            .unwrap();
 
         // Complete task1 - task2 should auto-advance (but not task3 since task2 just changed)
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
@@ -2443,10 +3561,16 @@ mod auto_advance_tests {
                 &task1.id,
                 &agent.id,
                 None, // assignee
-                None, None,
+                None,
+                None,
                 Some("completed".to_string()),
-                None, None, None,
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 false,
                 &states_config,
                 &deps_config,
@@ -2461,11 +3585,11 @@ mod auto_advance_tests {
         // in the same transaction - it would need a separate update
         assert_eq!(auto_advanced.len(), 1);
         assert_eq!(auto_advanced[0], task2.id);
-        
+
         // Verify states
         let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
         assert_eq!(task2_updated.status, "cancelled");
-        
+
         // task3 should still be pending since task2's transition to cancelled
         // doesn't count as "completing" in the cascade - it's in a separate scope
         // Actually task2 -> cancelled is a non-blocking state, so task3 might advance too

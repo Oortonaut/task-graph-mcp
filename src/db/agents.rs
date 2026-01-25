@@ -1,9 +1,9 @@
 //! Worker CRUD operations.
 
-use super::{now_ms, Database};
+use super::{Database, now_ms};
 use crate::types::{CleanupSummary, DisconnectSummary, Worker};
-use anyhow::{anyhow, Result};
-use rusqlite::{params, Connection};
+use anyhow::{Result, anyhow};
+use rusqlite::{Connection, params};
 
 /// Maximum length for worker IDs.
 pub const MAX_WORKER_ID_LEN: usize = 36;
@@ -15,27 +15,35 @@ const MAX_PETNAME_ATTEMPTS: u32 = 100;
 /// Tries base petname first, then appends numbers (e.g., "happy-turtle-2").
 fn generate_unique_petname(conn: &Connection) -> String {
     let base = petname::petname(2, "-").unwrap_or_else(|| "worker".to_string());
-    
+
     // Check if base name is available
     let exists: bool = conn
-        .query_row("SELECT 1 FROM workers WHERE id = ?1", params![&base], |_| Ok(true))
+        .query_row(
+            "SELECT 1 FROM workers WHERE id = ?1",
+            params![&base],
+            |_| Ok(true),
+        )
         .unwrap_or(false);
-    
+
     if !exists {
         return base;
     }
-    
+
     // Try appending numbers: happy-turtle-2, happy-turtle-3, etc.
     for i in 2..=MAX_PETNAME_ATTEMPTS {
         let candidate = format!("{}-{}", base, i);
         let exists: bool = conn
-            .query_row("SELECT 1 FROM workers WHERE id = ?1", params![&candidate], |_| Ok(true))
+            .query_row(
+                "SELECT 1 FROM workers WHERE id = ?1",
+                params![&candidate],
+                |_| Ok(true),
+            )
             .unwrap_or(false);
         if !exists {
             return candidate;
         }
     }
-    
+
     // Fallback: generate a completely new petname with 3 words for uniqueness
     petname::petname(3, "-").unwrap_or_else(|| format!("worker-{}", now_ms()))
 }
@@ -204,8 +212,8 @@ impl Database {
         max_claims: Option<i32>,
     ) -> Result<Worker> {
         self.with_conn(|conn| {
-            let worker = get_worker_internal(conn, worker_id)?
-                .ok_or_else(|| anyhow!("Worker not found"))?;
+            let worker =
+                get_worker_internal(conn, worker_id)?.ok_or_else(|| anyhow!("Worker not found"))?;
 
             let new_tags = tags.unwrap_or(worker.tags.clone());
             let new_max_claims = max_claims.unwrap_or(worker.max_claims);
@@ -253,7 +261,11 @@ impl Database {
 
     /// Unregister a worker (releases all claims).
     /// Returns a summary of released tasks and files.
-    pub fn unregister_worker(&self, worker_id: &str, final_status: &str) -> Result<DisconnectSummary> {
+    pub fn unregister_worker(
+        &self,
+        worker_id: &str,
+        final_status: &str,
+    ) -> Result<DisconnectSummary> {
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
 
@@ -271,10 +283,7 @@ impl Database {
             )? as i32;
 
             // Remove worker
-            tx.execute(
-                "DELETE FROM workers WHERE id = ?1",
-                params![worker_id],
-            )?;
+            tx.execute("DELETE FROM workers WHERE id = ?1", params![worker_id])?;
 
             tx.commit()?;
             Ok(DisconnectSummary {
@@ -293,27 +302,31 @@ impl Database {
                  FROM workers ORDER BY registered_at DESC",
             )?;
 
-            let workers = stmt.query_map([], |row| {
-                let id: String = row.get(0)?;
-                let tags_json: String = row.get(1)?;
-                let max_claims: i32 = row.get(2)?;
-                let registered_at: i64 = row.get(3)?;
-                let last_heartbeat: i64 = row.get(4)?;
+            let workers = stmt
+                .query_map([], |row| {
+                    let id: String = row.get(0)?;
+                    let tags_json: String = row.get(1)?;
+                    let max_claims: i32 = row.get(2)?;
+                    let registered_at: i64 = row.get(3)?;
+                    let last_heartbeat: i64 = row.get(4)?;
 
-                Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
-            })?
-            .filter_map(|r| r.ok())
-            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat)| {
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                Worker {
-                    id,
-                    tags,
-                    max_claims,
-                    registered_at,
-                    last_heartbeat,
-                }
-            })
-            .collect();
+                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
+                })?
+                .filter_map(|r| r.ok())
+                .map(
+                    |(id, tags_json, max_claims, registered_at, last_heartbeat)| {
+                        let tags: Vec<String> =
+                            serde_json::from_str(&tags_json).unwrap_or_default();
+                        Worker {
+                            id,
+                            tags,
+                            max_claims,
+                            registered_at,
+                            last_heartbeat,
+                        }
+                    },
+                )
+                .collect();
 
             Ok(workers)
         })
@@ -456,7 +469,11 @@ impl Database {
 
     /// Internal helper to get related task IDs at a given depth.
     /// Negative depth: ancestors (parents/blockers), positive depth: descendants (children/blocked).
-    fn get_related_task_ids_internal(conn: &Connection, task_id: &str, depth: i32) -> Result<Vec<String>> {
+    fn get_related_task_ids_internal(
+        conn: &Connection,
+        task_id: &str,
+        depth: i32,
+    ) -> Result<Vec<String>> {
         use std::collections::HashSet;
 
         let mut result = HashSet::new();
@@ -479,17 +496,15 @@ impl Database {
             for tid in &current_level {
                 let related: Vec<String> = if depth > 0 {
                     // Descendants: tasks where this task is the from_task_id (children, blocked tasks)
-                    let mut stmt = conn.prepare(
-                        "SELECT to_task_id FROM dependencies WHERE from_task_id = ?1"
-                    )?;
+                    let mut stmt = conn
+                        .prepare("SELECT to_task_id FROM dependencies WHERE from_task_id = ?1")?;
                     stmt.query_map(params![tid], |row| row.get(0))?
                         .filter_map(|r| r.ok())
                         .collect()
                 } else {
                     // Ancestors: tasks where this task is the to_task_id (parents, blockers)
-                    let mut stmt = conn.prepare(
-                        "SELECT from_task_id FROM dependencies WHERE to_task_id = ?1"
-                    )?;
+                    let mut stmt = conn
+                        .prepare("SELECT from_task_id FROM dependencies WHERE to_task_id = ?1")?;
                     stmt.query_map(params![tid], |row| row.get(0))?
                         .filter_map(|r| r.ok())
                         .collect()
@@ -519,27 +534,31 @@ impl Database {
                  FROM workers WHERE last_heartbeat < ?1",
             )?;
 
-            let workers = stmt.query_map(params![cutoff], |row| {
-                let id: String = row.get(0)?;
-                let tags_json: String = row.get(1)?;
-                let max_claims: i32 = row.get(2)?;
-                let registered_at: i64 = row.get(3)?;
-                let last_heartbeat: i64 = row.get(4)?;
+            let workers = stmt
+                .query_map(params![cutoff], |row| {
+                    let id: String = row.get(0)?;
+                    let tags_json: String = row.get(1)?;
+                    let max_claims: i32 = row.get(2)?;
+                    let registered_at: i64 = row.get(3)?;
+                    let last_heartbeat: i64 = row.get(4)?;
 
-                Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
-            })?
-            .filter_map(|r| r.ok())
-            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat)| {
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                Worker {
-                    id,
-                    tags,
-                    max_claims,
-                    registered_at,
-                    last_heartbeat,
-                }
-            })
-            .collect();
+                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
+                })?
+                .filter_map(|r| r.ok())
+                .map(
+                    |(id, tags_json, max_claims, registered_at, last_heartbeat)| {
+                        let tags: Vec<String> =
+                            serde_json::from_str(&tags_json).unwrap_or_default();
+                        Worker {
+                            id,
+                            tags,
+                            max_claims,
+                            registered_at,
+                            last_heartbeat,
+                        }
+                    },
+                )
+                .collect();
 
             Ok(workers)
         })
@@ -547,17 +566,21 @@ impl Database {
 
     /// Cleanup stale workers by evicting them and releasing their claims.
     /// Returns a summary of the cleanup operation.
-    pub fn cleanup_stale_workers(&self, timeout_seconds: i64, final_status: &str) -> Result<CleanupSummary> {
+    pub fn cleanup_stale_workers(
+        &self,
+        timeout_seconds: i64,
+        final_status: &str,
+    ) -> Result<CleanupSummary> {
         let stale_workers = self.get_stale_workers(timeout_seconds)?;
-        
+
         let mut total_tasks_released = 0;
         let mut total_files_released = 0;
         let mut evicted_worker_ids = Vec::new();
-        
+
         for worker in &stale_workers {
             // Release file locks first
             let _ = self.release_worker_locks(&worker.id);
-            
+
             // Unregister the worker
             if let Ok(summary) = self.unregister_worker(&worker.id, final_status) {
                 total_tasks_released += summary.tasks_released;
@@ -565,7 +588,7 @@ impl Database {
                 evicted_worker_ids.push(worker.id.clone());
             }
         }
-        
+
         Ok(CleanupSummary {
             workers_evicted: evicted_worker_ids.len() as i32,
             tasks_released: total_tasks_released,

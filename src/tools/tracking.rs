@@ -4,10 +4,10 @@ use super::{get_f64, get_i64, get_string, get_string_array, make_tool_with_promp
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::{markdown_to_json, OutputFormat};
+use crate::format::{OutputFormat, markdown_to_json};
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 /// Format a duration in milliseconds to a human-readable string.
@@ -148,10 +148,9 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
 }
 
 pub fn thinking(db: &Database, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
-    let thought = get_string(&args, "thought")
-        .ok_or_else(|| ToolError::missing_field("thought"))?;
+    let agent_id = get_string(&args, "agent").ok_or_else(|| ToolError::missing_field("agent"))?;
+    let thought =
+        get_string(&args, "thought").ok_or_else(|| ToolError::missing_field("thought"))?;
     let task_ids = get_string_array(&args, "tasks");
 
     // Also refresh heartbeat since updating thought implies activity
@@ -165,12 +164,16 @@ pub fn thinking(db: &Database, args: Value) -> Result<Value> {
     }))
 }
 
-pub fn task_history(db: &Database, states_config: &StatesConfig, default_format: OutputFormat, args: Value) -> Result<Value> {
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+pub fn task_history(
+    db: &Database,
+    states_config: &StatesConfig,
+    default_format: OutputFormat,
+    args: Value,
+) -> Result<Value> {
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let state_filter = get_string_array(&args, "states");
     let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
+        .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
 
     let history = db.get_task_state_history(&task_id)?;
@@ -201,19 +204,19 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
     }
 
     // Add current duration to the current state if applicable
-    if let Some(current_dur) = current_duration {
-        if let Some(last_event) = filtered_history.last() {
-            if last_event.end_timestamp.is_none() {
+    if let Some(current_dur) = current_duration
+        && let Some(last_event) = filtered_history.last()
+            && last_event.end_timestamp.is_none() {
                 // Include in state filter check
-                if state_filter.is_none() || state_filter.as_ref().unwrap().contains(&last_event.event) {
+                if state_filter.is_none()
+                    || state_filter.as_ref().unwrap().contains(&last_event.event)
+                {
                     *time_per_status.entry(last_event.event.clone()).or_insert(0) += current_dur;
                     if let Some(ref agent) = last_event.worker_id {
                         *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
                     }
                 }
             }
-        }
-    }
 
     match format {
         OutputFormat::Markdown => {
@@ -275,20 +278,17 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
 
             Ok(markdown_to_json(md))
         }
-        OutputFormat::Json => {
-            Ok(json!({
-                "history": filtered_history,
-                "current_duration_ms": current_duration,
-                "time_per_status_ms": time_per_status,
-                "time_per_agent_ms": time_per_agent
-            }))
-        }
+        OutputFormat::Json => Ok(json!({
+            "history": filtered_history,
+            "current_duration_ms": current_duration,
+            "time_per_status_ms": time_per_status,
+            "time_per_agent_ms": time_per_agent
+        })),
     }
 }
 
 pub fn log_metrics(db: &Database, args: Value) -> Result<Value> {
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
 
     let cost_usd = get_f64(&args, "cost_usd");
 
@@ -296,18 +296,10 @@ pub fn log_metrics(db: &Database, args: Value) -> Result<Value> {
     let values: Vec<i64> = args
         .get("values")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_i64())
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect())
         .unwrap_or_default();
 
-    let task = db.log_metrics(
-        &task_id,
-        cost_usd,
-        &values,
-    )?;
+    let task = db.log_metrics(&task_id, cost_usd, &values)?;
 
     Ok(json!({
         "success": true,
@@ -351,16 +343,12 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
     let state_filter = get_string_array(&args, "states");
     let limit = get_i64(&args, "limit").or(Some(100));
     let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
+        .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
 
     // Get transitions
-    let history = db.get_project_state_history(
-        from_timestamp,
-        to_timestamp,
-        state_filter.as_deref(),
-        limit,
-    )?;
+    let history =
+        db.get_project_state_history(from_timestamp, to_timestamp, state_filter.as_deref(), limit)?;
 
     // Get aggregate stats
     let stats = db.get_project_state_stats(from_timestamp, to_timestamp)?;
@@ -372,18 +360,24 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
             // Time range info
             md.push_str("## Time Range\n\n");
             let from_str = from_timestamp
-                .map(|ts| format_timestamp(ts))
+                .map(format_timestamp)
                 .unwrap_or_else(|| "beginning".to_string());
             let to_str = to_timestamp
-                .map(|ts| format_timestamp(ts))
+                .map(format_timestamp)
                 .unwrap_or_else(|| "now".to_string());
             md.push_str(&format!("**From:** {} **To:** {}\n\n", from_str, to_str));
 
             // Summary stats
             md.push_str("## Summary\n\n");
-            md.push_str(&format!("- **Total Transitions:** {}\n", stats.total_transitions));
+            md.push_str(&format!(
+                "- **Total Transitions:** {}\n",
+                stats.total_transitions
+            ));
             md.push_str(&format!("- **Tasks Affected:** {}\n", stats.tasks_affected));
-            md.push_str(&format!("- **Total Time Tracked:** {}\n\n", format_duration_ms(stats.total_time_ms)));
+            md.push_str(&format!(
+                "- **Total Time Tracked:** {}\n\n",
+                format_duration_ms(stats.total_time_ms)
+            ));
 
             // Recent transitions table
             md.push_str("## Recent Transitions\n\n");
@@ -427,7 +421,12 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
                 sorted_statuses.sort_by_key(|(k, _)| k.as_str());
                 for (status, count) in sorted_statuses {
                     let time = stats.time_by_status_ms.get(status).copied().unwrap_or(0);
-                    md.push_str(&format!("| {} | {} | {} |\n", status, count, format_duration_ms(time)));
+                    md.push_str(&format!(
+                        "| {} | {} | {} |\n",
+                        status,
+                        count,
+                        format_duration_ms(time)
+                    ));
                 }
             }
 
@@ -442,38 +441,41 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
                 sorted_agents.sort_by(|(_, a), (_, b)| b.cmp(a)); // Sort by count descending
                 for (agent, count) in sorted_agents {
                     let time = stats.time_by_agent_ms.get(agent).copied().unwrap_or(0);
-                    md.push_str(&format!("| {} | {} | {} |\n", agent, count, format_duration_ms(time)));
+                    md.push_str(&format!(
+                        "| {} | {} | {} |\n",
+                        agent,
+                        count,
+                        format_duration_ms(time)
+                    ));
                 }
             }
 
             Ok(markdown_to_json(md))
         }
-        OutputFormat::Json => {
-            Ok(json!({
-                "time_range": {
-                    "from_ms": from_timestamp,
-                    "to_ms": to_timestamp
-                },
-                "summary": {
-                    "total_transitions": stats.total_transitions,
-                    "tasks_affected": stats.tasks_affected,
-                    "total_time_ms": stats.total_time_ms
-                },
-                "transitions": history,
-                "transitions_by_status": stats.transitions_by_status,
-                "time_by_status_ms": stats.time_by_status_ms,
-                "transitions_by_agent": stats.transitions_by_agent,
-                "time_by_agent_ms": stats.time_by_agent_ms
-            }))
-        }
+        OutputFormat::Json => Ok(json!({
+            "time_range": {
+                "from_ms": from_timestamp,
+                "to_ms": to_timestamp
+            },
+            "summary": {
+                "total_transitions": stats.total_transitions,
+                "tasks_affected": stats.tasks_affected,
+                "total_time_ms": stats.total_time_ms
+            },
+            "transitions": history,
+            "transitions_by_status": stats.transitions_by_status,
+            "time_by_status_ms": stats.time_by_status_ms,
+            "transitions_by_agent": stats.transitions_by_agent,
+            "time_by_agent_ms": stats.time_by_agent_ms
+        })),
     }
 }
 
 pub fn get_metrics(db: &Database, args: Value) -> Result<Value> {
     use super::get_string_or_array;
 
-    let task_ids = get_string_or_array(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    let task_ids =
+        get_string_or_array(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
 
     if task_ids.is_empty() {
         return Err(ToolError::missing_field("task").into());
@@ -487,15 +489,15 @@ pub fn get_metrics(db: &Database, args: Value) -> Result<Value> {
     for task_id in &task_ids {
         if let Some(task) = db.get_task(task_id)? {
             total_cost_usd += task.cost_usd;
-            for i in 0..8 {
-                total_metrics[i] += task.metrics[i];
+            for (total, task_metric) in total_metrics.iter_mut().zip(task.metrics.iter()) {
+                *total += task_metric;
             }
             found_count += 1;
         }
     }
 
     if found_count == 0 {
-        return Err(anyhow::anyhow!("No tasks found with the provided IDs").into());
+        return Err(anyhow::anyhow!("No tasks found with the provided IDs"));
     }
 
     let response = if task_ids.len() == 1 {

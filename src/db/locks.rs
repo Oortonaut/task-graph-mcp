@@ -1,6 +1,6 @@
 //! File lock operations (advisory) and claim tracking.
 
-use super::{now_ms, Database};
+use super::{Database, now_ms};
 use crate::types::{ClaimEvent, ClaimEventType, ClaimUpdates, FileLock};
 use anyhow::Result;
 use rusqlite::params;
@@ -9,7 +9,13 @@ use std::collections::{HashMap, HashSet};
 impl Database {
     /// Lock a file (advisory).
     /// Returns Ok with optional warning if already locked by another worker.
-    pub fn lock_file(&self, file_path: String, worker_id: &str, reason: Option<String>, task_id: Option<String>) -> Result<Option<String>> {
+    pub fn lock_file(
+        &self,
+        file_path: String,
+        worker_id: &str,
+        reason: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<Option<String>> {
         let now = now_ms();
 
         self.with_conn_mut(|conn| {
@@ -56,7 +62,12 @@ impl Database {
     }
 
     /// Unlock a file with optional reason for next claimant.
-    pub fn unlock_file(&self, file_path: &str, worker_id: &str, reason: Option<String>) -> Result<bool> {
+    pub fn unlock_file(
+        &self,
+        file_path: &str,
+        worker_id: &str,
+        reason: Option<String>,
+    ) -> Result<bool> {
         let now = now_ms();
 
         self.with_conn_mut(|conn| {
@@ -150,7 +161,11 @@ impl Database {
 
     /// Release all files held by a worker with verbose return.
     /// Returns a list of (file_path, worker_id) pairs for files that were released.
-    pub fn release_worker_locks_verbose(&self, worker_id: &str, reason: Option<String>) -> Result<Vec<(String, String)>> {
+    pub fn release_worker_locks_verbose(
+        &self,
+        worker_id: &str,
+        reason: Option<String>,
+    ) -> Result<Vec<(String, String)>> {
         let now = now_ms();
 
         self.with_conn_mut(|conn| {
@@ -158,9 +173,8 @@ impl Database {
 
             // Get files locked by this worker before deleting
             let files_to_release: Vec<String> = {
-                let mut stmt = tx.prepare(
-                    "SELECT file_path FROM file_locks WHERE worker_id = ?1"
-                )?;
+                let mut stmt =
+                    tx.prepare("SELECT file_path FROM file_locks WHERE worker_id = ?1")?;
                 stmt.query_map(params![worker_id], |row| row.get::<_, String>(0))?
                     .filter_map(|r| r.ok())
                     .collect()
@@ -206,7 +220,11 @@ impl Database {
 
     /// Release all files associated with a task with verbose return.
     /// Returns a list of (file_path, worker_id) pairs for files that were released.
-    pub fn release_task_locks_verbose(&self, task_id: &str, reason: Option<String>) -> Result<Vec<(String, String)>> {
+    pub fn release_task_locks_verbose(
+        &self,
+        task_id: &str,
+        reason: Option<String>,
+    ) -> Result<Vec<(String, String)>> {
         let now = now_ms();
 
         self.with_conn_mut(|conn| {
@@ -214,9 +232,8 @@ impl Database {
 
             // Get files locked by this task before deleting
             let files_to_release: Vec<(String, String)> = {
-                let mut stmt = tx.prepare(
-                    "SELECT file_path, worker_id FROM file_locks WHERE task_id = ?1"
-                )?;
+                let mut stmt =
+                    tx.prepare("SELECT file_path, worker_id FROM file_locks WHERE task_id = ?1")?;
                 stmt.query_map(params![task_id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?
@@ -276,29 +293,31 @@ impl Database {
                 "SELECT id, file_path, worker_id, event, reason, timestamp, end_timestamp, claim_id
                  FROM claim_sequence
                  WHERE id >= ?1
-                 ORDER BY id"
+                 ORDER BY id",
             )?;
-            let events: Vec<ClaimEvent> = stmt.query_map(params![last_seq], |row| {
-                Ok(ClaimEvent {
-                    id: row.get(0)?,
-                    file_path: row.get(1)?,
-                    worker_id: row.get(2)?,
-                    event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
-                    reason: row.get(4)?,
-                    timestamp: row.get(5)?,
-                    end_timestamp: row.get(6)?,
-                    claim_id: row.get(7)?,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
+            let events: Vec<ClaimEvent> = stmt
+                .query_map(params![last_seq], |row| {
+                    Ok(ClaimEvent {
+                        id: row.get(0)?,
+                        file_path: row.get(1)?,
+                        worker_id: row.get(2)?,
+                        event: ClaimEventType::parse(&row.get::<_, String>(3)?)
+                            .unwrap_or(ClaimEventType::Claimed),
+                        reason: row.get(4)?,
+                        timestamp: row.get(5)?,
+                        end_timestamp: row.get(6)?,
+                        claim_id: row.get(7)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
             // Find max sequence from events. After polling, we set last_seq = max + 1
             // so that claims we just saw have claim_id < last_seq (for release filtering).
             let max_seen = events.iter().map(|e| e.id).max();
             let new_seq = match max_seen {
-                Some(max) => max + 1,  // +1 so claims just polled satisfy claim_id < new_seq
-                None => last_seq,       // No events, keep current sequence
+                Some(max) => max + 1, // +1 so claims just polled satisfy claim_id < new_seq
+                None => last_seq,     // No events, keep current sequence
             };
 
             // Update worker's last sequence
@@ -310,7 +329,8 @@ impl Database {
             }
 
             // Separate into claims and releases
-            let new_claims: Vec<ClaimEvent> = events.iter()
+            let new_claims: Vec<ClaimEvent> = events
+                .iter()
                 .filter(|e| e.event == ClaimEventType::Claimed)
                 .cloned()
                 .collect();
@@ -318,11 +338,10 @@ impl Database {
             // For releases, only include if agent has polled and received the original claim.
             // Include if claim_id < last_seq (strictly less - was in a previous poll, and
             // last_seq is max+1 after each poll) OR claim_id is in current batch.
-            let new_claim_ids: HashSet<i64> = new_claims.iter()
-                .map(|c| c.id)
-                .collect();
+            let new_claim_ids: HashSet<i64> = new_claims.iter().map(|c| c.id).collect();
 
-            let dropped_claims: Vec<ClaimEvent> = events.iter()
+            let dropped_claims: Vec<ClaimEvent> = events
+                .iter()
                 .filter(|e| e.event == ClaimEventType::Released)
                 .filter(|release| {
                     match release.claim_id {
@@ -425,8 +444,9 @@ impl Database {
     /// Get all file locks as FileLock objects.
     pub fn get_all_file_locks(&self) -> Result<Vec<FileLock>> {
         self.with_conn(|conn| {
-            let mut stmt =
-                conn.prepare("SELECT file_path, worker_id, reason, locked_at, task_id FROM file_locks")?;
+            let mut stmt = conn.prepare(
+                "SELECT file_path, worker_id, reason, locked_at, task_id FROM file_locks",
+            )?;
 
             let locks = stmt
                 .query_map([], |row| {
@@ -471,7 +491,6 @@ impl Database {
         })
     }
 
-
     /// Release all locks associated with a task.
     /// Called automatically when a task completes.
     pub fn release_task_locks(&self, task_id: &str) -> Result<i32> {
@@ -480,9 +499,8 @@ impl Database {
         self.with_conn(|conn| {
             // Get files locked by this task before deleting
             let files_to_release: Vec<(String, String)> = {
-                let mut stmt = conn.prepare(
-                    "SELECT file_path, worker_id FROM file_locks WHERE task_id = ?1"
-                )?;
+                let mut stmt =
+                    conn.prepare("SELECT file_path, worker_id FROM file_locks WHERE task_id = ?1")?;
                 stmt.query_map(params![task_id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?

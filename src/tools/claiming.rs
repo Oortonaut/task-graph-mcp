@@ -10,31 +10,29 @@ use crate::db::Database;
 use crate::error::ToolError;
 use anyhow::Result;
 use rmcp::model::Tool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> {
-    vec![
-        make_tool_with_prompts(
-            "claim",
-            "Commit to working on a task (like adding to a changelist). Fails if: already claimed, deps unsatisfied, or worker lacks required tags. Sets status to timed (working) status.",
-            json!({
-                "worker_id": {
-                    "type": "string",
-                    "description": "Worker ID claiming the task"
-                },
-                "task": {
-                    "type": "string",
-                    "description": "Task ID to claim"
-                },
-                "force": {
-                    "type": "boolean",
-                    "description": "Force claim even if owned by another agent (default: false)"
-                }
-            }),
-            vec!["worker_id", "task"],
-            prompts,
-        ),
-    ]
+    vec![make_tool_with_prompts(
+        "claim",
+        "Commit to working on a task (like adding to a changelist). Fails if: already claimed, deps unsatisfied, or worker lacks required tags. Sets status to timed (working) status.",
+        json!({
+            "worker_id": {
+                "type": "string",
+                "description": "Worker ID claiming the task"
+            },
+            "task": {
+                "type": "string",
+                "description": "Task ID to claim"
+            },
+            "force": {
+                "type": "boolean",
+                "description": "Force claim even if owned by another agent (default: false)"
+            }
+        }),
+        vec!["worker_id", "task"],
+        prompts,
+    )]
 }
 
 pub fn claim(
@@ -44,10 +42,9 @@ pub fn claim(
     auto_advance: &AutoAdvanceConfig,
     args: Value,
 ) -> Result<Value> {
-    let worker_id = get_string(&args, "worker_id")
-        .ok_or_else(|| ToolError::missing_field("worker_id"))?;
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    let worker_id =
+        get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let force = get_bool(&args, "force").unwrap_or(false);
 
     // Find the first timed state to use for claiming

@@ -2,7 +2,7 @@
 
 use crate::db::Database;
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_all_workers(db: &Database) -> Result<Value> {
     let workers = db.list_workers()?;

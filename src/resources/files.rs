@@ -2,7 +2,7 @@
 
 use crate::db::Database;
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn get_all_file_locks(db: &Database) -> Result<Value> {
     let locks = db.get_all_file_locks()?;
