@@ -55,18 +55,17 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "create_tree",
-            "Create a task tree from a nested structure. Use join_mode='then' for sequential children (auto-creates follows dependencies), 'also' for parallel. Returns the tree root task.",
+            "Create a task tree from nested structure. child_type (default 'contains') links parent→children, sibling_type ('follows' or null) links siblings. Use 'ref' in nodes to include existing tasks.",
             json!({
                 "tree": {
                     "type": "object",
-                    "description": "Nested tree structure with title, children[], join_mode, etc. Use 'ref' to reference existing tasks.",
+                    "description": "Nested tree structure with title, children[], etc. Use 'ref' to reference existing tasks.",
                     "properties": {
                         "ref": { "type": "string", "description": "Reference to an existing task ID (other fields ignored when set)" },
                         "id": { "type": "string", "description": "Custom task ID (optional, UUID7 generated if not provided)" },
                         "title": { "type": "string", "description": "Task title (required for new tasks)" },
                         "description": { "type": "string", "description": "Task description" },
                         "priority": { "type": "integer", "description": "Task priority 0-10 (default 5)" },
-                        "join_mode": { "type": "string", "enum": ["then", "also"], "description": "How children relate: 'then' = sequential with follows deps (default), 'also' = parallel" },
                         "points": { "type": "integer", "description": "Story points / complexity estimate" },
                         "time_estimate_ms": { "type": "integer", "description": "Estimated duration in milliseconds" },
                         "tags": { "type": "array", "items": { "type": "string" }, "description": "Categorization/discovery tags" },
@@ -78,6 +77,14 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "parent": {
                     "type": "string",
                     "description": "Optional parent task ID for the tree root"
+                },
+                "child_type": {
+                    "type": "string",
+                    "description": "Dependency type from parent to children (default: 'contains'). Set to null for no parent-child deps."
+                },
+                "sibling_type": {
+                    "type": "string",
+                    "description": "Dependency type between consecutive siblings (default: null/parallel). Use 'follows' for sequential."
                 }
             }),
             vec!["tree"],
@@ -364,8 +371,10 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
             .ok_or_else(|| ToolError::missing_field("tree"))?,
     )?;
     let parent_id = get_string(&args, "parent");
+    let child_type = get_string(&args, "child_type");
+    let sibling_type = get_string(&args, "sibling_type");
 
-    let (root_id, all_ids) = db.create_task_tree(tree, parent_id, states_config)?;
+    let (root_id, all_ids) = db.create_task_tree(tree, parent_id, child_type, sibling_type, states_config)?;
 
     // Fetch the root task to return full details
     let root_task = db.get_task(&root_id)?

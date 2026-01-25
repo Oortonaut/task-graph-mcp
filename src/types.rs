@@ -87,16 +87,7 @@ pub struct TaskTree {
     pub children: Vec<TaskTree>,
 }
 
-/// Join mode for tree children: how children relate to each other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum JoinMode {
-    /// Children run sequentially with "follows" dependencies between them.
-    #[default]
-    Then,
-    /// Children run in parallel with no dependencies between them.
-    Also,
-}
+
 
 /// Input for creating a task tree.
 /// Supports all fields from task creation, plus tree-specific fields.
@@ -121,11 +112,6 @@ pub struct TaskTreeInput {
     
     /// Task priority.
     pub priority: Option<Priority>,
-    
-    /// How children of this node relate to each other.
-    /// "then" = sequential (follows deps), "also" = parallel (no deps).
-    #[serde(default)]
-    pub join_mode: JoinMode,
     
     /// Story points / complexity estimate.
     pub points: Option<i32>,

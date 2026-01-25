@@ -266,7 +266,7 @@ package "Sequential Dependencies" {
     s2 -right-> s3 : **follows**\n(start)
     note bottom of s3
       Auto-created by
-      join_mode='then'
+      sibling_type='follows'
     end note
 }
 

@@ -3,7 +3,7 @@
 use super::state_transitions::record_state_transition;
 use super::{now_ms, Database};
 use crate::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
-use crate::types::{clamp_priority, parse_priority, JoinMode, Priority, Task, TaskTree, TaskTreeInput, Worker, PRIORITY_DEFAULT};
+use crate::types::{clamp_priority, parse_priority, Priority, Task, TaskTree, TaskTreeInput, Worker, PRIORITY_DEFAULT};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use uuid::Uuid;
@@ -275,15 +275,19 @@ impl Database {
     }
 
     /// Create a task tree from nested input.
-    /// Uses 'contains' dependencies for parent-child relationships
-    /// and 'follows' dependencies for sequential children (when parallel=false).
+    /// Uses child_type for parent-child dependencies (default: "contains").
+    /// Uses sibling_type for sibling dependencies (default: none/parallel).
     pub fn create_task_tree(
         &self,
         input: TaskTreeInput,
         parent_id: Option<String>,
+        child_type: Option<String>,
+        sibling_type: Option<String>,
         states_config: &StatesConfig,
     ) -> Result<(String, Vec<String>)> {
         let mut all_ids = Vec::new();
+        // Default child_type to "contains" if not specified
+        let child_type = child_type.or_else(|| Some("contains".to_string()));
 
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
@@ -292,6 +296,8 @@ impl Database {
                 &input,
                 parent_id.as_deref(),
                 None, // no previous sibling for root
+                child_type.as_deref(),
+                sibling_type.as_deref(),
                 &mut all_ids,
                 states_config,
             )?;
@@ -1602,14 +1608,16 @@ impl Database {
 }
 
 /// Helper function to create task tree recursively within a transaction.
-/// Creates 'contains' dependencies from parent to children.
-/// Creates 'follows' dependencies between siblings when join_mode is Then.
+/// Creates dependencies from parent to children using child_type.
+/// Creates dependencies between siblings using sibling_type.
 /// Supports referencing existing tasks via ref_id.
 fn create_tree_recursive(
     conn: &Connection,
     input: &TaskTreeInput,
     parent_id: Option<&str>,
     prev_sibling_id: Option<&str>,
+    child_type: Option<&str>,
+    sibling_type: Option<&str>,
     all_ids: &mut Vec<String>,
     states_config: &StatesConfig,
 ) -> Result<String> {
@@ -1672,34 +1680,28 @@ fn create_tree_recursive(
         task_id
     };
 
-    // Create 'contains' dependency from parent if present
-    if let Some(pid) = parent_id {
-        Database::add_dependency_internal(conn, pid, &task_id, "contains")?;
+    // Create dependency from parent if child_type is specified
+    if let (Some(pid), Some(ct)) = (parent_id, child_type) {
+        Database::add_dependency_internal(conn, pid, &task_id, ct)?;
     }
 
-    // Create 'follows' dependency from previous sibling if sequential (join_mode is Then)
-    if input.join_mode == JoinMode::Then {
-        if let Some(prev_id) = prev_sibling_id {
-            Database::add_dependency_internal(conn, prev_id, &task_id, "follows")?;
-        }
+    // Create dependency from previous sibling if sibling_type is specified
+    if let (Some(prev_id), Some(st)) = (prev_sibling_id, sibling_type) {
+        Database::add_dependency_internal(conn, prev_id, &task_id, st)?;
     }
 
     all_ids.push(task_id.clone());
 
-    // Create children with 'follows' dependencies based on join_mode
+    // Create children with dependencies based on child_type and sibling_type
     let mut prev_child_id: Option<String> = None;
     for child in input.children.iter() {
-        // Determine prev_sibling based on THIS node's join_mode (not the child's)
-        let child_prev = if input.join_mode == JoinMode::Then {
-            prev_child_id.as_deref()
-        } else {
-            None
-        };
         let child_id = create_tree_recursive(
             conn,
             child,
             Some(&task_id),
-            child_prev,
+            prev_child_id.as_deref(),
+            child_type,
+            sibling_type,
             all_ids,
             states_config,
         )?;

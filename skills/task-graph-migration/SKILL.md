@@ -110,8 +110,8 @@ Pattern:
   3. Third task
 
 Mapping:
-  Sequential numbers → join_mode: then
-  Parallel items → join_mode: also
+  Sequential numbers → sibling_type: "follows" (top-level param)
+  Parallel items → sibling_type: null (or omit)
   Indentation → hierarchy
 ```
 
@@ -216,16 +216,15 @@ for task in tasks:
 # 2. Second thing (after first)
 # 3. Third thing (after second)
 
-# Use create_tree with join_mode: then
+# Use create_tree with sibling_type: follows
 create_tree(tree={
     "title": "Migrated List",
-    "join_mode": "then",
     "children": [
         {"title": "First thing"},
         {"title": "Second thing"},
         {"title": "Third thing"}
     ]
-})
+}, sibling_type="follows")
 # Automatically creates sequential dependencies
 ```
 

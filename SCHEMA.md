@@ -39,7 +39,7 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 | `description` | TEXT | | Detailed task description |
 | `status` | TEXT | NOT NULL DEFAULT 'pending' | Task status (configurable, see States Configuration) |
 | `priority` | TEXT | NOT NULL DEFAULT 'medium' | One of: low, medium, high, critical |
-| `join_mode` | TEXT | NOT NULL DEFAULT 'then' | 'then' (sequential) or 'also' (parallel) |
+
 | `sibling_order` | INTEGER | NOT NULL DEFAULT 0 | Position among sibling tasks |
 | `worker_id` | TEXT | FK → workers(id) | Claiming worker |
 | `claimed_at` | INTEGER | | Unix timestamp when claimed |
@@ -358,7 +358,7 @@ list_tasks(qualified_for="agent-1")  # Tasks this agent can claim
 | V006 | 2026-01-24 | Add `task_state_sequence` table for automatic time tracking; add `end_timestamp` to `claim_sequence` |
 | V007 | 2026-01-24 | Configurable task states via YAML; `status` field is now dynamic string based on config |
 | V008 | 2026-01-24 | Add query indices for common access patterns |
-| V009 | 2026-01-24 | Unified dependency system with typed edges (blocks, follows, contains); remove parent_id, sibling_order, join_mode columns |
+| V009 | 2026-01-24 | Unified dependency system with typed edges (blocks, follows, contains); remove parent_id, sibling_order columns |
 | V010 | 2026-01-24 | Add `tags` column for task categorization/discovery; separate from needed_tags/wanted_tags (claim requirements) |
 | V019 | 2026-01-25 | Standardize naming: rename `owner_agent` → `worker_id`, `agent_tags_all` → `needed_tags`, `agent_tags_any` → `wanted_tags`; rename `agents` table to `workers` |
 

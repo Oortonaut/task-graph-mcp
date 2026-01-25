@@ -79,7 +79,7 @@ Every worker MUST connect before using task-graph tools:
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
 | `create` | Single task | `title`, `description`, `parent`, `priority`, `blocked_by[]`, `agent_tags_all[]`, `agent_tags_any[]` |
-| `create_tree` | Nested structure | `tree` (recursive), `parent` |
+| `create_tree` | Nested structure | `tree`, `parent`, `child_type`, `sibling_type` |
 | `get` | Fetch task | `task`, `children`, `format` |
 | `list_tasks` | Query tasks | `status`, `ready`, `blocked`, `owner`, `parent`, `worker_id`, `format` |
 | `update` | Modify task & state | `worker_id`, `task`, `state`, `title`, `description`, `priority`, `force` |
@@ -207,19 +207,32 @@ Use `create_tree` for hierarchical task structures:
 {
   "tree": {
     "title": "Feature X",
-    "join_mode": "then",
     "children": [
       {"title": "Design", "points": 3},
       {"title": "Implement", "points": 5},
       {"title": "Test", "points": 2}
     ]
-  }
+  },
+  "sibling_type": "follows"
 }
 ```
 
-**Join modes:**
-- `then` - Children execute sequentially (auto-creates dependencies)
-- `also` - Children execute in parallel
+**Top-level params:**
+- `child_type` - Dependency from parent to children (default: "contains")
+- `sibling_type` - Dependency between siblings ("follows" for sequential, null for parallel)
+
+**Tree node fields:**
+- `title` - Task title (required for new tasks)
+- `ref` - Reference existing task by ID (other fields ignored)
+- `id` - Custom task ID (UUID7 generated if omitted)
+- `description`, `priority`, `points`, `time_estimate_ms`
+- `tags`, `needed_tags`, `wanted_tags`
+- `children` - Nested child nodes
+
+**Reference existing tasks:**
+```json
+{ "ref": "existing-task-id" }  // Include in tree, other fields ignored
+```
 
 ---
 

@@ -32,8 +32,8 @@ Coordinated 16 worker agents completing 15 tasks:
 - `list_tasks(status="in_progress")` shows active work
 
 ### Task Dependencies
-- `join_mode: "then"` for sequential subtasks
-- `join_mode: "also"` for parallel work
+- `sibling_type: "follows"` for sequential subtasks (top-level param)
+- `sibling_type: null` (or omit) for parallel work
 - `blocked_by` prevents premature claiming
 
 ### Scope Discovery

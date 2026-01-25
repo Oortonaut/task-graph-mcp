@@ -27,9 +27,8 @@ connect(name="coordinator", tags=["coordinator", "planning"])
 # 2. Design and create task tree
 create_tree(tree={
   "title": "Sprint Goal",
-  "join_mode": "then",
   "children": [...]
-})
+}, sibling_type="follows")
 
 # 3. Monitor progress
 list_tasks(format="markdown")
@@ -64,7 +63,7 @@ As a **Coordinator**, you:
 │    • Estimate complexity (points)                   │
 ├─────────────────────────────────────────────────────┤
 │ 2. STRUCTURE                                        │
-│    • Choose join_mode (then vs also)                │
+│    • Choose sibling_type (follows or null)          │
 │    • Set tag requirements                           │
 │    • Define acceptance criteria (attachments)       │
 ├─────────────────────────────────────────────────────┤
@@ -112,7 +111,6 @@ agent_tags_any: ["python", "rust"]  # Senior + (Python OR Rust)
 {
   "tree": {
     "title": "Feature: User Auth",
-    "join_mode": "then",
     "children": [
       {
         "title": "Design API schema",
@@ -135,32 +133,33 @@ agent_tags_any: ["python", "rust"]  # Senior + (Python OR Rust)
         "agent_tags_any": ["testing", "qa"]
       }
     ]
-  }
+  },
+  "sibling_type": "follows"
 }
 ```
 
 ### Parallel Workstreams
 
+For complex patterns with parallel tracks containing sequential tasks, build the structure then add links manually:
+
 ```json
+// Create tree without sibling linking
 {
   "tree": {
     "title": "Sprint 5",
-    "join_mode": "also",
     "children": [
       {
         "title": "Backend Track",
-        "join_mode": "then",
         "children": [
-          {"title": "API endpoints", "agent_tags_all": ["backend"]},
-          {"title": "Database migrations", "agent_tags_all": ["database"]}
+          {"title": "API endpoints", "id": "api", "agent_tags_all": ["backend"]},
+          {"title": "Database migrations", "id": "db", "agent_tags_all": ["database"]}
         ]
       },
       {
         "title": "Frontend Track",
-        "join_mode": "then",
         "children": [
-          {"title": "Component library", "agent_tags_all": ["frontend"]},
-          {"title": "Page integration", "agent_tags_all": ["frontend"]}
+          {"title": "Component library", "id": "comp", "agent_tags_all": ["frontend"]},
+          {"title": "Page integration", "id": "page", "agent_tags_all": ["frontend"]}
         ]
       }
     ]
@@ -168,11 +167,13 @@ agent_tags_any: ["python", "rust"]  # Senior + (Python OR Rust)
 }
 ```
 
-### Cross-Branch Dependencies
-
 ```
-# After creating tree, add cross-branch deps:
-block(blocker="api-endpoints-task-id", blocked="page-integration-task-id")
+# Add sequential deps within each track:
+link(from="api", to="db", type="follows")
+link(from="comp", to="page", type="follows")
+
+# Add cross-branch deps:
+link(from="api", to="page", type="blocks")
 ```
 
 ---
@@ -370,12 +371,14 @@ Lead Coordinator
 
 ```json
 {
-  "title": "Implement Feature",
-  "join_mode": "then",
-  "children": [
-    {"title": "Write code", "agent_tags_all": ["developer"]},
-    {"title": "Review code", "agent_tags_all": ["reviewer"]}
-  ]
+  "tree": {
+    "title": "Implement Feature",
+    "children": [
+      {"title": "Write code", "agent_tags_all": ["developer"]},
+      {"title": "Review code", "agent_tags_all": ["reviewer"]}
+    ]
+  },
+  "sibling_type": "follows"
 }
 ```
 
@@ -403,7 +406,7 @@ Before creating a task tree:
 
 - [ ] Goal clearly defined
 - [ ] Tasks are atomic (one deliverable each)
-- [ ] Dependencies explicit (join_mode + block)
+- [ ] Dependencies explicit (sibling_type + link)
 - [ ] Tags defined for each task
 - [ ] Estimates provided (points)
 - [ ] Acceptance criteria attached

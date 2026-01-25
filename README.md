@@ -258,7 +258,7 @@ Environment variables:
 | Tool | Description |
 |------|-------------|
 | `create(description: str, id?: task_str, parent?: task_str, priority?: int = 5, points?: int, time_estimate_ms?: int, tags?: str[])` | Create a task. Priority 0-10 (higher = more important). |
-| `create_tree(tree: object, parent?: task_str)` | Create nested task tree. Tree nodes have `title`, `children[]`, `join_mode` (then/also), etc. |
+| `create_tree(tree, parent?, child_type?, sibling_type?)` | Create nested task tree. `child_type` (default: "contains") for parent→child deps, `sibling_type` for sibling deps. |
 | `get(task: task_str)` | Get task by ID with attachment metadata and counts. |
 | `list_tasks(status?: status_str[], ready?: bool, blocked?: bool, claimed?: bool, owner?: worker_str, parent?: task_str, worker_id?: worker_str, tags_any?: str[], tags_all?: str[], sort_by?: str, sort_order?: str, limit?: int)` | Query tasks with filters. Use `ready=true` for claimable tasks. |
 | `update(worker_id: worker_str, task: task_str, status?: status_str, assignee?: worker_str, title?: str, description?: str, priority?: int, points?: int, tags?: str[], needed_tags?: str[], wanted_tags?: str[], time_estimate_ms?: int, reason?: str, force?: bool, attachments?: object[])` | Update task. Status changes auto-manage ownership. Include `attachments` to record commits/changelists. |
@@ -332,26 +332,69 @@ Environment variables:
 
 ## Task Tree Structure
 
-Create hierarchical tasks with `then`/`also` join modes:
+Create hierarchical tasks with `create_tree`:
 
 ```json
 {
-  "title": "Implement auth",
-  "children": [
-    { "title": "Design schema", "join_mode": "then" },
-    { "title": "Write migrations", "join_mode": "then" },
-    { "title": "Implement endpoints", "join_mode": "then", "children": [
-      { "title": "Login endpoint", "join_mode": "then" },
-      { "title": "Logout endpoint", "join_mode": "also" },
-      { "title": "Refresh endpoint", "join_mode": "also" }
-    ]},
-    { "title": "Write tests", "join_mode": "then" }
-  ]
+  "tree": {
+    "title": "Implement auth",
+    "children": [
+      { "title": "Design schema" },
+      { "title": "Write migrations" },
+      { "title": "Implement endpoints", "children": [
+        { "title": "Login endpoint" },
+        { "title": "Logout endpoint" },
+        { "title": "Refresh endpoint" }
+      ]},
+      { "title": "Write tests" }
+    ]
+  },
+  "sibling_type": "follows"
 }
 ```
 
-- `then`: Depends on previous sibling completing
-- `also`: Runs in parallel with previous sibling
+### Tree Node Fields
+
+| Field | Description |
+|-------|-------------|
+| `title` | Task title (required for new tasks) |
+| `description` | Task description |
+| `id` | Custom task ID (UUID7 generated if omitted) |
+| `ref` | Reference existing task by ID (other fields ignored when set) |
+| `priority` | Priority 0-10 (default 5) |
+| `points` | Story points / complexity estimate |
+| `time_estimate_ms` | Estimated duration in milliseconds |
+| `tags` | Categorization tags for the task |
+| `needed_tags` | Agent must have ALL of these tags to claim (AND) |
+| `wanted_tags` | Agent must have AT LEAST ONE of these tags to claim (OR) |
+| `children` | Nested child nodes |
+
+### Top-Level Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `tree` | required | Root node of the task tree |
+| `parent` | null | Attach tree root to existing parent task |
+| `child_type` | "contains" | Dependency type from parent to children |
+| `sibling_type` | null | Dependency type between siblings ("follows" for sequential, null for parallel) |
+
+### Referencing Existing Tasks
+
+Use `ref` to integrate existing tasks into a tree structure:
+
+```json
+{
+  "tree": {
+    "title": "Sprint 5",
+    "children": [
+      { "title": "New feature" },
+      { "ref": "existing-task-id" },
+      { "title": "Another task" }
+    ]
+  },
+  "sibling_type": "follows"
+}
+```
 
 ## Tag-Based Affinity
 

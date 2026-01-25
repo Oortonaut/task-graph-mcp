@@ -104,13 +104,12 @@ All skills reference `task-graph-basics` for shared tool documentation.
 connect(name="coordinator", tags=["planning"])
 create_tree(tree={
   "title": "Feature X",
-  "join_mode": "then",
   "children": [
     {"title": "Design", "agent_tags_all": ["design"]},
     {"title": "Implement", "agent_tags_all": ["backend"]},
     {"title": "Test", "agent_tags_all": ["testing"]}
   ]
-})
+}, sibling_type="follows")
 ```
 
 **Worker (backend):**
