@@ -132,10 +132,9 @@ dependencies:
 | `blocks` | `none`, `start`, `completion` | What the dependency blocks |
 
 Environment variables:
-- `TASK_GRAPH_DB_PATH`: Database file path
-- `TASK_GRAPH_MEDIA_DIR`: Media directory for file attachments
-- `TASK_GRAPH_CLAIM_LIMIT`: Default claim limit
-- `TASK_GRAPH_STALE_TIMEOUT`: Stale timeout in seconds
+- `TASK_GRAPH_CONFIG_PATH`: Path to configuration file (takes precedence over `.task-graph/config.yaml`)
+- `TASK_GRAPH_DB_PATH`: Database file path (fallback if no config file)
+- `TASK_GRAPH_MEDIA_DIR`: Media directory for file attachments (fallback if no config file)
 
 ## MCP Tools
 

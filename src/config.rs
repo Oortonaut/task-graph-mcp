@@ -543,12 +543,19 @@ impl Config {
 
     /// Load configuration from default locations or return defaults.
     pub fn load_or_default() -> Self {
+        // Try TASK_GRAPH_CONFIG_PATH environment variable first
+        if let Ok(config_path) = std::env::var("TASK_GRAPH_CONFIG_PATH") {
+            if let Ok(config) = Self::load(&config_path) {
+                return config;
+            }
+        }
+
         // Try .task-graph/config.yaml
         if let Ok(config) = Self::load(".task-graph/config.yaml") {
             return config;
         }
 
-        // Try environment variables
+        // Fall back to defaults with environment variable overrides
         let mut config = Self::default();
 
         if let Ok(db_path) = std::env::var("TASK_GRAPH_DB_PATH") {
@@ -557,18 +564,6 @@ impl Config {
 
         if let Ok(media_dir) = std::env::var("TASK_GRAPH_MEDIA_DIR") {
             config.server.media_dir = PathBuf::from(media_dir);
-        }
-
-        if let Ok(limit) = std::env::var("TASK_GRAPH_CLAIM_LIMIT") {
-            if let Ok(limit) = limit.parse() {
-                config.server.claim_limit = limit;
-            }
-        }
-
-        if let Ok(timeout) = std::env::var("TASK_GRAPH_STALE_TIMEOUT") {
-            if let Ok(timeout) = timeout.parse() {
-                config.server.stale_timeout_seconds = timeout;
-            }
         }
 
         config
