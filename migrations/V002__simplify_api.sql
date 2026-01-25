@@ -14,7 +14,7 @@ CREATE TABLE tasks_new (
     priority TEXT NOT NULL DEFAULT 'medium',
     join_mode TEXT NOT NULL DEFAULT 'then',
     sibling_order INTEGER NOT NULL DEFAULT 0,
-    owner_agent TEXT REFERENCES agents(id),
+    owner_agent TEXT REFERENCES workers(id),
     claimed_at INTEGER,
 
     -- Affinity (tag-based)

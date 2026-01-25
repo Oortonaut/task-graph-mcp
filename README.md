@@ -109,7 +109,7 @@ Environment variables:
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `thinking` | `agent`, `thought?`, `tasks?` | Update current activity (visible to other agents). Refreshes heartbeat. |
+| `thinking` | `agent`, `thought`, `tasks?` | Update current activity (visible to other agents). Refreshes heartbeat. |
 | `log_time` | `agent`, `task`, `duration_ms` | Manually log time spent on a task (in addition to automatic tracking). |
 | `log_cost` | `agent`, `task`, `tokens_in?`, `tokens_cached?`, `tokens_out?`, `tokens_thinking?`, `tokens_image?`, `tokens_audio?`, `cost_usd?`, `user_metrics?` | Log token usage and cost. |
 | `get_state_history` | `task` | Get state transition history and current duration in state. |

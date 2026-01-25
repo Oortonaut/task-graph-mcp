@@ -5,7 +5,7 @@
 CREATE TABLE task_state_sequence (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL,
-    agent_id TEXT,
+    worker_id TEXT,
     event TEXT NOT NULL,          -- Target state: pending, in_progress, completed, etc.
     reason TEXT,
     timestamp INTEGER NOT NULL,

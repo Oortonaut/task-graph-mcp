@@ -3,7 +3,7 @@
 use super::state_transitions::record_state_transition;
 use super::{now_ms, Database};
 use crate::config::StatesConfig;
-use crate::types::{Agent, Priority, Task, TaskSummary, TaskTree, TaskTreeInput};
+use crate::types::{parse_priority, priority_to_str, Priority, Task, TaskSummary, TaskTree, TaskTreeInput, Worker, PRIORITY_MEDIUM};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use std::collections::HashMap;
@@ -47,7 +47,7 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         title,
         description,
         status,
-        priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
+        priority: parse_priority(&priority),
         owner_agent,
         claimed_at,
         needed_tags: needed_tags_json
@@ -91,14 +91,14 @@ fn get_task_internal(conn: &Connection, task_id: &str) -> Result<Option<Task>> {
     }
 }
 
-/// Internal helper to get an agent using an existing connection (avoids deadlock).
-fn get_agent_internal(conn: &Connection, agent_id: &str) -> Result<Option<Agent>> {
+/// Internal helper to get a worker using an existing connection (avoids deadlock).
+fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Worker>> {
     let mut stmt = conn.prepare(
         "SELECT id, tags, max_claims, registered_at, last_heartbeat
-         FROM agents WHERE id = ?1",
+         FROM workers WHERE id = ?1",
     )?;
 
-    let result = stmt.query_row(params![agent_id], |row| {
+    let result = stmt.query_row(params![worker_id], |row| {
         let id: String = row.get(0)?;
         let tags_json: String = row.get(1)?;
         let max_claims: i32 = row.get(2)?;
@@ -111,7 +111,7 @@ fn get_agent_internal(conn: &Connection, agent_id: &str) -> Result<Option<Agent>
     match result {
         Ok((id, tags_json, max_claims, registered_at, last_heartbeat)) => {
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-            Ok(Some(Agent {
+            Ok(Some(Worker {
                 id,
                 tags,
                 max_claims,
@@ -136,11 +136,12 @@ fn get_claim_count_internal(conn: &Connection, agent_id: &str) -> Result<i32> {
 
 impl Database {
     /// Create a new task.
+    /// If id is provided, uses it as the task ID; otherwise generates UUID7.
     /// If parent_id is provided, creates a 'contains' dependency from parent to this task.
     pub fn create_task(
         &self,
-        title: String,
-        description: Option<String>,
+        id: Option<String>,
+        description: String,
         parent_id: Option<String>,
         priority: Option<Priority>,
         points: Option<i32>,
@@ -148,12 +149,11 @@ impl Database {
         needed_tags: Option<Vec<String>>,
         wanted_tags: Option<Vec<String>>,
         tags: Option<Vec<String>>,
-        blocked_by: Option<Vec<String>>,
         states_config: &StatesConfig,
     ) -> Result<Task> {
-        let id = Uuid::now_v7().to_string();
+        let task_id = id.unwrap_or_else(|| Uuid::now_v7().to_string());
         let now = now_ms();
-        let priority = priority.unwrap_or(Priority::Medium);
+        let priority = priority.unwrap_or(PRIORITY_MEDIUM);
         let initial_status = &states_config.initial;
 
         let needed_tags = needed_tags.unwrap_or_default();
@@ -172,11 +172,11 @@ impl Database {
                     needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
-                    &id,
-                    title,
-                    description,
+                    &task_id,
+                    &description,  // Use description as title
+                    &description,  // Also store as description
                     initial_status,
-                    priority.as_str(),
+                    priority_to_str(priority),
                     needed_tags_json,
                     wanted_tags_json,
                     tags_json,
@@ -189,25 +189,18 @@ impl Database {
 
             // Create 'contains' dependency if parent_id is provided
             if let Some(ref pid) = parent_id {
-                Database::add_dependency_internal(&tx, pid, &id, "contains")?;
-            }
-
-            // Add 'blocks' dependencies if specified
-            if let Some(blockers) = &blocked_by {
-                for blocker_id in blockers {
-                    Database::add_dependency_internal(&tx, blocker_id, &id, "blocks")?;
-                }
+                Database::add_dependency_internal(&tx, pid, &task_id, "contains")?;
             }
 
             // Record initial state
-            record_state_transition(&tx, &id, initial_status, None, None, states_config)?;
+            record_state_transition(&tx, &task_id, initial_status, None, None, states_config)?;
 
             tx.commit()?;
 
             Ok(Task {
-                id,
-                title,
-                description,
+                id: task_id,
+                title: description.clone(),
+                description: Some(description),
                 status: initial_status.clone(),
                 priority,
                 owner_agent: None,
@@ -408,7 +401,7 @@ impl Database {
                     new_title,
                     new_description,
                     new_status,
-                    new_priority.as_str(),
+                    priority_to_str(new_priority),
                     new_points,
                     started_at,
                     completed_at,
@@ -511,7 +504,7 @@ impl Database {
                 }
 
                 // Get the agent
-                let agent = get_agent_internal(&tx, agent_id)?
+                let agent = get_worker_internal(&tx, agent_id)?
                     .ok_or_else(|| anyhow!("Agent not found"))?;
 
                 // Check claim limit (skip if force)
@@ -546,7 +539,7 @@ impl Database {
 
                 // Refresh agent heartbeat
                 tx.execute(
-                    "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                    "UPDATE workers SET last_heartbeat = ?1 WHERE id = ?2",
                     params![now, agent_id],
                 )?;
             }
@@ -596,10 +589,10 @@ impl Database {
                 new_owner = None;
                 new_claimed_at = None;
 
-                // Release all file locks held by this agent
+                // Release file locks associated with this task (for auto-cleanup)
                 tx.execute(
-                    "DELETE FROM file_locks WHERE agent_id = ?1",
-                    params![agent_id],
+                    "DELETE FROM file_locks WHERE task_id = ?1",
+                    params![task_id],
                 )?;
             }
 
@@ -639,7 +632,7 @@ impl Database {
                     new_title,
                     new_description,
                     new_status,
-                    new_priority.as_str(),
+                    priority_to_str(new_priority),
                     new_points,
                     started_at,
                     completed_at,
@@ -773,7 +766,7 @@ impl Database {
                         id,
                         title,
                         status,
-                        priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
+                        priority: parse_priority(&priority),
                         owner_agent,
                         points,
                         current_thought,
@@ -964,7 +957,7 @@ impl Database {
 
             // Get the agent (using internal helper to avoid deadlock)
             let agent =
-                get_agent_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
+                get_worker_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
 
             // Check claim limit (using internal helper to avoid deadlock)
             let current_claims = get_claim_count_internal(conn, agent_id)?;
@@ -1010,7 +1003,7 @@ impl Database {
 
             // Refresh agent heartbeat
             conn.execute(
-                "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                "UPDATE workers SET last_heartbeat = ?1 WHERE id = ?2",
                 params![now, agent_id],
             )?;
 
@@ -1116,7 +1109,7 @@ impl Database {
 
             // Get the agent
             let agent =
-                get_agent_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
+                get_worker_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
 
             // Check claim limit
             let current_claims = get_claim_count_internal(conn, agent_id)?;
@@ -1162,7 +1155,7 @@ impl Database {
 
             // Refresh agent heartbeat
             conn.execute(
-                "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                "UPDATE workers SET last_heartbeat = ?1 WHERE id = ?2",
                 params![now, agent_id],
             )?;
 
@@ -1343,15 +1336,15 @@ impl Database {
                 params![complete_status, now, now, task_id],
             )?;
 
-            // Release all file locks held by this agent
+            // Release file locks associated with this task (for auto-cleanup)
             tx.execute(
-                "DELETE FROM file_locks WHERE agent_id = ?1",
-                params![agent_id],
+                "DELETE FROM file_locks WHERE task_id = ?1",
+                params![task_id],
             )?;
 
             // Refresh agent heartbeat
             tx.execute(
-                "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                "UPDATE workers SET last_heartbeat = ?1 WHERE id = ?2",
                 params![now, agent_id],
             )?;
 
@@ -1428,9 +1421,11 @@ fn create_tree_recursive(
     all_ids: &mut Vec<String>,
     states_config: &StatesConfig,
 ) -> Result<String> {
-    let id = Uuid::now_v7().to_string();
+    // Use custom id if provided, otherwise generate UUID7
+    let generated_id = Uuid::now_v7().to_string();
+    let task_id = input.id.clone().unwrap_or(generated_id);
     let now = now_ms();
-    let priority = input.priority.unwrap_or(Priority::Medium);
+    let priority = input.priority.unwrap_or(PRIORITY_MEDIUM);
     let initial_status = &states_config.initial;
 
     let needed_tags = input.needed_tags.clone().unwrap_or_default();
@@ -1446,11 +1441,11 @@ fn create_tree_recursive(
             needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
-            &id,
-            input.title,
-            input.description,
+            &task_id,
+            &input.description,  // Use description as title
+            &input.description,  // Also store as description
             initial_status,
-            priority.as_str(),
+            priority_to_str(priority),
             needed_tags_json,
             wanted_tags_json,
             tags_json,
@@ -1463,20 +1458,20 @@ fn create_tree_recursive(
 
     // Create 'contains' dependency from parent if present
     if let Some(pid) = parent_id {
-        Database::add_dependency_internal(conn, pid, &id, "contains")?;
+        Database::add_dependency_internal(conn, pid, &task_id, "contains")?;
     }
 
     // Create 'follows' dependency from previous sibling if sequential (parallel=false)
     if !input.parallel {
         if let Some(prev_id) = prev_sibling_id {
-            Database::add_dependency_internal(conn, prev_id, &id, "follows")?;
+            Database::add_dependency_internal(conn, prev_id, &task_id, "follows")?;
         }
     }
 
     // Record initial state transition
-    record_state_transition(conn, &id, initial_status, None, None, states_config)?;
+    record_state_transition(conn, &task_id, initial_status, None, None, states_config)?;
 
-    all_ids.push(id.clone());
+    all_ids.push(task_id.clone());
 
     // Create children with 'follows' dependencies if not parallel
     let mut prev_child_id: Option<String> = None;
@@ -1484,7 +1479,7 @@ fn create_tree_recursive(
         let child_id = create_tree_recursive(
             conn,
             child,
-            Some(&id),
+            Some(&task_id),
             if child.parallel {
                 None
             } else {
@@ -1496,5 +1491,5 @@ fn create_tree_recursive(
         prev_child_id = Some(child_id);
     }
 
-    Ok(id)
+    Ok(task_id)
 }

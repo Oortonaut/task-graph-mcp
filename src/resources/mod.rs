@@ -234,7 +234,7 @@ impl ResourceHandler {
         let path = uri.strip_prefix("agents://").unwrap_or("");
 
         match path {
-            "all" => agents::get_all_agents(&self.db),
+            "all" => agents::get_all_workers(&self.db),
             _ => Err(anyhow::anyhow!("Unknown agents resource: {}", path)),
         }
     }

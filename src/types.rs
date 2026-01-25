@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Agent (session-based) - represents a connected agent.
+/// Worker (session-based) - represents a connected worker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Agent {
+pub struct Worker {
     pub id: String,
     pub tags: Vec<String>,
     pub max_claims: i32,
@@ -13,9 +13,9 @@ pub struct Agent {
     pub last_heartbeat: i64,
 }
 
-/// Agent info with additional runtime details for list_agents.
+/// Worker info with additional runtime details for list_workers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentInfo {
+pub struct WorkerInfo {
     pub id: String,
     pub tags: Vec<String>,
     pub max_claims: i32,
@@ -25,31 +25,34 @@ pub struct AgentInfo {
     pub last_heartbeat: i64,
 }
 
-/// Task priority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Priority {
-    High,
-    Medium,
-    Low,
+/// Task priority as an integer (higher = more important).
+/// Default is 0. Typical range: -100 to 100.
+pub type Priority = i32;
+
+/// Priority constants for convenience.
+pub const PRIORITY_HIGH: Priority = 1;
+pub const PRIORITY_MEDIUM: Priority = 0;
+pub const PRIORITY_LOW: Priority = -1;
+
+/// Parse a priority string ("high", "medium", "low") to an integer.
+/// Returns 0 (medium) for unrecognized values.
+pub fn parse_priority(s: &str) -> Priority {
+    match s.to_lowercase().as_str() {
+        "high" => PRIORITY_HIGH,
+        "medium" => PRIORITY_MEDIUM,
+        "low" => PRIORITY_LOW,
+        _ => s.parse().unwrap_or(PRIORITY_MEDIUM),
+    }
 }
 
-impl Priority {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Priority::High => "high",
-            Priority::Medium => "medium",
-            Priority::Low => "low",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "high" => Some(Priority::High),
-            "medium" => Some(Priority::Medium),
-            "low" => Some(Priority::Low),
-            _ => None,
-        }
+/// Convert priority integer to string representation.
+pub fn priority_to_str(p: Priority) -> &'static str {
+    if p > 0 {
+        "high"
+    } else if p < 0 {
+        "low"
+    } else {
+        "medium"
     }
 }
 
@@ -104,9 +107,10 @@ pub struct TaskTree {
 }
 
 /// Input for creating a task tree.
-/// Input for creating a task tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskTreeInput {
+    /// Custom task ID (optional, UUID7 generated if not provided)
+    pub id: Option<String>,
     pub title: String,
     pub description: Option<String>,
     pub priority: Option<Priority>,
@@ -137,9 +141,10 @@ pub struct Dependency {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileLock {
     pub file_path: String,
-    pub agent_id: String,
+    pub worker_id: String,
     pub reason: Option<String>,
     pub locked_at: i64,
+    pub task_id: Option<String>,
 }
 
 /// A claim event for file coordination tracking.
@@ -147,7 +152,7 @@ pub struct FileLock {
 pub struct ClaimEvent {
     pub id: i64,
     pub file_path: String,
-    pub agent_id: String,
+    pub worker_id: String,
     pub event: ClaimEventType,
     pub reason: Option<String>,
     pub timestamp: i64,
@@ -161,7 +166,7 @@ pub struct ClaimEvent {
 pub struct TaskStateEvent {
     pub id: i64,
     pub task_id: String,
-    pub agent_id: Option<String>,
+    pub worker_id: Option<String>,
     pub event: String,
     pub reason: Option<String>,
     pub timestamp: i64,
@@ -252,7 +257,6 @@ pub struct Stats {
 }
 
 /// Compact task representation for list views.
-/// Compact task representation for list views.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
     pub id: String,
@@ -264,41 +268,21 @@ pub struct TaskSummary {
     pub current_thought: Option<String>,
 }
 
+
+/// Summary of disconnect operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisconnectSummary {
+    /// Number of tasks that were released.
+    pub tasks_released: i32,
+    /// Number of file locks that were released.
+    pub files_released: i32,
+    /// The final state applied to released tasks.
+    pub final_state: String,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    mod priority_tests {
-        use super::*;
-
-        #[test]
-        fn as_str_returns_correct_string_for_all_variants() {
-            assert_eq!(Priority::High.as_str(), "high");
-            assert_eq!(Priority::Medium.as_str(), "medium");
-            assert_eq!(Priority::Low.as_str(), "low");
-        }
-
-        #[test]
-        fn from_str_parses_valid_strings() {
-            assert_eq!(Priority::from_str("high"), Some(Priority::High));
-            assert_eq!(Priority::from_str("medium"), Some(Priority::Medium));
-            assert_eq!(Priority::from_str("low"), Some(Priority::Low));
-        }
-
-        #[test]
-        fn from_str_returns_none_for_invalid_strings() {
-            assert_eq!(Priority::from_str("invalid"), None);
-            assert_eq!(Priority::from_str("HIGH"), None);
-            assert_eq!(Priority::from_str("critical"), None);
-        }
-
-        #[test]
-        fn roundtrip_conversion_is_lossless() {
-            for priority in [Priority::High, Priority::Medium, Priority::Low] {
-                assert_eq!(Priority::from_str(priority.as_str()), Some(priority));
-            }
-        }
-    }
+    // Priority tests removed - Priority is now a type alias for i32
 
 
 

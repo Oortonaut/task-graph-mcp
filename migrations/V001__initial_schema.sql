@@ -1,7 +1,7 @@
 -- Initial schema for Task Graph MCP Server
 
--- Agents (session-based)
-CREATE TABLE agents (
+-- Workers (session-based)
+CREATE TABLE workers (
     id TEXT PRIMARY KEY,
     name TEXT,
     tags TEXT,  -- JSON array of freeform tags
@@ -20,7 +20,7 @@ CREATE TABLE tasks (
     priority TEXT NOT NULL DEFAULT 'medium',
     join_mode TEXT NOT NULL DEFAULT 'then',  -- 'then' or 'also'
     sibling_order INTEGER NOT NULL DEFAULT 0,  -- position among siblings
-    owner_agent TEXT REFERENCES agents(id),
+    owner_agent TEXT REFERENCES workers(id),
     claimed_at INTEGER,
 
     -- Affinity (tag-based)
@@ -72,24 +72,24 @@ CREATE TABLE dependencies (
 -- File locks (advisory)
 CREATE TABLE file_locks (
     file_path TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL REFERENCES agents(id),
+    worker_id TEXT NOT NULL REFERENCES workers(id),
     locked_at INTEGER NOT NULL
 );
 
 -- Subscriptions for pub/sub
 CREATE TABLE subscriptions (
     id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL REFERENCES agents(id),
+    worker_id TEXT NOT NULL REFERENCES workers(id),
     target_type TEXT NOT NULL,  -- 'task', 'file', or 'agent'
     target_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    UNIQUE(agent_id, target_type, target_id)
+    UNIQUE(worker_id, target_type, target_id)
 );
 
 -- Inbox for pub/sub messages
 CREATE TABLE inbox (
     id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL REFERENCES agents(id),
+    worker_id TEXT NOT NULL REFERENCES workers(id),
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,  -- JSON
     created_at INTEGER NOT NULL,
@@ -100,7 +100,7 @@ CREATE TABLE inbox (
 CREATE INDEX idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX idx_tasks_owner ON tasks(owner_agent);
 CREATE INDEX idx_tasks_status ON tasks(status);
-CREATE INDEX idx_inbox_agent ON inbox(agent_id, read, created_at);
+CREATE INDEX idx_inbox_worker ON inbox(worker_id, read, created_at);
 CREATE INDEX idx_deps_to ON dependencies(to_task_id);
-CREATE INDEX idx_file_locks_agent ON file_locks(agent_id);
+CREATE INDEX idx_file_locks_worker ON file_locks(worker_id);
 CREATE INDEX idx_attachments_task ON attachments(task_id);

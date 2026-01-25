@@ -29,7 +29,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                     "description": "Specific task IDs to update (default: all claimed tasks)"
                 }
             }),
-            vec!["agent"],
+            vec!["agent", "thought"],
             prompts,
         ),
         make_tool_with_prompts(
@@ -98,13 +98,14 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 pub fn thinking(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent")
         .ok_or_else(|| ToolError::missing_field("agent"))?;
-    let thought = get_string(&args, "thought");
+    let thought = get_string(&args, "thought")
+        .ok_or_else(|| ToolError::missing_field("thought"))?;
     let task_ids = get_string_array(&args, "tasks");
 
     // Also refresh heartbeat since updating thought implies activity
     let _ = db.heartbeat(&agent_id);
 
-    let updated = db.set_thought(&agent_id, thought, task_ids)?;
+    let updated = db.set_thought(&agent_id, Some(thought), task_ids)?;
 
     Ok(json!({
         "success": true,

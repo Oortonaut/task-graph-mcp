@@ -18,13 +18,20 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
              For file reference: provide 'file' path (existing file, will be referenced).\n\
              For media storage: provide 'content' + 'store_as_file'=true (saves to .task-graph/media/).",
             json!({
-                "task": {
+                "agent": {
                     "type": "string",
-                    "description": "Task ID"
+                    "description": "Agent ID"
+                },
+                "task": {
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "array", "items": { "type": "string" } }
+                    ],
+                    "description": "Task ID or array of Task IDs for bulk attachment"
                 },
                 "name": {
                     "type": "string",
-                    "description": "Attachment name (use 'meta' for structured metadata)"
+                    "description": "Attachment name (use 'meta' for structured metadata). Same name replaces existing attachment."
                 },
                 "content": {
                     "type": "string",
@@ -125,8 +132,25 @@ fn is_in_media_dir(file_path: &str, media_dir: &Path) -> bool {
 }
 
 pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
+    // Agent parameter is optional - for tracking/audit purposes
+    let _agent_id = get_string(&args, "agent");
+    
+    // Task can be string or array of strings
+    let task_ids: Vec<String> = if let Some(task_array) = args.get("task").and_then(|v| v.as_array()) {
+        task_array
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    } else if let Some(task_id) = get_string(&args, "task") {
+        vec![task_id]
+    } else {
+        return Err(ToolError::missing_field("task").into());
+    };
+
+    if task_ids.is_empty() {
+        return Err(ToolError::new(ErrorCode::InvalidFieldValue, "At least one task ID must be provided").into());
+    }
+
     let name = get_string(&args, "name")
         .ok_or_else(|| ToolError::missing_field("name"))?;
     let content = get_string(&args, "content");
@@ -139,8 +163,8 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
         return Err(ToolError::new(ErrorCode::InvalidFieldValue, "Either 'content' or 'file' must be provided").into());
     }
 
-    // Handle different attachment modes
-    let (final_content, final_file_path): (String, Option<String>) = if let Some(ref fp) = file_path {
+    // Handle different attachment modes - prepare content/file once for all tasks
+    let (base_content, base_file_path): (String, Option<String>) = if let Some(ref fp) = file_path {
         // File reference mode: verify file exists
         let path = Path::new(fp);
         if !path.exists() {
@@ -148,36 +172,62 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
         }
         (String::new(), Some(fp.clone()))
     } else if store_as_file {
-        // Store content to media directory
-        let content_str = content.unwrap();
-        let filename = generate_media_filename(&task_id, &name, &mime_type);
-        let file_path = media_dir.join(&filename);
-
-        // Ensure media directory exists
-        std::fs::create_dir_all(media_dir)?;
-
-        // Write content to file
-        std::fs::write(&file_path, &content_str)?;
-
-        let file_path_str = file_path.to_string_lossy().to_string();
-        (String::new(), Some(file_path_str))
+        // For store_as_file with multiple tasks, we'll create per-task files
+        (content.clone().unwrap(), None)
     } else {
         // Inline content mode
         (content.unwrap(), None)
     };
 
-    let order_index = db.add_attachment(&task_id, name, final_content, Some(mime_type), final_file_path.clone())?;
+    let mut results = Vec::new();
 
-    let mut result = json!({
-        "task_id": task_id,
-        "order_index": order_index
-    });
+    for task_id in &task_ids {
+        // Replace behavior: delete existing attachment with same name
+        if let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name) {
+            // Clean up old media file if it was in media dir
+            if is_in_media_dir(&old_file_path, media_dir) {
+                let _ = std::fs::remove_file(&old_file_path);
+            }
+        }
 
-    if let Some(fp) = final_file_path {
-        result["file_path"] = json!(fp);
+        // Determine final content and file path for this task
+        let (final_content, final_file_path): (String, Option<String>) = if store_as_file && file_path.is_none() {
+            // Store content to media directory (per-task file)
+            let filename = generate_media_filename(task_id, &name, &mime_type);
+            let media_file_path = media_dir.join(&filename);
+
+            // Ensure media directory exists
+            std::fs::create_dir_all(media_dir)?;
+
+            // Write content to file
+            std::fs::write(&media_file_path, &base_content)?;
+
+            let file_path_str = media_file_path.to_string_lossy().to_string();
+            (String::new(), Some(file_path_str))
+        } else {
+            (base_content.clone(), base_file_path.clone())
+        };
+
+        let order_index = db.add_attachment(task_id, name.clone(), final_content, Some(mime_type.clone()), final_file_path.clone())?;
+
+        let mut result = json!({
+            "task_id": task_id,
+            "order_index": order_index
+        });
+
+        if let Some(fp) = final_file_path {
+            result["file_path"] = json!(fp);
+        }
+
+        results.push(result);
     }
 
-    Ok(result)
+    // Return single result for single task, array for bulk
+    if results.len() == 1 {
+        Ok(results.into_iter().next().unwrap())
+    } else {
+        Ok(json!({ "attachments": results }))
+    }
 }
 
 pub fn attachments(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {

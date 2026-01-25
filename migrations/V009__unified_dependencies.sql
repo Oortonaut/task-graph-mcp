@@ -8,7 +8,7 @@ ALTER TABLE dependencies ADD COLUMN dep_type TEXT NOT NULL DEFAULT 'blocks';
 CREATE INDEX IF NOT EXISTS idx_deps_type ON dependencies(dep_type);
 CREATE INDEX IF NOT EXISTS idx_deps_type_to ON dependencies(dep_type, to_task_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_claimed ON tasks(claimed_at) WHERE owner_agent IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_agents_heartbeat ON agents(last_heartbeat);
+CREATE INDEX IF NOT EXISTS idx_workers_heartbeat ON workers(last_heartbeat);
 
 -- Step 3: Migrate parent_id relationships to 'contains' edges
 -- from_task_id = parent, to_task_id = child (parent contains child)
@@ -38,7 +38,7 @@ CREATE TABLE tasks_new (
     description TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     priority TEXT NOT NULL DEFAULT 'medium',
-    owner_agent TEXT REFERENCES agents(id),
+    owner_agent TEXT REFERENCES workers(id),
     claimed_at INTEGER,
 
     -- Affinity (tag-based)

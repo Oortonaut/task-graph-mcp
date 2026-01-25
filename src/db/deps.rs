@@ -762,7 +762,7 @@ impl Database {
     pub fn get_agent_tags(&self, agent_id: &str) -> Result<Vec<String>> {
         self.with_conn(|conn| {
             let result: Result<String, rusqlite::Error> = conn.query_row(
-                "SELECT tags FROM agents WHERE id = ?1",
+                "SELECT tags FROM workers WHERE id = ?1",
                 params![agent_id],
                 |row| row.get(0),
             );

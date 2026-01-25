@@ -8,41 +8,41 @@ use std::collections::{HashMap, HashSet};
 
 impl Database {
     /// Lock a file (advisory).
-    /// Returns Ok with optional warning if already locked by another agent.
-    pub fn lock_file(&self, file_path: String, agent_id: &str, reason: Option<String>) -> Result<Option<String>> {
+    /// Returns Ok with optional warning if already locked by another worker.
+    pub fn lock_file(&self, file_path: String, worker_id: &str, reason: Option<String>, task_id: Option<String>) -> Result<Option<String>> {
         let now = now_ms();
 
         self.with_conn(|conn| {
             // Check if already locked
             let existing: Option<String> = conn
                 .query_row(
-                    "SELECT agent_id FROM file_locks WHERE file_path = ?1",
+                    "SELECT worker_id FROM file_locks WHERE file_path = ?1",
                     params![&file_path],
                     |row| row.get(0),
                 )
                 .ok();
 
-            if let Some(existing_agent) = existing {
-                if existing_agent != agent_id {
-                    // Locked by another agent - return warning
-                    return Ok(Some(existing_agent));
+            if let Some(existing_worker) = existing {
+                if existing_worker != worker_id {
+                    // Locked by another worker - return warning
+                    return Ok(Some(existing_worker));
                 }
-                // Already locked by this agent - just update timestamp and reason
+                // Already locked by this worker - just update timestamp, reason, and task_id
                 conn.execute(
-                    "UPDATE file_locks SET locked_at = ?1, reason = ?2 WHERE file_path = ?3",
-                    params![now, &reason, &file_path],
+                    "UPDATE file_locks SET locked_at = ?1, reason = ?2, task_id = ?3 WHERE file_path = ?4",
+                    params![now, &reason, &task_id, &file_path],
                 )?;
             } else {
                 // Not locked - create new lock
                 conn.execute(
-                    "INSERT INTO file_locks (file_path, agent_id, reason, locked_at) VALUES (?1, ?2, ?3, ?4)",
-                    params![&file_path, agent_id, &reason, now],
+                    "INSERT INTO file_locks (file_path, worker_id, reason, locked_at, task_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![&file_path, worker_id, &reason, now, &task_id],
                 )?;
 
                 // Record claim event for tracking
                 conn.execute(
-                    "INSERT INTO claim_sequence (file_path, agent_id, event, reason, timestamp) VALUES (?1, ?2, 'claimed', ?3, ?4)",
-                    params![&file_path, agent_id, &reason, now],
+                    "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp) VALUES (?1, ?2, 'claimed', ?3, ?4)",
+                    params![&file_path, worker_id, &reason, now],
                 )?;
             }
 
@@ -51,36 +51,36 @@ impl Database {
     }
 
     /// Unlock a file with optional reason for next claimant.
-    pub fn unlock_file(&self, file_path: &str, agent_id: &str, reason: Option<String>) -> Result<bool> {
+    pub fn unlock_file(&self, file_path: &str, worker_id: &str, reason: Option<String>) -> Result<bool> {
         let now = now_ms();
 
         self.with_conn(|conn| {
             let deleted = conn.execute(
-                "DELETE FROM file_locks WHERE file_path = ?1 AND agent_id = ?2",
-                params![file_path, agent_id],
+                "DELETE FROM file_locks WHERE file_path = ?1 AND worker_id = ?2",
+                params![file_path, worker_id],
             )?;
 
             if deleted > 0 {
-                // Find the claim_id for this file+agent (most recent claim)
+                // Find the claim_id for this file+worker (most recent claim)
                 let claim_id: Option<i64> = conn.query_row(
                     "SELECT MAX(id) FROM claim_sequence
-                     WHERE file_path = ?1 AND agent_id = ?2 AND event = 'claimed'",
-                    params![file_path, agent_id],
+                     WHERE file_path = ?1 AND worker_id = ?2 AND event = 'claimed'",
+                    params![file_path, worker_id],
                     |row| row.get(0),
                 ).ok().flatten();
 
-                // Close any open claim for this file+agent
+                // Close any open claim for this file+worker
                 conn.execute(
                     "UPDATE claim_sequence SET end_timestamp = ?1
-                     WHERE file_path = ?2 AND agent_id = ?3 AND end_timestamp IS NULL",
-                    params![now, file_path, agent_id],
+                     WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
+                    params![now, file_path, worker_id],
                 )?;
 
                 // Record release event with claim_id reference
                 conn.execute(
-                    "INSERT INTO claim_sequence (file_path, agent_id, event, reason, timestamp, claim_id)
+                    "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp, claim_id)
                      VALUES (?1, ?2, 'released', ?3, ?4, ?5)",
-                    params![file_path, agent_id, &reason, now, claim_id],
+                    params![file_path, worker_id, &reason, now, claim_id],
                 )?;
             }
 
@@ -88,14 +88,196 @@ impl Database {
         })
     }
 
-    /// Get claim updates since agent's last poll.
-    pub fn claim_updates(&self, agent_id: &str, files: Option<Vec<String>>) -> Result<ClaimUpdates> {
+    /// Unlock multiple files with verbose return.
+    /// Returns a list of (file_path, worker_id) pairs for files that were actually released.
+    pub fn unlock_files_verbose(
+        &self,
+        file_paths: Vec<String>,
+        worker_id: &str,
+        reason: Option<String>,
+    ) -> Result<Vec<(String, String)>> {
+        let now = now_ms();
+        let mut released = Vec::new();
+
         self.with_conn(|conn| {
-            // Get agent's last sequence
+            for file_path in file_paths {
+                let deleted = conn.execute(
+                    "DELETE FROM file_locks WHERE file_path = ?1 AND worker_id = ?2",
+                    params![&file_path, worker_id],
+                )?;
+
+                if deleted > 0 {
+                    // Find the claim_id for this file+worker (most recent claim)
+                    let claim_id: Option<i64> = conn.query_row(
+                        "SELECT MAX(id) FROM claim_sequence
+                         WHERE file_path = ?1 AND worker_id = ?2 AND event = 'claimed'",
+                        params![&file_path, worker_id],
+                        |row| row.get(0),
+                    ).ok().flatten();
+
+                    // Close any open claim for this file+worker
+                    conn.execute(
+                        "UPDATE claim_sequence SET end_timestamp = ?1
+                         WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
+                        params![now, &file_path, worker_id],
+                    )?;
+
+                    // Record release event with claim_id reference
+                    conn.execute(
+                        "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp, claim_id)
+                         VALUES (?1, ?2, 'released', ?3, ?4, ?5)",
+                        params![&file_path, worker_id, &reason, now, claim_id],
+                    )?;
+
+                    released.push((file_path, worker_id.to_string()));
+                }
+            }
+
+            Ok(released)
+        })
+    }
+
+    /// Release all files held by a worker with verbose return.
+    /// Returns a list of (file_path, worker_id) pairs for files that were released.
+    pub fn release_worker_locks_verbose(&self, worker_id: &str, reason: Option<String>) -> Result<Vec<(String, String)>> {
+        let now = now_ms();
+
+        self.with_conn(|conn| {
+            // Get files locked by this worker before deleting
+            let files_to_release: Vec<String> = {
+                let mut stmt = conn.prepare(
+                    "SELECT file_path FROM file_locks WHERE worker_id = ?1"
+                )?;
+                stmt.query_map(params![worker_id], |row| row.get::<_, String>(0))?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            };
+
+            if files_to_release.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            // Close any open claims for this worker
+            conn.execute(
+                "UPDATE claim_sequence SET end_timestamp = ?1
+                 WHERE worker_id = ?2 AND end_timestamp IS NULL",
+                params![now, worker_id],
+            )?;
+
+            // Record release events for each file
+            for file_path in &files_to_release {
+                conn.execute(
+                    "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp)
+                     VALUES (?1, ?2, 'released', ?3, ?4)",
+                    params![file_path, worker_id, &reason, now],
+                )?;
+            }
+
+            // Delete the locks
+            conn.execute(
+                "DELETE FROM file_locks WHERE worker_id = ?1",
+                params![worker_id],
+            )?;
+
+            let released: Vec<(String, String)> = files_to_release
+                .into_iter()
+                .map(|f| (f, worker_id.to_string()))
+                .collect();
+
+            Ok(released)
+        })
+    }
+
+    /// Release all files associated with a task with verbose return.
+    /// Returns a list of (file_path, worker_id) pairs for files that were released.
+    pub fn release_task_locks_verbose(&self, task_id: &str, reason: Option<String>) -> Result<Vec<(String, String)>> {
+        let now = now_ms();
+
+        self.with_conn(|conn| {
+            // Get files locked by this task before deleting
+            let files_to_release: Vec<(String, String)> = {
+                let mut stmt = conn.prepare(
+                    "SELECT file_path, worker_id FROM file_locks WHERE task_id = ?1"
+                )?;
+                stmt.query_map(params![task_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            };
+
+            if files_to_release.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            // Close any open claims for these files
+            for (file_path, worker_id) in &files_to_release {
+                conn.execute(
+                    "UPDATE claim_sequence SET end_timestamp = ?1
+                     WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
+                    params![now, file_path, worker_id],
+                )?;
+
+                // Record release event
+                let reason_str = reason.as_deref().unwrap_or("task release");
+                conn.execute(
+                    "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp)
+                     VALUES (?1, ?2, 'released', ?3, ?4)",
+                    params![file_path, worker_id, reason_str, now],
+                )?;
+            }
+
+            // Delete the locks
+            conn.execute(
+                "DELETE FROM file_locks WHERE task_id = ?1",
+                params![task_id],
+            )?;
+
+            Ok(files_to_release)
+        })
+    }
+
+    /// Get claim updates since worker's last poll.
+    ///
+    /// If `timeout_ms` is Some and > 0, this becomes a long-polling operation:
+    /// - If updates exist, returns immediately
+    /// - If no updates, waits up to `timeout_ms` milliseconds for new events
+    /// - Returns empty result after timeout expires with no events
+    ///
+    /// Poll interval is 1000ms (1 second between checks).
+    pub fn claim_updates(&self, worker_id: &str, files: Option<Vec<String>>, timeout_ms: Option<i64>) -> Result<ClaimUpdates> {
+        let deadline = timeout_ms
+            .filter(|&t| t > 0)
+            .map(|t| now_ms() + t);
+
+        loop {
+            let updates = self.claim_updates_once(worker_id, files.clone())?;
+
+            // Return if we have updates or no timeout specified
+            if !updates.new_claims.is_empty() || !updates.dropped_claims.is_empty() || deadline.is_none() {
+                return Ok(updates);
+            }
+
+            // Check deadline
+            if let Some(d) = deadline {
+                if now_ms() >= d {
+                    return Ok(updates); // Empty result after timeout
+                }
+            }
+
+            // Sleep before next poll (1 second interval)
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
+    }
+
+    /// Internal helper for single poll of claim updates.
+    fn claim_updates_once(&self, worker_id: &str, files: Option<Vec<String>>) -> Result<ClaimUpdates> {
+        self.with_conn(|conn| {
+            // Get worker's last sequence
             let last_seq: i64 = conn
                 .query_row(
-                    "SELECT last_claim_sequence FROM agents WHERE id = ?1",
-                    params![agent_id],
+                    "SELECT last_claim_sequence FROM workers WHERE id = ?1",
+                    params![worker_id],
                     |row| row.get(0),
                 )
                 .unwrap_or(0);
@@ -107,7 +289,7 @@ impl Database {
                 } else {
                     let placeholders: Vec<String> = paths.iter().map(|_| "?".to_string()).collect();
                     let sql = format!(
-                        "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp, claim_id
+                        "SELECT id, file_path, worker_id, event, reason, timestamp, end_timestamp, claim_id
                          FROM claim_sequence
                          WHERE id > ?1 AND file_path IN ({})
                          ORDER BY id",
@@ -128,7 +310,7 @@ impl Database {
                         Ok(ClaimEvent {
                             id: row.get(0)?,
                             file_path: row.get(1)?,
-                            agent_id: row.get(2)?,
+                            worker_id: row.get(2)?,
                             event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
                             reason: row.get(4)?,
                             timestamp: row.get(5)?,
@@ -141,7 +323,7 @@ impl Database {
                 }
             } else {
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_path, agent_id, event, reason, timestamp, end_timestamp, claim_id
+                    "SELECT id, file_path, worker_id, event, reason, timestamp, end_timestamp, claim_id
                      FROM claim_sequence
                      WHERE id > ?1
                      ORDER BY id"
@@ -150,7 +332,7 @@ impl Database {
                     Ok(ClaimEvent {
                         id: row.get(0)?,
                         file_path: row.get(1)?,
-                        agent_id: row.get(2)?,
+                        worker_id: row.get(2)?,
                         event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
                         reason: row.get(4)?,
                         timestamp: row.get(5)?,
@@ -165,11 +347,11 @@ impl Database {
             // Find max sequence from events
             let new_seq = events.iter().map(|e| e.id).max().unwrap_or(last_seq);
 
-            // Update agent's last sequence
+            // Update worker's last sequence
             if new_seq > last_seq {
                 conn.execute(
-                    "UPDATE agents SET last_claim_sequence = ?1 WHERE id = ?2",
-                    params![new_seq, agent_id],
+                    "UPDATE workers SET last_claim_sequence = ?1 WHERE id = ?2",
+                    params![new_seq, worker_id],
                 )?;
             }
 
@@ -204,12 +386,13 @@ impl Database {
         })
     }
 
-    /// Get file locks.
+    /// Get file locks with full details.
     pub fn get_file_locks(
         &self,
         file_paths: Option<Vec<String>>,
         agent_id: Option<&str>,
-    ) -> Result<HashMap<String, String>> {
+        task_id: Option<&str>,
+    ) -> Result<HashMap<String, FileLock>> {
         self.with_conn(|conn| {
             let locks = if let Some(paths) = file_paths {
                 if paths.is_empty() {
@@ -218,7 +401,7 @@ impl Database {
 
                 let placeholders: Vec<String> = paths.iter().map(|_| "?".to_string()).collect();
                 let sql = format!(
-                    "SELECT file_path, agent_id FROM file_locks WHERE file_path IN ({})",
+                    "SELECT file_path, worker_id, reason, locked_at, task_id FROM file_locks WHERE file_path IN ({})",
                     placeholders.join(", ")
                 );
 
@@ -232,32 +415,52 @@ impl Database {
 
                 let mut stmt = conn.prepare(&sql)?;
                 stmt.query_map(params_refs.as_slice(), |row| {
-                    let path: String = row.get(0)?;
-                    let agent: String = row.get(1)?;
-                    Ok((path, agent))
+                    let file_path: String = row.get(0)?;
+                    Ok((file_path.clone(), FileLock {
+                        file_path,
+                        worker_id: row.get(1)?,
+                        reason: row.get(2)?,
+                        locked_at: row.get(3)?,
+                        task_id: row.get(4)?,
+                    }))
                 })?
                 .filter_map(|r| r.ok())
                 .collect()
             } else if let Some(aid) = agent_id {
                 let mut stmt = conn.prepare(
-                    "SELECT file_path, agent_id FROM file_locks WHERE agent_id = ?1",
+                    "SELECT file_path, worker_id, reason, locked_at, task_id FROM file_locks WHERE worker_id = ?1",
                 )?;
                 stmt.query_map(params![aid], |row| {
-                    let path: String = row.get(0)?;
-                    let agent: String = row.get(1)?;
-                    Ok((path, agent))
+                    let file_path: String = row.get(0)?;
+                    Ok((file_path.clone(), FileLock {
+                        file_path,
+                        worker_id: row.get(1)?,
+                        reason: row.get(2)?,
+                        locked_at: row.get(3)?,
+                        task_id: row.get(4)?,
+                    }))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            } else if let Some(tid) = task_id {
+                let mut stmt = conn.prepare(
+                    "SELECT file_path, worker_id, reason, locked_at, task_id FROM file_locks WHERE task_id = ?1",
+                )?;
+                stmt.query_map(params![tid], |row| {
+                    let file_path: String = row.get(0)?;
+                    Ok((file_path.clone(), FileLock {
+                        file_path,
+                        worker_id: row.get(1)?,
+                        reason: row.get(2)?,
+                        locked_at: row.get(3)?,
+                        task_id: row.get(4)?,
+                    }))
                 })?
                 .filter_map(|r| r.ok())
                 .collect()
             } else {
-                let mut stmt = conn.prepare("SELECT file_path, agent_id FROM file_locks")?;
-                stmt.query_map([], |row| {
-                    let path: String = row.get(0)?;
-                    let agent: String = row.get(1)?;
-                    Ok((path, agent))
-                })?
-                .filter_map(|r| r.ok())
-                .collect()
+                // Return empty - we now require at least one filter
+                HashMap::new()
             };
 
             Ok(locks)
@@ -268,19 +471,21 @@ impl Database {
     pub fn get_all_file_locks(&self) -> Result<Vec<FileLock>> {
         self.with_conn(|conn| {
             let mut stmt =
-                conn.prepare("SELECT file_path, agent_id, reason, locked_at FROM file_locks")?;
+                conn.prepare("SELECT file_path, worker_id, reason, locked_at, task_id FROM file_locks")?;
 
             let locks = stmt
                 .query_map([], |row| {
                     let file_path: String = row.get(0)?;
-                    let agent_id: String = row.get(1)?;
+                    let worker_id: String = row.get(1)?;
                     let reason: Option<String> = row.get(2)?;
                     let locked_at: i64 = row.get(3)?;
+                    let task_id: Option<String> = row.get(4)?;
                     Ok(FileLock {
                         file_path,
-                        agent_id,
+                        worker_id,
                         reason,
                         locked_at,
+                        task_id,
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -290,21 +495,65 @@ impl Database {
         })
     }
 
-    /// Release all locks held by an agent.
-    pub fn release_agent_locks(&self, agent_id: &str) -> Result<i32> {
+    /// Release all locks held by a worker.
+    pub fn release_worker_locks(&self, worker_id: &str) -> Result<i32> {
         let now = now_ms();
 
         self.with_conn(|conn| {
-            // Close any open claims for this agent
+            // Close any open claims for this worker
             conn.execute(
                 "UPDATE claim_sequence SET end_timestamp = ?1
-                 WHERE agent_id = ?2 AND end_timestamp IS NULL",
-                params![now, agent_id],
+                 WHERE worker_id = ?2 AND end_timestamp IS NULL",
+                params![now, worker_id],
             )?;
 
             let deleted = conn.execute(
-                "DELETE FROM file_locks WHERE agent_id = ?1",
-                params![agent_id],
+                "DELETE FROM file_locks WHERE worker_id = ?1",
+                params![worker_id],
+            )?;
+
+            Ok(deleted as i32)
+        })
+    }
+
+
+    /// Release all locks associated with a task.
+    /// Called automatically when a task completes.
+    pub fn release_task_locks(&self, task_id: &str) -> Result<i32> {
+        let now = now_ms();
+
+        self.with_conn(|conn| {
+            // Get files locked by this task before deleting
+            let files_to_release: Vec<(String, String)> = {
+                let mut stmt = conn.prepare(
+                    "SELECT file_path, worker_id FROM file_locks WHERE task_id = ?1"
+                )?;
+                stmt.query_map(params![task_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            };
+
+            // Close any open claims for these files
+            for (file_path, worker_id) in &files_to_release {
+                conn.execute(
+                    "UPDATE claim_sequence SET end_timestamp = ?1
+                     WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
+                    params![now, file_path, worker_id],
+                )?;
+
+                // Record release event
+                conn.execute(
+                    "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp)
+                     VALUES (?1, ?2, 'released', 'task completed', ?3)",
+                    params![file_path, worker_id, now],
+                )?;
+            }
+
+            let deleted = conn.execute(
+                "DELETE FROM file_locks WHERE task_id = ?1",
+                params![task_id],
             )?;
 
             Ok(deleted as i32)

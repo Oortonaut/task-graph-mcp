@@ -21,20 +21,20 @@ Worker role: find available tasks, claim work matching your capabilities, report
 
 ```
 # 1. Connect with your capabilities
-connect(agent="rust-worker", tags=["rust", "backend"], force=true)
-→ agent_id (SAVE THIS!)
+connect(worker_id="rust-worker", tags=["rust", "backend"], force=true)
+→ worker_id (SAVE THIS!)
 
 # 2. Find work matching your skills
-list_tasks(ready=true, agent=agent_id)
+list_tasks(ready=true, worker_id=worker_id)
 
 # 3. Claim a task
-claim(agent=agent_id, task=task_id)
+claim(worker_id=worker_id, task=task_id)
 
 # 4. Report progress as you work
-thinking(agent=agent_id, thought="Implementing auth module...")
+thinking(worker_id=worker_id, thought="Implementing auth module...")
 
 # 5. Complete when done
-update(agent=agent_id, task=task_id, state="completed")
+update(worker_id=worker_id, task=task_id, state="completed")
 ```
 
 ---
@@ -58,12 +58,12 @@ As a **Worker**, you:
 ```
 ┌─────────────────────────────────────────────────────┐
 │ 1. FIND WORK                                        │
-│    list_tasks(ready=true, agent=agent_id)           │
+│    list_tasks(ready=true, worker_id=worker_id)      │
 │    • Returns unclaimed tasks you can claim          │
 │    • Filters by your tags automatically             │
 ├─────────────────────────────────────────────────────┤
 │ 2. CLAIM                                            │
-│    claim(agent=agent_id, task=task_id)              │
+│    claim(worker_id=worker_id, task=task_id)         │
 │    • Now you own this task                          │
 │    • Status changes to in_progress                  │
 │    • Timer starts for time tracking                 │
@@ -74,28 +74,28 @@ As a **Worker**, you:
 │       attachments(task=task_id, content=true)       │
 │                                                     │
 │    b. Lock files you'll edit:                       │
-│       claim_file(agent=agent_id, file="src/x.rs")   │
+│       claim_file(worker_id=worker_id, file="src/x.rs")│
 │                                                     │
 │    c. Report progress frequently:                   │
-│       thinking(agent=agent_id,                      │
+│       thinking(worker_id=worker_id,                 │
 │                thought="Implementing X...")         │
 │                                                     │
 │    d. Do the actual work                            │
 ├─────────────────────────────────────────────────────┤
 │ 4. FINISH                                           │
 │    a. Release file locks:                           │
-│       release_file(agent=agent_id, file="src/x.rs") │
+│       release_file(worker_id=worker_id, file="src/x.rs")│
 │                                                     │
 │    b. Attach outputs (optional):                    │
 │       attach(task=task_id, name="result",           │
 │              content="...", mime="text/plain")      │
 │                                                     │
 │    c. Log costs:                                    │
-│       log_cost(agent=agent_id, task=task_id,        │
+│       log_cost(worker_id=worker_id, task=task_id,   │
 │                tokens_in=1000, cost_usd=0.05)       │
 │                                                     │
 │    d. Complete task:                                │
-│       update(agent=agent_id, task=task_id,          │
+│       update(worker_id=worker_id, task=task_id,     │
 │              state="completed")                     │
 ├─────────────────────────────────────────────────────┤
 │ 5. REPEAT                                           │
@@ -127,13 +127,13 @@ As a **Worker**, you:
 ### Examples
 
 ```
-thinking(agent=agent_id, thought="Reading existing code...")
-thinking(agent=agent_id, thought="Designing solution approach")
-thinking(agent=agent_id, thought="Implementing auth middleware")
-thinking(agent=agent_id, thought="Writing unit tests")
-thinking(agent=agent_id, thought="Running test suite")
-thinking(agent=agent_id, thought="Fixing failing test: auth_test_3")
-thinking(agent=agent_id, thought="All tests passing, preparing to complete")
+thinking(worker_id=worker_id, thought="Reading existing code...")
+thinking(worker_id=worker_id, thought="Designing solution approach")
+thinking(worker_id=worker_id, thought="Implementing auth middleware")
+thinking(worker_id=worker_id, thought="Writing unit tests")
+thinking(worker_id=worker_id, thought="Running test suite")
+thinking(worker_id=worker_id, thought="Fixing failing test: auth_test_3")
+thinking(worker_id=worker_id, thought="All tests passing, preparing to complete")
 ```
 
 ---
@@ -151,22 +151,22 @@ Multiple workers may edit the same codebase. Advisory locks prevent conflicts.
 list_files(files=["src/auth.rs"])
 
 # 2. Check for recent activity
-claim_updates(agent=agent_id)
+claim_updates(worker_id=worker_id)
 
 # 3. Claim the file
-claim_file(agent=agent_id, file="src/auth.rs",
+claim_file(worker_id=worker_id, file="src/auth.rs",
            reason="Adding auth middleware")
 
 # 4. Do your work...
 
 # 5. Release when done
-release_file(agent=agent_id, file="src/auth.rs",
+release_file(worker_id=worker_id, file="src/auth.rs",
              reason="Auth middleware complete")
 ```
 
 ### Handling Conflicts
 
-If file is locked by another agent:
+If file is locked by another worker:
 
 1. **Wait** - Poll with `claim_updates` for release
 2. **Coordinate** - Work on different files
@@ -179,14 +179,14 @@ If file is locked by another agent:
 ### Standard Claim
 
 ```
-claim(agent=agent_id, task=task_id)
+claim(worker_id=worker_id, task=task_id)
 ```
 
 ### Force Claim (use sparingly)
 
 ```
-# Takes task from another agent (e.g., they disconnected)
-claim(agent=agent_id, task=task_id, force=true)
+# Takes task from another worker (e.g., they disconnected)
+claim(worker_id=worker_id, task=task_id, force=true)
 ```
 
 ### Multi-Task
@@ -194,8 +194,8 @@ claim(agent=agent_id, task=task_id, force=true)
 ```
 # Claim multiple tasks if you'll work on them
 # (up to your max_claims limit)
-claim(agent=agent_id, task=task_1)
-claim(agent=agent_id, task=task_2)
+claim(worker_id=worker_id, task=task_1)
+claim(worker_id=worker_id, task=task_2)
 ```
 
 ---
@@ -206,7 +206,7 @@ claim(agent=agent_id, task=task_2)
 
 ```
 # If you can't complete the task:
-update(agent=agent_id, task=task_id, state="failed")
+update(worker_id=worker_id, task=task_id, state="failed")
 
 # Attach explanation
 attach(task=task_id, name="failure-reason",
@@ -217,7 +217,7 @@ attach(task=task_id, name="failure-reason",
 
 ```
 # Release back to pending for another worker
-update(agent=agent_id, task=task_id, state="pending")
+update(worker_id=worker_id, task=task_id, state="pending")
 
 # Attach progress notes
 attach(task=task_id, name="handoff-notes",
@@ -231,7 +231,7 @@ attach(task=task_id, name="handoff-notes",
 get(task=task_id)  # Look at blockedBy field
 
 # Either wait, or help complete the blocker
-list_tasks(ready=true, agent=agent_id)  # Find other work
+list_tasks(ready=true, worker_id=worker_id)  # Find other work
 ```
 
 ---
@@ -242,7 +242,7 @@ Track your resource usage for project accounting:
 
 ```
 log_cost(
-  agent=agent_id,
+  worker_id=worker_id,
   task=task_id,
   tokens_in=1500,      # Input tokens
   tokens_out=800,      # Output tokens

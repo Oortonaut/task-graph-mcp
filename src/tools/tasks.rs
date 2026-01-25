@@ -4,8 +4,8 @@ use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_
 use crate::config::{DependenciesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::{format_task_markdown, format_task_tree_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
-use crate::types::{Priority, TaskTreeInput};
+use crate::format::{format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
+use crate::types::{parse_priority, TaskTreeInput};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -18,24 +18,23 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
     vec![
         make_tool_with_prompts(
             "create",
-            "Create a new task. Use parent for subtasks. Set needed_tags (AND) or wanted_tags (OR) to restrict which agents can claim it. Use blocked_by to set initial dependencies.",
+            "Create a new task. Use parent for subtasks. Use the link system (block tool) for dependencies.",
             json!({
-                "title": {
+                "id": {
                     "type": "string",
-                    "description": "Task title"
+                    "description": "Custom task ID (optional, UUID7 generated if not provided)"
                 },
                 "description": {
                     "type": "string",
-                    "description": "Task description"
+                    "description": "Task description (required)"
                 },
                 "parent": {
                     "type": "string",
                     "description": "Parent task ID for nesting"
                 },
                 "priority": {
-                    "type": "string",
-                    "enum": ["high", "medium", "low"],
-                    "description": "Task priority"
+                    "type": "integer",
+                    "description": "Task priority as integer (higher = more important, default 0)"
                 },
                 "points": {
                     "type": "integer",
@@ -45,42 +44,27 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "integer",
                     "description": "Estimated duration in milliseconds"
                 },
-                "needed_tags": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Tags agent must have ALL of to claim (AND)"
-                },
-                "wanted_tags": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Tags agent must have AT LEAST ONE of to claim (OR)"
-                },
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Categorization/discovery tags (what the task IS, for querying)"
-                },
-                "blocked_by": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Task IDs that must complete before this task can be claimed"
                 }
             }),
-            vec!["title"],
+            vec!["description"],
             prompts,
         ),
         make_tool_with_prompts(
             "create_tree",
-            "Create a task tree from a nested structure. Use join_mode='then' for sequential children (auto-creates dependencies), 'also' for parallel.",
+            "Create a task tree from a nested structure. Use parallel=true for parallel children, false (default) for sequential (auto-creates follows dependencies).",
             json!({
                 "tree": {
                     "type": "object",
-                    "description": "Nested tree structure with title, children[], join_mode, etc.",
+                    "description": "Nested tree structure with id (optional), description (required), children[], parallel, etc.",
                     "properties": {
-                        "title": { "type": "string" },
-                        "description": { "type": "string" },
-                        "priority": { "type": "string" },
-                        "join_mode": { "type": "string", "enum": ["then", "also"] },
+                        "id": { "type": "string", "description": "Custom task ID (optional, UUID7 generated if not provided)" },
+                        "description": { "type": "string", "description": "Task description (required)" },
+                        "priority": { "type": "integer", "description": "Priority as integer (higher = more important)" },
+                        "parallel": { "type": "boolean", "description": "If true, children run in parallel; if false (default), sequential with follows deps" },
                         "points": { "type": "integer" },
                         "time_estimate_ms": { "type": "integer" },
                         "children": { "type": "array" }
@@ -96,15 +80,11 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "get",
-            "Get a single task by ID with optional children and formatting.",
+            "Get a single task by ID. Returns detailed task with attachment metadata list and counts by type.",
             json!({
                 "task": {
                     "type": "string",
                     "description": "Task ID"
-                },
-                "children": {
-                    "type": "boolean",
-                    "description": "Whether to include all descendants"
                 },
                 "format": {
                     "type": "string",
@@ -136,15 +116,15 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "owner": {
                     "type": "string",
-                    "description": "Filter by owner agent ID"
+                    "description": "Filter by owner worker ID"
                 },
                 "parent": {
                     "type": "string",
                     "description": "Filter by parent task ID (use 'null' for root tasks)"
                 },
-                "agent": {
+                "worker_id": {
                     "type": "string",
-                    "description": "With ready=true, pre-filters by agent's tags"
+                    "description": "With ready=true, pre-filters by worker's tags"
                 },
                 "tags_any": {
                     "type": "array",
@@ -158,7 +138,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "qualified_for": {
                     "type": "string",
-                    "description": "Filter tasks that this agent is qualified to claim (checks needed_tags/wanted_tags)"
+                    "description": "Filter tasks that this worker is qualified to claim (checks needed_tags/wanted_tags)"
                 },
                 "limit": {
                     "type": "integer",
@@ -177,9 +157,9 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
             "update",
             "Update a task's properties. State changes handle ownership automatically: transitioning to a timed state (e.g., in_progress) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it.",
             json!({
-                "agent": {
+                "worker_id": {
                     "type": "string",
-                    "description": "Agent ID making the update"
+                    "description": "Worker ID making the update"
                 },
                 "task": {
                     "type": "string",
@@ -214,10 +194,10 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "force": {
                     "type": "boolean",
-                    "description": "Force ownership changes even if owned by another agent (default: false)"
+                    "description": "Force ownership changes even if owned by another worker (default: false)"
                 }
             }),
-            vec!["agent", "task"],
+            vec!["worker_id", "task"],
             prompts,
         ),
         make_tool_with_prompts(
@@ -240,37 +220,37 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
 }
 
 pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
-    let title = get_string(&args, "title")
-        .ok_or_else(|| ToolError::missing_field("title"))?;
-    let description = get_string(&args, "description");
+    let id = get_string(&args, "id");
+    let description = get_string(&args, "description")
+        .ok_or_else(|| ToolError::missing_field("description"))?;
     let parent_id = get_string(&args, "parent");
-    let priority = get_string(&args, "priority").and_then(|s| Priority::from_str(&s));
+    // Support both integer and string priority
+    let priority = get_i32(&args, "priority")
+        .or_else(|| get_string(&args, "priority").map(|s| parse_priority(&s)));
     let points = get_i32(&args, "points");
     let time_estimate_ms = get_i64(&args, "time_estimate_ms");
-    let needed_tags = get_string_array(&args, "needed_tags");
-    let wanted_tags = get_string_array(&args, "wanted_tags");
     let tags = get_string_array(&args, "tags");
-    let blocked_by = get_string_array(&args, "blocked_by");
 
+    // Deferred: needed_tags and wanted_tags are not exposed in the API for now
+    // They can still be set via update or task tree
     let task = db.create_task(
-        title,
+        id,
         description,
         parent_id,
         priority,
         points,
         time_estimate_ms,
-        needed_tags,
-        wanted_tags,
+        None, // needed_tags - deferred
+        None, // wanted_tags - deferred
         tags,
-        blocked_by,
         states_config,
     )?;
 
     Ok(json!({
-        "task_id": &task.id,
-        "title": task.title,
+        "id": &task.id,
+        "description": task.description,
         "status": task.status,
-        "priority": task.priority.as_str(),
+        "priority": task.priority,
         "created_at": task.created_at
     }))
 }
@@ -294,35 +274,53 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
 pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
-    let include_children = get_bool(&args, "children").unwrap_or(false);
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::from_str(&s))
         .unwrap_or(default_format);
 
-    if include_children {
-        let tree = db.get_task_tree(&task_id)?
-            .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
-        match format {
-            OutputFormat::Markdown => Ok(markdown_to_json(format_task_tree_markdown(&tree))),
-            OutputFormat::Json => Ok(serde_json::to_value(tree)?),
-        }
-    } else {
-        let task = db.get_task(&task_id)?
-            .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
+    let task = db.get_task(&task_id)?
+        .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
 
-        let blocked_by = db.get_blockers(&task_id)?;
+    let blocked_by = db.get_blockers(&task_id)?;
 
-        match format {
-            OutputFormat::Markdown => {
-                Ok(markdown_to_json(format_task_markdown(&task, &blocked_by)))
-            }
-            OutputFormat::Json => {
-                let mut task_json = serde_json::to_value(&task)?;
-                if let Some(obj) = task_json.as_object_mut() {
-                    obj.insert("blocked_by".to_string(), json!(blocked_by));
+    // Get attachment metadata
+    let attachments = db.get_attachments(&task_id)?;
+
+    // Calculate attachment counts by MIME type
+    let mut attachment_counts: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+    for att in &attachments {
+        *attachment_counts.entry(att.mime_type.clone()).or_insert(0) += 1;
+    }
+
+    match format {
+        OutputFormat::Markdown => {
+            let mut md = format_task_markdown(&task, &blocked_by);
+
+            // Add attachment section if there are attachments
+            if !attachments.is_empty() {
+                md.push_str("\n### Attachments\n");
+                for att in &attachments {
+                    let file_indicator = if att.file_path.is_some() { " (file)" } else { "" };
+                    md.push_str(&format!("- **{}** [{}]{}\n", att.name, att.mime_type, file_indicator));
                 }
-                Ok(task_json)
+
+                // Add counts by type
+                md.push_str("\n**Counts by type:**\n");
+                for (mime_type, count) in &attachment_counts {
+                    md.push_str(&format!("- {}: {}\n", mime_type, count));
+                }
             }
+
+            Ok(markdown_to_json(md))
+        }
+        OutputFormat::Json => {
+            let mut task_json = serde_json::to_value(&task)?;
+            if let Some(obj) = task_json.as_object_mut() {
+                obj.insert("blocked_by".to_string(), json!(blocked_by));
+                obj.insert("attachments".to_string(), serde_json::to_value(&attachments)?);
+                obj.insert("attachment_counts".to_string(), serde_json::to_value(&attachment_counts)?);
+            }
+            Ok(task_json)
         }
     }
 }
@@ -350,8 +348,8 @@ pub fn list_tasks(
     // Get tasks based on filters
     let tasks = if ready {
         // Ready tasks: in initial state, unclaimed, all deps satisfied
-        let agent_id = get_string(&args, "agent");
-        db.get_ready_tasks(agent_id.as_deref(), states_config, deps_config)?
+        let worker_id = get_string(&args, "worker_id");
+        db.get_ready_tasks(worker_id.as_deref(), states_config, deps_config)?
     } else if blocked {
         // Blocked tasks: have unsatisfied deps
         db.get_blocked_tasks(states_config, deps_config)?
@@ -447,8 +445,8 @@ pub fn list_tasks(
 }
 
 pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
+    let worker_id = get_string(&args, "worker_id")
+        .ok_or_else(|| ToolError::missing_field("worker_id"))?;
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
     let title = get_string(&args, "title");
@@ -458,7 +456,7 @@ pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
         None
     };
     let status = get_string(&args, "state");
-    let priority = get_string(&args, "priority").and_then(|s| Priority::from_str(&s));
+    let priority = get_string(&args, "priority").map(|s| parse_priority(&s));
     let points = if args.get("points").is_some() {
         Some(get_i32(&args, "points"))
     } else {
@@ -473,7 +471,7 @@ pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
 
     let task = db.update_task_unified(
         &task_id,
-        &agent_id,
+        &worker_id,
         title,
         description,
         status,

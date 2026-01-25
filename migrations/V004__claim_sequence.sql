@@ -5,7 +5,7 @@
 CREATE TABLE claim_sequence (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_path TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
     event TEXT NOT NULL,  -- 'claimed' or 'released'
     reason TEXT,          -- Optional reason for claim/release
     timestamp INTEGER NOT NULL
@@ -14,8 +14,8 @@ CREATE TABLE claim_sequence (
 -- Index for efficient polling by files
 CREATE INDEX idx_claim_sequence_file ON claim_sequence(file_path, id);
 
--- Add last_sequence column to agents for tracking poll position
-ALTER TABLE agents ADD COLUMN last_claim_sequence INTEGER NOT NULL DEFAULT 0;
+-- Add last_sequence column to workers for tracking poll position
+ALTER TABLE workers ADD COLUMN last_claim_sequence INTEGER NOT NULL DEFAULT 0;
 
 -- Add reason column to file_locks
 ALTER TABLE file_locks ADD COLUMN reason TEXT;

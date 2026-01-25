@@ -16,11 +16,11 @@ pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> 
     vec![
         make_tool_with_prompts(
             "claim",
-            "Commit to working on a task (like adding to a changelist). Fails if: already claimed, deps unsatisfied, agent at max_claims limit, or agent lacks required tags. Sets status to timed (working) state.",
+            "Commit to working on a task (like adding to a changelist). Fails if: already claimed, deps unsatisfied, worker at max_claims limit, or worker lacks required tags. Sets status to timed (working) state.",
             json!({
-                "agent": {
+                "worker_id": {
                     "type": "string",
-                    "description": "Agent ID claiming the task"
+                    "description": "Worker ID claiming the task"
                 },
                 "task": {
                     "type": "string",
@@ -31,15 +31,15 @@ pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> 
                     "description": "Force claim even if owned by another agent (default: false)"
                 }
             }),
-            vec!["agent", "task"],
+            vec!["worker_id", "task"],
             prompts,
         ),
     ]
 }
 
 pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
+    let worker_id = get_string(&args, "worker_id")
+        .ok_or_else(|| ToolError::missing_field("worker_id"))?;
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
     let force = get_bool(&args, "force").unwrap_or(false);
@@ -55,7 +55,7 @@ pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result
     // Use unified update which handles claiming when transitioning to timed state
     let task = db.update_task_unified(
         &task_id,
-        &agent_id,
+        &worker_id,
         None,             // title
         None,             // description
         Some(claim_status), // status - first timed state

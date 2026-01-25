@@ -133,6 +133,10 @@ pub struct StatesConfig {
     #[serde(default = "default_initial_state")]
     pub initial: String,
 
+    /// Default state for tasks when their owner disconnects (must be untimed).
+    #[serde(default = "default_disconnect_state")]
+    pub disconnect_state: String,
+
     /// States that block dependent tasks (tasks in these states count as "not done").
     #[serde(default = "default_blocking_states")]
     pub blocking_states: Vec<String>,
@@ -146,6 +150,7 @@ impl Default for StatesConfig {
     fn default() -> Self {
         Self {
             initial: default_initial_state(),
+            disconnect_state: default_disconnect_state(),
             blocking_states: default_blocking_states(),
             definitions: default_state_definitions(),
         }
@@ -153,6 +158,10 @@ impl Default for StatesConfig {
 }
 
 fn default_initial_state() -> String {
+    "pending".to_string()
+}
+
+fn default_disconnect_state() -> String {
     "pending".to_string()
 }
 
@@ -263,6 +272,8 @@ pub enum DependencyDisplay {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockTarget {
+    /// Does not block - informational link only.
+    None,
     /// Blocks the task from being started/claimed.
     Start,
     /// Blocks the task from being completed.
@@ -272,6 +283,7 @@ pub enum BlockTarget {
 fn default_dependency_definitions() -> HashMap<String, DependencyDefinition> {
     let mut defs = HashMap::new();
 
+    // Primary workflow types (blocking)
     defs.insert(
         "blocks".to_string(),
         DependencyDefinition {
@@ -293,6 +305,31 @@ fn default_dependency_definitions() -> HashMap<String, DependencyDefinition> {
         DependencyDefinition {
             display: DependencyDisplay::Vertical,
             blocks: BlockTarget::Completion,
+        },
+    );
+
+    // Non-blocking relationship types
+    defs.insert(
+        "duplicate".to_string(),
+        DependencyDefinition {
+            display: DependencyDisplay::Horizontal,
+            blocks: BlockTarget::None,
+        },
+    );
+
+    defs.insert(
+        "see-also".to_string(),
+        DependencyDefinition {
+            display: DependencyDisplay::Horizontal,
+            blocks: BlockTarget::None,
+        },
+    );
+
+    defs.insert(
+        "relates-to".to_string(),
+        DependencyDefinition {
+            display: DependencyDisplay::Horizontal,
+            blocks: BlockTarget::None,
         },
     );
 
@@ -411,6 +448,15 @@ impl StatesConfig {
             .unwrap_or_default()
     }
 
+    /// Get all untimed state names (valid for disconnect final_state).
+    pub fn untimed_state_names(&self) -> Vec<&str> {
+        self.definitions
+            .iter()
+            .filter(|(_, def)| !def.timed)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
     /// Validate the states configuration.
     pub fn validate(&self) -> Result<()> {
         // Check initial state exists
@@ -418,6 +464,20 @@ impl StatesConfig {
             return Err(anyhow!(
                 "Initial state '{}' is not defined in state definitions",
                 self.initial
+            ));
+        }
+
+        // Check disconnect_state exists and is not timed
+        if !self.definitions.contains_key(&self.disconnect_state) {
+            return Err(anyhow!(
+                "Disconnect state '{}' is not defined in state definitions",
+                self.disconnect_state
+            ));
+        }
+        if self.is_timed_state(&self.disconnect_state) {
+            return Err(anyhow!(
+                "Disconnect state '{}' must not be a timed state",
+                self.disconnect_state
             ));
         }
 

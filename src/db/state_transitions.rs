@@ -13,7 +13,7 @@ pub(crate) fn record_state_transition(
     conn: &Connection,
     task_id: &str,
     to_status: &str,
-    agent_id: Option<&str>,
+    worker_id: Option<&str>,
     reason: Option<&str>,
     states_config: &StatesConfig,
 ) -> Result<i64> {
@@ -53,9 +53,9 @@ pub(crate) fn record_state_transition(
 
     // Insert the new transition
     conn.execute(
-        "INSERT INTO task_state_sequence (task_id, agent_id, event, reason, timestamp)
+        "INSERT INTO task_state_sequence (task_id, worker_id, event, reason, timestamp)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![task_id, agent_id, to_status, reason, now],
+        params![task_id, worker_id, to_status, reason, now],
     )?;
 
     Ok(elapsed_added)
@@ -66,7 +66,7 @@ impl Database {
     pub fn get_task_state_history(&self, task_id: &str) -> Result<Vec<TaskStateEvent>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, task_id, agent_id, event, reason, timestamp, end_timestamp
+                "SELECT id, task_id, worker_id, event, reason, timestamp, end_timestamp
                  FROM task_state_sequence
                  WHERE task_id = ?1
                  ORDER BY id ASC",
@@ -77,7 +77,7 @@ impl Database {
                     Ok(TaskStateEvent {
                         id: row.get(0)?,
                         task_id: row.get(1)?,
-                        agent_id: row.get(2)?,
+                        worker_id: row.get(2)?,
                         event: row.get(3)?,
                         reason: row.get(4)?,
                         timestamp: row.get(5)?,

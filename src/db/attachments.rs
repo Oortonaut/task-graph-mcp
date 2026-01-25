@@ -195,4 +195,29 @@ impl Database {
             Ok(deleted > 0)
         })
     }
+
+
+    /// Delete an attachment by name (for replace behavior).
+    /// Returns the file_path if one was set (for cleanup).
+    pub fn delete_attachment_by_name(&self, task_id: &str, name: &str) -> Result<Option<String>> {
+        self.with_conn(|conn| {
+            // First get the file_path if any
+            let file_path: Option<String> = conn
+                .query_row(
+                    "SELECT file_path FROM attachments WHERE task_id = ?1 AND name = ?2",
+                    params![task_id, name],
+                    |row| row.get(0),
+                )
+                .ok()
+                .flatten();
+
+            // Delete the attachment
+            conn.execute(
+                "DELETE FROM attachments WHERE task_id = ?1 AND name = ?2",
+                params![task_id, name],
+            )?;
+
+            Ok(file_path)
+        })
+    }
 }

@@ -55,7 +55,7 @@ impl ToolHandler {
     pub fn get_tools(&self) -> Vec<Tool> {
         let mut tools = Vec::new();
 
-        // Agent tools
+        // Worker tools
         tools.extend(agents::get_tools(&self.prompts));
 
         // Task tools (with dynamic state schema)
@@ -85,9 +85,9 @@ impl ToolHandler {
     /// Call a tool by name.
     pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value> {
         match name {
-            // Agent tools
+            // Worker tools
             "connect" => agents::connect(&self.db, arguments),
-            "disconnect" => agents::disconnect(&self.db, arguments),
+            "disconnect" => agents::disconnect(&self.db, &self.states_config, arguments),
             "list_agents" => agents::list_agents(&self.db, self.default_format, arguments),
 
             // Task tools
@@ -108,8 +108,8 @@ impl ToolHandler {
             "log_cost" => tracking::log_cost(&self.db, arguments),
 
             // Dependency tools
-            "block" => deps::block(&self.db, &self.deps_config, arguments),
-            "unblock" => deps::unblock(&self.db, arguments),
+            "link" => deps::link(&self.db, &self.deps_config, arguments),
+            "unlink" => deps::unlink(&self.db, arguments),
 
             // Claiming tools
             "claim" => claiming::claim(&self.db, &self.states_config, arguments),
@@ -197,5 +197,25 @@ pub fn get_string_array(args: &Value, key: &str) -> Option<Vec<String>> {
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect()
         })
+    })
+}
+
+/// Helper to get either a single string or array of strings from arguments.
+/// Normalizes to a Vec<String>.
+pub fn get_string_or_array(args: &Value, key: &str) -> Option<Vec<String>> {
+    args.get(key).and_then(|v| {
+        if let Some(s) = v.as_str() {
+            // Single string - wrap in vec
+            Some(vec![s.to_string()])
+        } else if let Some(arr) = v.as_array() {
+            // Array of strings
+            Some(
+                arr.iter()
+                    .filter_map(|item| item.as_str().map(String::from))
+                    .collect(),
+            )
+        } else {
+            None
+        }
     })
 }
