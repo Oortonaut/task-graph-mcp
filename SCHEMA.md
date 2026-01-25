@@ -217,6 +217,41 @@ states:
 4. The `started_at` timestamp is set on first entry to any timed state
 5. The `completed_at` timestamp is set when entering a terminal state
 
+### Dependency Propagation
+
+When a task transitions from a blocking state to a non-blocking state (e.g., `in_progress` → `completed`), the system automatically:
+
+1. **Reports unblocked tasks** - The `update` tool response includes an `unblocked` array listing task IDs whose dependencies are now satisfied
+2. **Optionally auto-advances** - If `auto_advance` is enabled, unblocked tasks transition to the configured target state
+
+### Auto-Advance Configuration
+
+```yaml
+auto_advance:
+  enabled: false          # Default: disabled
+  target_state: "ready"   # Target state for auto-advanced tasks
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `enabled` | boolean | `false` | Enable automatic state transitions for unblocked tasks |
+| `target_state` | string | `null` | Target state for auto-advanced tasks (e.g., "ready") |
+
+**Example response when completing a blocker:**
+```json
+{
+  "task": { "id": "task-1", "status": "completed", ... },
+  "unblocked": ["task-2", "task-3"],
+  "auto_advanced": ["task-2", "task-3"]
+}
+```
+
+**Notes:**
+- `unblocked` is always reported, regardless of `auto_advance` settings
+- `auto_advanced` only appears when `enabled: true` and `target_state` is set
+- Tasks are only auto-advanced if they are in the initial state (e.g., "pending")
+- Cascading is supported: if auto-advancing task A unblocks task B, B may also auto-advance
+
 ---
 
 ## Tagging System

@@ -61,6 +61,10 @@ server:
 
 paths:
   style: relative  # or project_prefixed
+
+auto_advance:
+  enabled: false        # Auto-transition unblocked tasks
+  target_state: ready   # Target state (requires custom state in states config)
 ```
 
 Environment variables:
