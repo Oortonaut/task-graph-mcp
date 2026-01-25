@@ -4,6 +4,11 @@ version = "0.1.1"
 edition = "2024"
 description = "MCP server for atomic, token-efficient task management for multi-agent coordination"
 license = "Apache-2.0"
+repository = "https://github.com/Oortonaut/task-graph-mcp"
+homepage = "https://github.com/Oortonaut/task-graph-mcp"
+readme = "README.md"
+keywords = ["mcp", "task-management", "multi-agent", "ai", "coordination"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 # MCP protocol

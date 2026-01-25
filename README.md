@@ -34,8 +34,8 @@ When you have multiple AI agents working on the same codebase, things go wrong f
 ## Quick Start
 
 ```bash
-# Build
-cargo build --release
+# Install
+cargo install task-graph-mcp
 
 # Add to your MCP client (Claude Code, etc.)
 ```
@@ -63,9 +63,34 @@ update(worker_id="worker-1", task="task-123",           → done, deps unblock
 
 ## Installation
 
+### From crates.io (Recommended)
+
 ```bash
+cargo install task-graph-mcp
+```
+
+### Pre-built Binaries
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/Oortonaut/task-graph-mcp/releases):
+
+| Platform | Download |
+|----------|----------|
+| Linux (x64) | `task-graph-mcp-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS (Intel) | `task-graph-mcp-x86_64-apple-darwin.tar.gz` |
+| macOS (Apple Silicon) | `task-graph-mcp-aarch64-apple-darwin.tar.gz` |
+| Windows (x64) | `task-graph-mcp-x86_64-pc-windows-msvc.zip` |
+
+Extract and place the binary in your PATH.
+
+### From Source
+
+```bash
+git clone https://github.com/Oortonaut/task-graph-mcp.git
+cd task-graph-mcp
 cargo build --release
 ```
+
+The binary will be at `target/release/task-graph-mcp`.
 
 ## Usage
 
