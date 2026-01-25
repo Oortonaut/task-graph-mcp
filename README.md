@@ -131,6 +131,49 @@ dependencies:
 | `display` | `horizontal`, `vertical` | Visual relationship (same-level vs parent-child) |
 | `blocks` | `none`, `start`, `completion` | What the dependency blocks |
 
+### Attachments Configuration
+
+Preconfigured attachment keys provide default MIME types and modes, reducing boilerplate when attaching common content types.
+
+```yaml
+attachments:
+  unknown_key: warn  # allow | warn (default) | reject
+  definitions:
+    commit:
+      mime: text/git.hash
+      mode: append
+    checkin:
+      mime: text/p4.changelist
+      mode: append
+    meta:
+      mime: application/json
+      mode: replace
+    note:
+      mime: text/plain
+      mode: append
+```
+
+| Property | Values | Description |
+|----------|--------|-------------|
+| `unknown_key` | `allow`, `warn`, `reject` | Behavior for undefined attachment keys |
+| `definitions.<key>.mime` | MIME type string | Default MIME type for this key |
+| `definitions.<key>.mode` | `append`, `replace` | Default mode (append keeps existing, replace overwrites) |
+
+**Built-in defaults**: `commit` (text/git.hash), `checkin` (text/p4.changelist), `meta` (JSON, replace mode), `note` (text/plain).
+
+**Usage**:
+```
+# MIME and mode auto-filled from config:
+attach(task="123", name="commit", content="abc1234")
+# → mime=text/git.hash, mode=append
+
+attach(task="123", name="meta", content='{"v":1}')
+# → mime=application/json, mode=replace (overwrites existing meta)
+
+# Explicit values override defaults:
+attach(task="123", name="commit", mime="text/plain", content="override")
+```
+
 Environment variables:
 - `TASK_GRAPH_CONFIG_PATH`: Path to configuration file (takes precedence over `.task-graph/config.yaml`)
 - `TASK_GRAPH_DB_PATH`: Database file path (fallback if no config file)
@@ -197,14 +240,22 @@ Environment variables:
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `attach` | `task`, `name`, `content?`, `mime?`, `file?`, `store_as_file?` | Add an attachment. |
+| `attach` | `task`, `name`, `content?`, `mime?`, `file?`, `store_as_file?`, `mode?` | Add an attachment. |
 | `attachments` | `task`, `content?` | Get attachment metadata. Use `content=true` for full content. |
 | `detach` | `task`, `index` | Delete an attachment by task and index. |
 
-Attachment modes:
+Attachment storage modes:
 - **Inline**: Content stored in database (`content` parameter)
 - **File reference**: Reference an existing file (`file` parameter)
 - **Media storage**: Store to `.task-graph/media/` (`content` + `store_as_file=true`)
+
+Same-name behavior (`mode` parameter):
+- **append** (default): Multiple attachments with same name allowed (useful for tracking commits)
+- **replace**: New attachment replaces existing with same name
+
+Suggested MIME types for version control:
+- `application/git-commit` - Git commit hash
+- `application/p4-changelist` - Perforce changelist number
 
 ## MCP Resources
 

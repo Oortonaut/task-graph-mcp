@@ -12,7 +12,7 @@ pub mod skills;
 pub mod tasks;
 pub mod tracking;
 
-use crate::config::{AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig};
+use crate::config::{AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{OutputFormat, ToolResult};
@@ -31,6 +31,7 @@ pub struct ToolHandler {
     pub states_config: Arc<StatesConfig>,
     pub deps_config: Arc<DependenciesConfig>,
     pub auto_advance: Arc<AutoAdvanceConfig>,
+    pub attachments_config: Arc<AttachmentsConfig>,
     pub default_format: OutputFormat,
 }
 
@@ -43,6 +44,7 @@ impl ToolHandler {
         states_config: Arc<StatesConfig>,
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
+        attachments_config: Arc<AttachmentsConfig>,
         default_format: OutputFormat,
     ) -> Self {
         Self {
@@ -53,6 +55,7 @@ impl ToolHandler {
             states_config,
             deps_config,
             auto_advance,
+            attachments_config,
             default_format,
         }
     }
@@ -145,7 +148,7 @@ impl ToolHandler {
             "claim_updates" => json(files::claim_updates_async(std::sync::Arc::clone(&self.db), arguments).await),
 
             // Attachment tools
-            "attach" => json(attachments::attach(&self.db, &self.media_dir, arguments)),
+            "attach" => json(attachments::attach(&self.db, &self.media_dir, &self.attachments_config, arguments)),
             "attachments" => json(attachments::attachments(&self.db, &self.media_dir, self.default_format, arguments)),
             "detach" => json(attachments::detach(&self.db, &self.media_dir, arguments)),
 

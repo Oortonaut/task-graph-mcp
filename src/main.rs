@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use task_graph_mcp::config::{AutoAdvanceConfig, Config, DependenciesConfig, Prompts, StatesConfig};
+use task_graph_mcp::config::{AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, Prompts, StatesConfig};
 use task_graph_mcp::format::OutputFormat;
 use task_graph_mcp::error::ToolError;
 use task_graph_mcp::db::Database;
@@ -66,6 +66,7 @@ impl TaskGraphServer {
         states_config: Arc<StatesConfig>,
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
+        attachments_config: Arc<AttachmentsConfig>,
         default_format: OutputFormat,
     ) -> Self {
         Self {
@@ -77,6 +78,7 @@ impl TaskGraphServer {
                 Arc::clone(&states_config),
                 Arc::clone(&deps_config),
                 Arc::clone(&auto_advance),
+                Arc::clone(&attachments_config),
                 default_format,
             )),
             resource_handler: Arc::new(
@@ -286,6 +288,7 @@ async fn main() -> Result<()> {
     let states_config = Arc::new(config.states.clone());
     let deps_config = Arc::new(config.dependencies.clone());
     let auto_advance = Arc::new(config.auto_advance.clone());
+    let attachments_config = Arc::new(config.attachments.clone());
     let server = TaskGraphServer::new(
         db,
         config.server.media_dir.clone(),
@@ -294,6 +297,7 @@ async fn main() -> Result<()> {
         states_config,
         deps_config,
         auto_advance,
+        attachments_config,
         config.server.default_format,
     );
 

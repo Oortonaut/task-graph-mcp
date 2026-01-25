@@ -2,7 +2,7 @@
 
 use super::{get_bool, get_string, make_tool_with_prompts};
 use crate::format::{format_attachments_markdown, markdown_to_json, OutputFormat};
-use crate::config::Prompts;
+use crate::config::{AttachmentsConfig, Prompts, UnknownKeyBehavior};
 use crate::db::Database;
 use crate::error::{ErrorCode, ToolError};
 use anyhow::Result;
@@ -32,7 +32,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 },
                 "name": {
                     "type": "string",
-                    "description": "Attachment name (use 'meta' for structured metadata). Same name replaces existing attachment."
+                    "description": "Attachment name (use 'meta' for structured metadata)"
                 },
                 "content": {
                     "type": "string",
@@ -49,6 +49,11 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "store_as_file": {
                     "type": "boolean",
                     "description": "If true, store content in .task-graph/media/ instead of database"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["append", "replace"],
+                    "description": "How to handle existing attachment with same name: 'append' (default) keeps both, 'replace' deletes old"
                 }
             }),
             vec!["task", "name"],
@@ -145,10 +150,10 @@ fn is_in_media_dir(file_path: &str, media_dir: &Path) -> bool {
     }
 }
 
-pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
+pub fn attach(db: &Database, media_dir: &Path, attachments_config: &AttachmentsConfig, args: Value) -> Result<Value> {
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
-    
+
     // Task can be string or array of strings
     let task_ids: Vec<String> = if let Some(task_array) = args.get("task").and_then(|v| v.as_array()) {
         task_array
@@ -168,9 +173,38 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let name = get_string(&args, "name")
         .ok_or_else(|| ToolError::missing_field("name"))?;
     let content = get_string(&args, "content");
-    let mime_type = get_string(&args, "mime").unwrap_or_else(|| "text/plain".to_string());
     let file_path = get_string(&args, "file");
     let store_as_file = get_bool(&args, "store_as_file").unwrap_or(false);
+
+    // Check if this is a known key and handle unknown_key behavior
+    let is_known = attachments_config.is_known_key(&name);
+    let warning: Option<String> = if !is_known {
+        match attachments_config.unknown_key {
+            UnknownKeyBehavior::Reject => {
+                return Err(ToolError::new(
+                    ErrorCode::InvalidFieldValue,
+                    format!("Unknown attachment key '{}'. Configure it in attachments.definitions or set unknown_key to 'allow' or 'warn'.", name)
+                ).into());
+            }
+            UnknownKeyBehavior::Warn => {
+                Some(format!("Unknown attachment key '{}'", name))
+            }
+            UnknownKeyBehavior::Allow => None,
+        }
+    } else {
+        None
+    };
+
+    // Use config defaults for mime/mode, but allow explicit overrides from args
+    let mime_type = get_string(&args, "mime")
+        .unwrap_or_else(|| attachments_config.get_mime_default(&name).to_string());
+    let mode = get_string(&args, "mode")
+        .unwrap_or_else(|| attachments_config.get_mode_default(&name).to_string());
+
+    // Validate mode
+    if mode != "append" && mode != "replace" {
+        return Err(ToolError::new(ErrorCode::InvalidFieldValue, "mode must be 'append' or 'replace'").into());
+    }
 
     // Validate: need either content or file
     if content.is_none() && file_path.is_none() {
@@ -196,11 +230,13 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let mut results = Vec::new();
 
     for task_id in &task_ids {
-        // Replace behavior: delete existing attachment with same name
-        if let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name) {
-            // Clean up old media file if it was in media dir
-            if is_in_media_dir(&old_file_path, media_dir) {
-                let _ = std::fs::remove_file(&old_file_path);
+        // Replace mode: delete existing attachment with same name before adding new one
+        if mode == "replace" {
+            if let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name) {
+                // Clean up old media file if it was in media dir
+                if is_in_media_dir(&old_file_path, media_dir) {
+                    let _ = std::fs::remove_file(&old_file_path);
+                }
             }
         }
 
@@ -237,11 +273,18 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     }
 
     // Return single result for single task, array for bulk
-    if results.len() == 1 {
-        Ok(results.into_iter().next().unwrap())
+    let mut response = if results.len() == 1 {
+        results.into_iter().next().unwrap()
     } else {
-        Ok(json!({ "attachments": results }))
+        json!({ "attachments": results })
+    };
+
+    // Add warning if unknown key behavior is "warn"
+    if let Some(warn_msg) = warning {
+        response["warning"] = json!(warn_msg);
     }
+
+    Ok(response)
 }
 
 pub fn attachments(db: &Database, _media_dir: &Path, default_format: OutputFormat, args: Value) -> Result<Value> {

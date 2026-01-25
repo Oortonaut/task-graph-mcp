@@ -19,6 +19,120 @@ pub struct AutoAdvanceConfig {
     pub target_state: Option<String>,
 }
 
+/// Behavior for unknown attachment keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UnknownKeyBehavior {
+    /// Silently use default mime/mode.
+    Allow,
+    /// Use defaults but return a warning in the response (default).
+    #[default]
+    Warn,
+    /// Reject unknown keys with an error.
+    Reject,
+}
+
+/// Definition of a preconfigured attachment key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentKeyDefinition {
+    /// Default MIME type for this key.
+    pub mime: String,
+    /// Default mode: "append" or "replace".
+    #[serde(default = "default_append_mode")]
+    pub mode: String,
+}
+
+fn default_append_mode() -> String {
+    "append".to_string()
+}
+
+/// Attachments configuration with preconfigured key definitions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentsConfig {
+    /// Behavior for unknown attachment keys (allow, warn, reject).
+    #[serde(default)]
+    pub unknown_key: UnknownKeyBehavior,
+    /// Preconfigured attachment key definitions.
+    #[serde(default = "AttachmentsConfig::default_definitions")]
+    pub definitions: HashMap<String, AttachmentKeyDefinition>,
+}
+
+impl Default for AttachmentsConfig {
+    fn default() -> Self {
+        Self {
+            unknown_key: UnknownKeyBehavior::default(),
+            definitions: Self::default_definitions(),
+        }
+    }
+}
+
+impl AttachmentsConfig {
+    /// Default attachment key definitions.
+    pub fn default_definitions() -> HashMap<String, AttachmentKeyDefinition> {
+        let mut defs = HashMap::new();
+
+        defs.insert(
+            "commit".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/git.hash".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "checkin".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/p4.changelist".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "meta".to_string(),
+            AttachmentKeyDefinition {
+                mime: "application/json".to_string(),
+                mode: "replace".to_string(),
+            },
+        );
+
+        defs.insert(
+            "note".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs
+    }
+
+    /// Get the definition for a key, if it exists.
+    pub fn get_definition(&self, key: &str) -> Option<&AttachmentKeyDefinition> {
+        self.definitions.get(key)
+    }
+
+    /// Check if a key is a known/configured key.
+    pub fn is_known_key(&self, key: &str) -> bool {
+        self.definitions.contains_key(key)
+    }
+
+    /// Get the default MIME type for a key, or fallback to text/plain.
+    pub fn get_mime_default(&self, key: &str) -> &str {
+        self.definitions
+            .get(key)
+            .map(|d| d.mime.as_str())
+            .unwrap_or("text/plain")
+    }
+
+    /// Get the default mode for a key, or fallback to "append".
+    pub fn get_mode_default(&self, key: &str) -> &str {
+        self.definitions
+            .get(key)
+            .map(|d| d.mode.as_str())
+            .unwrap_or("append")
+    }
+}
+
 /// Server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -36,6 +150,9 @@ pub struct Config {
 
     #[serde(default)]
     pub auto_advance: AutoAdvanceConfig,
+
+    #[serde(default)]
+    pub attachments: AttachmentsConfig,
 }
 
 impl Default for Config {
@@ -46,6 +163,7 @@ impl Default for Config {
             states: StatesConfig::default(),
             dependencies: DependenciesConfig::default(),
             auto_advance: AutoAdvanceConfig::default(),
+            attachments: AttachmentsConfig::default(),
         }
     }
 }
