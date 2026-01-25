@@ -96,16 +96,16 @@ pub fn disconnect(db: &Database, states_config: &StatesConfig, args: Value) -> R
     let worker_id = get_string(&args, "worker_id")
         .ok_or_else(|| ToolError::missing_field("worker_id"))?;
 
-    // Get final_state from args or fall back to config
-    let final_state = get_string(&args, "final_state")
+    // Get final_status from args or fall back to config
+    let final_status = get_string(&args, "final_status")
         .unwrap_or_else(|| states_config.disconnect_state.clone());
 
-    // Validate final_state is untimed
-    if states_config.is_timed_state(&final_state) {
+    // Validate final_status is untimed
+    if states_config.is_timed_state(&final_status) {
         return Err(ToolError::invalid_value(
-            "final_state",
-            &format!("must be an untimed state, got '{}'. Valid states: {:?}", 
-                final_state, 
+            "final_status",
+            &format!("must be an untimed status, got '{}'. Valid statuses: {:?}", 
+                final_status, 
                 states_config.untimed_state_names())
         ).into());
     }
@@ -114,13 +114,13 @@ pub fn disconnect(db: &Database, states_config: &StatesConfig, args: Value) -> R
     let _ = db.release_worker_locks(&worker_id);
 
     // Unregister and get summary
-    let summary = db.unregister_worker(&worker_id, &final_state)?;
+    let summary = db.unregister_worker(&worker_id, &final_status)?;
 
     Ok(json!({
         "success": true,
         "tasks_released": summary.tasks_released,
         "files_released": summary.files_released,
-        "final_state": summary.final_state
+        "final_status": summary.final_status
     }))
 }
 

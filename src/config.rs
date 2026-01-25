@@ -136,6 +136,14 @@ impl AttachmentsConfig {
         );
 
         defs.insert(
+            "changelist".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
             "plan".to_string(),
             AttachmentKeyDefinition {
                 mime: "text/markdown".to_string(),

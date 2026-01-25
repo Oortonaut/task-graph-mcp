@@ -138,10 +138,33 @@ Event log for file claim/release tracking, enabling efficient polling.
 | `reason` | TEXT | | Optional reason for the event |
 | `timestamp` | INTEGER | NOT NULL | Unix timestamp of the event |
 | `end_timestamp` | INTEGER | | Unix timestamp when this claim period ended |
+| `claim_id` | INTEGER | | For releases: references the original claim event |
 
 **Indexes:**
 - `idx_claim_sequence_file` on `(file_path, id)`
 - `idx_claim_seq_open` on `file_path` WHERE `end_timestamp IS NULL`
+
+---
+
+### File Coordination Model
+
+File claims enable multi-agent coordination through intent communication:
+
+1. **Claiming with reason**: When an agent claims a file, they provide a reason describing their intent (e.g., "Renaming state to status", "Fixing null check in validate()")
+
+2. **Visibility on conflict**: When another agent tries to claim the same file, they see who has it and why, enabling informed decisions:
+   - Wait for the other agent to finish
+   - Work around their changes (use their new naming, etc.)
+   - Move on to other work if the issue is already being addressed
+
+3. **Polling for updates**: Agents poll `claim_updates` to see claims/releases as they happen, maintaining awareness of what's being worked on
+
+4. **Release notifications**: When a file is released, waiting agents are notified and can claim it
+
+This model prevents:
+- Blind overwrites of others' changes
+- Duplicate effort on the same problem
+- Merge conflicts from uncoordinated edits
 
 ---
 

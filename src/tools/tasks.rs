@@ -3,7 +3,6 @@
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig, UnknownKeyBehavior};
 use crate::db::Database;
-use std::path::Path;
 use crate::error::ToolError;
 use crate::format::{format_scan_result_markdown, format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
 use crate::types::{parse_priority, ScanResult, TaskTreeInput};
@@ -225,33 +224,29 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "attachments": {
                     "type": "array",
-                    "description": "List of attachments to add to the task (e.g., changelists, notes, final summaries)",
+                    "description": "List of attachments to add to the task (e.g., commit hashes, changelists, notes)",
                     "items": {
                         "type": "object",
                         "properties": {
                             "name": {
                                 "type": "string",
-                                "description": "Attachment name/key (e.g., 'changelist', 'notes', 'summary')"
+                                "description": "Attachment name/key (e.g., 'commit', 'changelist', 'note')"
                             },
                             "content": {
                                 "type": "string",
-                                "description": "Attachment content (text or base64). Required unless 'file' is provided."
+                                "description": "Attachment content (text)"
                             },
                             "mime": {
                                 "type": "string",
-                                "description": "MIME type (default: text/plain)"
-                            },
-                            "file": {
-                                "type": "string",
-                                "description": "Path to existing file to reference (alternative to content)"
+                                "description": "MIME type (uses configured default if omitted)"
                             },
                             "mode": {
                                 "type": "string",
                                 "enum": ["append", "replace"],
-                                "description": "How to handle existing attachment with same name: 'append' (default) keeps both, 'replace' deletes old"
+                                "description": "How to handle existing attachment with same name (uses configured default if omitted)"
                             }
                         },
-                        "required": ["name"]
+                        "required": ["name", "content"]
                     }
                 }
             }),
@@ -567,7 +562,6 @@ pub fn list_tasks(
 
 pub fn update(
     db: &Database,
-    media_dir: &Path,
     attachments_config: &AttachmentsConfig,
     states_config: &StatesConfig,
     deps_config: &DependenciesConfig,
@@ -621,7 +615,6 @@ pub fn update(
         for att_value in attachments_arr {
             let name = att_value.get("name").and_then(|v| v.as_str());
             let content = att_value.get("content").and_then(|v| v.as_str());
-            let file_path = att_value.get("file").and_then(|v| v.as_str());
             let mime_override = att_value.get("mime").and_then(|v| v.as_str());
             let mode_override = att_value.get("mode").and_then(|v| v.as_str());
 
@@ -633,18 +626,19 @@ pub fn update(
                 }
             };
 
-            // Validate content or file is provided
-            if content.is_none() && file_path.is_none() {
-                attachment_warnings.push(format!(
-                    "Skipped attachment '{}': either 'content' or 'file' must be provided",
-                    name
-                ));
-                continue;
-            }
+            let content = match content {
+                Some(c) => c,
+                None => {
+                    attachment_warnings.push(format!(
+                        "Skipped attachment '{}': missing 'content' field",
+                        name
+                    ));
+                    continue;
+                }
+            };
 
             // Check unknown key behavior
-            let is_known = attachments_config.is_known_key(name);
-            if !is_known {
+            if !attachments_config.is_known_key(name) {
                 match attachments_config.unknown_key {
                     UnknownKeyBehavior::Reject => {
                         attachment_warnings.push(format!(
@@ -677,43 +671,17 @@ pub fn update(
 
             // Handle replace mode - delete existing attachment with same name
             if mode == "replace" {
-                if let Ok(Some(old_file_path)) = db.delete_attachment_by_name(&task_id, name) {
-                    // Clean up old media file if it was in media dir
-                    if is_in_media_dir(&old_file_path, media_dir) {
-                        let _ = std::fs::remove_file(&old_file_path);
-                    }
-                }
+                let _ = db.delete_attachment_by_name(&task_id, name);
             }
 
-            // Determine final content and file path
-            let (final_content, final_file_path): (String, Option<String>) = if let Some(fp) = file_path {
-                // File reference mode: verify file exists
-                let path = Path::new(fp);
-                if !path.exists() {
-                    attachment_warnings.push(format!(
-                        "Skipped attachment '{}': file not found: {}",
-                        name, fp
-                    ));
-                    continue;
-                }
-                (String::new(), Some(fp.to_string()))
-            } else {
-                // Inline content mode
-                (content.unwrap().to_string(), None)
-            };
-
             // Add the attachment
-            match db.add_attachment(&task_id, name.to_string(), final_content, Some(mime_type.clone()), final_file_path.clone()) {
+            match db.add_attachment(&task_id, name.to_string(), content.to_string(), Some(mime_type.clone()), None) {
                 Ok(order_index) => {
-                    let mut result = json!({
+                    attachment_results.push(json!({
                         "name": name,
                         "order_index": order_index,
                         "mime_type": mime_type
-                    });
-                    if let Some(fp) = final_file_path {
-                        result["file_path"] = json!(fp);
-                    }
-                    attachment_results.push(result);
+                    }));
                 }
                 Err(e) => {
                     attachment_warnings.push(format!(
@@ -768,19 +736,6 @@ pub fn update(
     }
 
     Ok(response)
-}
-
-/// Check if a file path is within the media directory.
-fn is_in_media_dir(file_path: &str, media_dir: &Path) -> bool {
-    let file_path = Path::new(file_path);
-
-    // Try to canonicalize both paths for comparison
-    if let (Ok(file_abs), Ok(media_abs)) = (file_path.canonicalize(), media_dir.canonicalize()) {
-        file_abs.starts_with(media_abs)
-    } else {
-        // Fall back to string prefix check
-        file_path.starts_with(media_dir)
-    }
 }
 
 pub fn delete(db: &Database, args: Value) -> Result<Value> {
