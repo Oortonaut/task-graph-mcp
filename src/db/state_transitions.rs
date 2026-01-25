@@ -61,6 +61,18 @@ pub(crate) fn record_state_transition(
     Ok(elapsed_added)
 }
 
+/// Statistics for project-wide state transitions.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProjectStateStats {
+    pub total_transitions: i64,
+    pub total_time_ms: i64,
+    pub tasks_affected: i64,
+    pub transitions_by_state: std::collections::HashMap<String, i64>,
+    pub time_by_state_ms: std::collections::HashMap<String, i64>,
+    pub transitions_by_agent: std::collections::HashMap<String, i64>,
+    pub time_by_agent_ms: std::collections::HashMap<String, i64>,
+}
+
 impl Database {
     /// Get the state transition history for a task.
     pub fn get_task_state_history(&self, task_id: &str) -> Result<Vec<TaskStateEvent>> {
@@ -117,6 +129,152 @@ impl Database {
                 }
                 None => Ok(None),
             }
+        })
+    }
+
+    /// Get project-wide state transition history with optional time range filter.
+    /// Returns all state transitions across all tasks within the specified time range.
+    pub fn get_project_state_history(
+        &self,
+        from_timestamp: Option<i64>,
+        to_timestamp: Option<i64>,
+        state_filter: Option<&[String]>,
+        limit: Option<i64>,
+    ) -> Result<Vec<TaskStateEvent>> {
+        self.with_conn(|conn| {
+            // Build query dynamically based on filters
+            let mut sql = String::from(
+                "SELECT id, task_id, worker_id, event, reason, timestamp, end_timestamp
+                 FROM task_state_sequence WHERE 1=1"
+            );
+            let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+            if let Some(from_ts) = from_timestamp {
+                sql.push_str(&format!(" AND timestamp >= ?{}", param_values.len() + 1));
+                param_values.push(Box::new(from_ts));
+            }
+
+            if let Some(to_ts) = to_timestamp {
+                sql.push_str(&format!(" AND timestamp <= ?{}", param_values.len() + 1));
+                param_values.push(Box::new(to_ts));
+            }
+
+            if let Some(states) = state_filter {
+                if !states.is_empty() {
+                    let placeholders: Vec<String> = states.iter().enumerate()
+                        .map(|(i, _)| format!("?{}", param_values.len() + i + 1))
+                        .collect();
+                    sql.push_str(&format!(" AND event IN ({})", placeholders.join(", ")));
+                    for state in states {
+                        param_values.push(Box::new(state.clone()));
+                    }
+                }
+            }
+
+            sql.push_str(" ORDER BY timestamp DESC, id DESC");
+
+            if let Some(lim) = limit {
+                sql.push_str(&format!(" LIMIT ?{}", param_values.len() + 1));
+                param_values.push(Box::new(lim));
+            }
+
+            let mut stmt = conn.prepare(&sql)?;
+
+            // Convert Vec<Box<dyn ToSql>> to slice of references
+            let param_refs: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+
+            let events = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    Ok(TaskStateEvent {
+                        id: row.get(0)?,
+                        task_id: row.get(1)?,
+                        worker_id: row.get(2)?,
+                        event: row.get(3)?,
+                        reason: row.get(4)?,
+                        timestamp: row.get(5)?,
+                        end_timestamp: row.get(6)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(events)
+        })
+    }
+
+    /// Get aggregate project statistics for state transitions within a time range.
+    /// Returns counts of transitions per state and per agent.
+    pub fn get_project_state_stats(
+        &self,
+        from_timestamp: Option<i64>,
+        to_timestamp: Option<i64>,
+    ) -> Result<ProjectStateStats> {
+        self.with_conn(|conn| {
+            let mut transitions_by_state = std::collections::HashMap::new();
+            let mut time_by_state = std::collections::HashMap::new();
+            let mut transitions_by_agent = std::collections::HashMap::new();
+            let mut time_by_agent = std::collections::HashMap::new();
+            let mut tasks_touched = std::collections::HashSet::new();
+            let mut total_transitions = 0i64;
+            let mut total_time_ms = 0i64;
+
+            // Build base query
+            let mut sql = String::from(
+                "SELECT event, worker_id, task_id, timestamp, end_timestamp FROM task_state_sequence WHERE 1=1"
+            );
+            let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+            if let Some(from_ts) = from_timestamp {
+                sql.push_str(&format!(" AND timestamp >= ?{}", param_values.len() + 1));
+                param_values.push(Box::new(from_ts));
+            }
+
+            if let Some(to_ts) = to_timestamp {
+                sql.push_str(&format!(" AND timestamp <= ?{}", param_values.len() + 1));
+                param_values.push(Box::new(to_ts));
+            }
+
+            let mut stmt = conn.prepare(&sql)?;
+            let param_refs: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+
+            let mut rows = stmt.query(param_refs.as_slice())?;
+
+            while let Some(row) = rows.next()? {
+                let event: String = row.get(0)?;
+                let worker_id: Option<String> = row.get(1)?;
+                let task_id: String = row.get(2)?;
+                let timestamp: i64 = row.get(3)?;
+                let end_timestamp: Option<i64> = row.get(4)?;
+
+                total_transitions += 1;
+                tasks_touched.insert(task_id);
+
+                *transitions_by_state.entry(event.clone()).or_insert(0i64) += 1;
+
+                if let Some(ref agent) = worker_id {
+                    *transitions_by_agent.entry(agent.clone()).or_insert(0i64) += 1;
+                }
+
+                // Calculate duration if we have an end timestamp
+                if let Some(end_ts) = end_timestamp {
+                    let duration = end_ts - timestamp;
+                    total_time_ms += duration;
+                    *time_by_state.entry(event).or_insert(0i64) += duration;
+
+                    if let Some(agent) = worker_id {
+                        *time_by_agent.entry(agent).or_insert(0i64) += duration;
+                    }
+                }
+            }
+
+            Ok(ProjectStateStats {
+                total_transitions,
+                total_time_ms,
+                tasks_affected: tasks_touched.len() as i64,
+                transitions_by_state,
+                time_by_state_ms: time_by_state,
+                transitions_by_agent,
+                time_by_agent_ms: time_by_agent,
+            })
         })
     }
 }

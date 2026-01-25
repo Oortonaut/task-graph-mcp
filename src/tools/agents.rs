@@ -4,7 +4,7 @@ use super::{get_bool, get_i32, get_string, get_string_array, make_tool_with_prom
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::{format_workers_markdown, markdown_to_json, OutputFormat};
+use crate::format::{format_workers_markdown, OutputFormat, ToolResult};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
@@ -53,11 +53,6 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
             "list_agents",
             "List all connected workers with their current status, claim counts, and what they're working on.",
             json!({
-                "format": {
-                    "type": "string",
-                    "enum": ["json", "markdown"],
-                    "description": "Output format (default: json)"
-                },
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -129,11 +124,7 @@ pub fn disconnect(db: &Database, states_config: &StatesConfig, args: Value) -> R
     }))
 }
 
-pub fn list_agents(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
-    let format = get_string(&args, "format")
-        .and_then(|s| OutputFormat::from_str(&s))
-        .unwrap_or(default_format);
-
+pub fn list_agents(db: &Database, format: OutputFormat, args: Value) -> Result<ToolResult> {
     // Extract filter parameters
     let tags = get_string_array(&args, "tags");
     let file = get_string(&args, "file");
@@ -151,10 +142,10 @@ pub fn list_agents(db: &Database, default_format: OutputFormat, args: Value) -> 
 
     match format {
         OutputFormat::Markdown => {
-            Ok(markdown_to_json(format_workers_markdown(&workers)))
+            Ok(ToolResult::Raw(format_workers_markdown(&workers)))
         }
         OutputFormat::Json => {
-            Ok(json!({
+            Ok(ToolResult::Json(json!({
                 "workers": workers.iter().map(|w| json!({
                     "id": w.id,
                     "tags": w.tags,
@@ -165,7 +156,7 @@ pub fn list_agents(db: &Database, default_format: OutputFormat, args: Value) -> 
                     "last_heartbeat": w.last_heartbeat,
                     "heartbeat_age_ms": now - w.last_heartbeat
                 })).collect::<Vec<_>>()
-            }))
+            })))
         }
     }
 }

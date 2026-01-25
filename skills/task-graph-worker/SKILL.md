@@ -27,6 +27,9 @@ connect(worker_id="rust-worker", tags=["rust", "backend"], force=true)
 # 2. Find work matching your skills
 list_tasks(ready=true, worker_id=worker_id)
 
+# 2b. Or search for specific tasks
+search(query="authentication backend")
+
 # 3. Claim a task
 claim(worker_id=worker_id, task=task_id)
 
@@ -168,7 +171,7 @@ release_file(worker_id=worker_id, file="src/auth.rs",
 
 If file is locked by another worker:
 
-1. **Wait** - Poll with `claim_updates` for release
+1. **Wait** - Use `claim_updates(timeout=30000)` to long-poll for release
 2. **Coordinate** - Work on different files
 3. **Request** - Ask coordinator to intervene
 
@@ -197,6 +200,41 @@ claim(worker_id=worker_id, task=task_id, force=true)
 claim(worker_id=worker_id, task=task_1)
 claim(worker_id=worker_id, task=task_2)
 ```
+
+---
+
+## Finding Tasks with Search
+
+Use `search` for powerful full-text search across tasks and attachments:
+
+### Basic Search
+```
+search(query="authentication")
+# Returns ranked results with highlighted snippets
+```
+
+### Search with Filters
+```
+# Find pending tasks only
+search(query="backend API", status_filter="pending")
+
+# Include attachment content in search
+search(query="error handling", include_attachments=true)
+
+# Limit results
+search(query="refactor", limit=5)
+```
+
+### When to Use Search vs list_tasks
+
+| Use Case | Tool |
+|----------|------|
+| Find ready tasks for your tags | `list_tasks(ready=true)` |
+| Find tasks by keyword | `search(query="keyword")` |
+| Filter by status only | `list_tasks(status="pending")` |
+| Find tasks with specific content | `search(query="...")` |
+| Check your claimed tasks | `list_tasks(owner=worker_id)` |
+| Find tasks mentioning a topic | `search(query="topic")` |
 
 ---
 

@@ -238,40 +238,8 @@ impl Database {
     }
 
     /// Get claim updates since worker's last poll.
-    ///
-    /// If `timeout_ms` is Some and > 0, this becomes a long-polling operation:
-    /// - If updates exist, returns immediately
-    /// - If no updates, waits up to `timeout_ms` milliseconds for new events
-    /// - Returns empty result after timeout expires with no events
-    ///
-    /// Poll interval is 1000ms (1 second between checks).
-    pub fn claim_updates(&self, worker_id: &str, files: Option<Vec<String>>, timeout_ms: Option<i64>) -> Result<ClaimUpdates> {
-        let deadline = timeout_ms
-            .filter(|&t| t > 0)
-            .map(|t| now_ms() + t);
-
-        loop {
-            let updates = self.claim_updates_once(worker_id, files.clone())?;
-
-            // Return if we have updates or no timeout specified
-            if !updates.new_claims.is_empty() || !updates.dropped_claims.is_empty() || deadline.is_none() {
-                return Ok(updates);
-            }
-
-            // Check deadline
-            if let Some(d) = deadline {
-                if now_ms() >= d {
-                    return Ok(updates); // Empty result after timeout
-                }
-            }
-
-            // Sleep before next poll (1 second interval)
-            std::thread::sleep(std::time::Duration::from_millis(1000));
-        }
-    }
-
-    /// Internal helper for single poll of claim updates.
-    fn claim_updates_once(&self, worker_id: &str, files: Option<Vec<String>>) -> Result<ClaimUpdates> {
+    /// Returns all claim/release events since the agent's last poll position.
+    pub fn claim_updates(&self, worker_id: &str) -> Result<ClaimUpdates> {
         self.with_conn(|conn| {
             // Get worker's last sequence
             let last_seq: i64 = conn
@@ -282,67 +250,27 @@ impl Database {
                 )
                 .unwrap_or(0);
 
-            // Get new events since last sequence
-            let events: Vec<ClaimEvent> = if let Some(ref paths) = files {
-                if paths.is_empty() {
-                    Vec::new()
-                } else {
-                    let placeholders: Vec<String> = paths.iter().map(|_| "?".to_string()).collect();
-                    let sql = format!(
-                        "SELECT id, file_path, worker_id, event, reason, timestamp, end_timestamp, claim_id
-                         FROM claim_sequence
-                         WHERE id > ?1 AND file_path IN ({})
-                         ORDER BY id",
-                        placeholders.join(", ")
-                    );
-
-                    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-                    params_vec.push(Box::new(last_seq));
-                    for path in paths {
-                        params_vec.push(Box::new(path.clone()));
-                    }
-
-                    let params_refs: Vec<&dyn rusqlite::ToSql> =
-                        params_vec.iter().map(|b| b.as_ref()).collect();
-
-                    let mut stmt = conn.prepare(&sql)?;
-                    stmt.query_map(params_refs.as_slice(), |row| {
-                        Ok(ClaimEvent {
-                            id: row.get(0)?,
-                            file_path: row.get(1)?,
-                            worker_id: row.get(2)?,
-                            event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
-                            reason: row.get(4)?,
-                            timestamp: row.get(5)?,
-                            end_timestamp: row.get(6)?,
-                            claim_id: row.get(7)?,
-                        })
-                    })?
-                    .filter_map(|r| r.ok())
-                    .collect()
-                }
-            } else {
-                let mut stmt = conn.prepare(
-                    "SELECT id, file_path, worker_id, event, reason, timestamp, end_timestamp, claim_id
-                     FROM claim_sequence
-                     WHERE id > ?1
-                     ORDER BY id"
-                )?;
-                stmt.query_map(params![last_seq], |row| {
-                    Ok(ClaimEvent {
-                        id: row.get(0)?,
-                        file_path: row.get(1)?,
-                        worker_id: row.get(2)?,
-                        event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
-                        reason: row.get(4)?,
-                        timestamp: row.get(5)?,
-                        end_timestamp: row.get(6)?,
-                        claim_id: row.get(7)?,
-                    })
-                })?
-                .filter_map(|r| r.ok())
-                .collect()
-            };
+            // Get all new events since last sequence
+            let mut stmt = conn.prepare(
+                "SELECT id, file_path, worker_id, event, reason, timestamp, end_timestamp, claim_id
+                 FROM claim_sequence
+                 WHERE id > ?1
+                 ORDER BY id"
+            )?;
+            let events: Vec<ClaimEvent> = stmt.query_map(params![last_seq], |row| {
+                Ok(ClaimEvent {
+                    id: row.get(0)?,
+                    file_path: row.get(1)?,
+                    worker_id: row.get(2)?,
+                    event: ClaimEventType::from_str(&row.get::<_, String>(3)?).unwrap_or(ClaimEventType::Claimed),
+                    reason: row.get(4)?,
+                    timestamp: row.get(5)?,
+                    end_timestamp: row.get(6)?,
+                    claim_id: row.get(7)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
             // Find max sequence from events
             let new_seq = events.iter().map(|e| e.id).max().unwrap_or(last_seq);

@@ -98,34 +98,92 @@ impl Database {
 
     /// Get attachments for a task (metadata only).
     pub fn get_attachments(&self, task_id: &str) -> Result<Vec<AttachmentMeta>> {
+        self.get_attachments_filtered(task_id, None, None)
+    }
+
+
+    /// Get attachments for a task with optional filtering (metadata only).
+    /// - name_pattern: Optional glob pattern (with * wildcard) to filter by attachment name
+    /// - mime_pattern: Optional prefix to filter by MIME type (e.g., "image/" matches "image/png")
+    pub fn get_attachments_filtered(
+        &self,
+        task_id: &str,
+        name_pattern: Option<&str>,
+        mime_pattern: Option<&str>,
+    ) -> Result<Vec<AttachmentMeta>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
+            // Build query with optional filters
+            let mut sql = String::from(
                 "SELECT task_id, order_index, name, mime_type, file_path, created_at
-                 FROM attachments WHERE task_id = ?1 ORDER BY order_index, created_at",
-            )?;
+                 FROM attachments WHERE task_id = ?1"
+            );
 
-            let attachments = stmt
-                .query_map(params![task_id], |row| {
-                    let task_id: String = row.get(0)?;
-                    let order_index: i32 = row.get(1)?;
-                    let name: String = row.get(2)?;
-                    let mime_type: String = row.get(3)?;
-                    let file_path: Option<String> = row.get(4)?;
-                    let created_at: i64 = row.get(5)?;
+            // For name pattern, convert glob to SQL LIKE pattern
+            let name_like = name_pattern.map(|p| {
+                // Convert glob wildcards to SQL LIKE: * -> %, ? -> _
+                p.replace('*', "%").replace('?', "_")
+            });
 
-                    Ok(AttachmentMeta {
-                        task_id,
-                        order_index,
-                        name,
-                        mime_type,
-                        file_path,
-                        created_at,
-                    })
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
+            if name_like.is_some() {
+                sql.push_str(" AND name LIKE ?2 ESCAPE '\\'");
+            }
+
+            if mime_pattern.is_some() {
+                let idx = if name_like.is_some() { 3 } else { 2 };
+                sql.push_str(&format!(" AND mime_type LIKE ?{} ESCAPE '\\\\'", idx));
+            }
+
+            sql.push_str(" ORDER BY order_index, created_at");
+
+            let mut stmt = conn.prepare(&sql)?;
+
+            // Bind parameters based on which filters are present
+            let attachments: Vec<AttachmentMeta> = match (&name_like, mime_pattern) {
+                (Some(name), Some(mime)) => {
+                    let mime_like = format!("{}%", mime);
+                    stmt.query_map(params![task_id, name, mime_like], |row| {
+                        Self::map_attachment_meta(row)
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect()
+                }
+                (Some(name), None) => {
+                    stmt.query_map(params![task_id, name], |row| {
+                        Self::map_attachment_meta(row)
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect()
+                }
+                (None, Some(mime)) => {
+                    let mime_like = format!("{}%", mime);
+                    stmt.query_map(params![task_id, mime_like], |row| {
+                        Self::map_attachment_meta(row)
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect()
+                }
+                (None, None) => {
+                    stmt.query_map(params![task_id], |row| {
+                        Self::map_attachment_meta(row)
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect()
+                }
+            };
 
             Ok(attachments)
+        })
+    }
+
+    /// Helper to map a row to AttachmentMeta.
+    fn map_attachment_meta(row: &rusqlite::Row) -> rusqlite::Result<AttachmentMeta> {
+        Ok(AttachmentMeta {
+            task_id: row.get(0)?,
+            order_index: row.get(1)?,
+            name: row.get(2)?,
+            mime_type: row.get(3)?,
+            file_path: row.get(4)?,
+            created_at: row.get(5)?,
         })
     }
 
@@ -218,6 +276,30 @@ impl Database {
             )?;
 
             Ok(file_path)
+        })
+    }
+
+    /// Delete an attachment by name and return whether it was deleted plus the file_path.
+    /// Returns (was_deleted, file_path).
+    pub fn delete_attachment_by_name_ex(&self, task_id: &str, name: &str) -> Result<(bool, Option<String>)> {
+        self.with_conn(|conn| {
+            // First get the file_path if any
+            let file_path: Option<String> = conn
+                .query_row(
+                    "SELECT file_path FROM attachments WHERE task_id = ?1 AND name = ?2",
+                    params![task_id, name],
+                    |row| row.get(0),
+                )
+                .ok()
+                .flatten();
+
+            // Delete the attachment
+            let rows_affected = conn.execute(
+                "DELETE FROM attachments WHERE task_id = ?1 AND name = ?2",
+                params![task_id, name],
+            )?;
+
+            Ok((rows_affected > 0, file_path))
         })
     }
 }

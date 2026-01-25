@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use task_graph_mcp::config::{Config, DependenciesConfig, Prompts, StatesConfig};
+use task_graph_mcp::config::{AutoAdvanceConfig, Config, DependenciesConfig, Prompts, StatesConfig};
 use task_graph_mcp::format::OutputFormat;
 use task_graph_mcp::error::ToolError;
 use task_graph_mcp::db::Database;
@@ -65,6 +65,7 @@ impl TaskGraphServer {
         prompts: Arc<Prompts>,
         states_config: Arc<StatesConfig>,
         deps_config: Arc<DependenciesConfig>,
+        auto_advance: Arc<AutoAdvanceConfig>,
         default_format: OutputFormat,
     ) -> Self {
         Self {
@@ -75,6 +76,7 @@ impl TaskGraphServer {
                 Arc::clone(&prompts),
                 Arc::clone(&states_config),
                 Arc::clone(&deps_config),
+                Arc::clone(&auto_advance),
                 default_format,
             )),
             resource_handler: Arc::new(
@@ -136,9 +138,7 @@ impl ServerHandler for TaskGraphServer {
         let args = Value::Object(request.arguments.unwrap_or_default());
         match self.tool_handler.call_tool(&request.name, args).await {
             Ok(result) => Ok(CallToolResult {
-                content: vec![Content::text(
-                    serde_json::to_string_pretty(&result).unwrap_or_default(),
-                )],
+                content: vec![Content::text(result.into_string())],
                 is_error: None,
                 meta: None,
                 structured_content: None,
@@ -281,6 +281,7 @@ async fn main() -> Result<()> {
     // Create server handler
     let states_config = Arc::new(config.states.clone());
     let deps_config = Arc::new(config.dependencies.clone());
+    let auto_advance = Arc::new(config.auto_advance.clone());
     let server = TaskGraphServer::new(
         db,
         config.server.media_dir.clone(),
@@ -288,6 +289,7 @@ async fn main() -> Result<()> {
         prompts,
         states_config,
         deps_config,
+        auto_advance,
         config.server.default_format,
     );
 

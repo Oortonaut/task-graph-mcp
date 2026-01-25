@@ -21,15 +21,8 @@ pub fn get_stats_summary(db: &Database, states_config: &StatesConfig) -> Result<
             "estimated_ms": stats.total_time_estimate_ms,
             "actual_ms": stats.total_time_actual_ms
         },
-        "tokens": {
-            "in": stats.total_tokens_in,
-            "cached": stats.total_tokens_cached,
-            "out": stats.total_tokens_out,
-            "thinking": stats.total_tokens_thinking,
-            "image": stats.total_tokens_image,
-            "audio": stats.total_tokens_audio
-        },
-        "cost_usd": stats.total_cost_usd
+        "cost_usd": stats.total_cost_usd,
+        "metrics": stats.total_metrics
     }))
 }
 
@@ -72,8 +65,7 @@ pub fn get_acp_plan(db: &Database) -> Result<Value> {
                 "timeEstimateMs": t.time_estimate_ms,
                 "timeActualMs": t.time_actual_ms,
                 "cost": {
-                    "tokensIn": t.tokens_in,
-                    "tokensOut": t.tokens_out,
+                    "metrics": t.metrics,
                     "usd": t.cost_usd
                 }
             }

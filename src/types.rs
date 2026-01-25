@@ -68,8 +68,8 @@ pub struct Task {
     pub claimed_at: Option<i64>,
 
     // Affinity (tag-based claiming requirements)
-    pub needed_tags: Vec<String>,
-    pub wanted_tags: Vec<String>,
+    pub agent_tags_all: Vec<String>,
+    pub agent_tags_any: Vec<String>,
 
     // Categorization/discovery tags
     pub tags: Vec<String>,
@@ -84,14 +84,10 @@ pub struct Task {
     // Live status
     pub current_thought: Option<String>,
 
-    // Cost accounting (fixed categories)
-    pub tokens_in: i64,
-    pub tokens_cached: i64,
-    pub tokens_out: i64,
-    pub tokens_thinking: i64,
-    pub tokens_image: i64,
-    pub tokens_audio: i64,
+    // Cost accounting
     pub cost_usd: f64,
+    /// Fixed array of 8 integer metrics [metric_0..metric_7], aggregated on update
+    pub metrics: [i64; 8],
     pub user_metrics: Option<HashMap<String, serde_json::Value>>,
 
     pub created_at: i64,
@@ -106,23 +102,62 @@ pub struct TaskTree {
     pub children: Vec<TaskTree>,
 }
 
+/// Join mode for tree children: how children relate to each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinMode {
+    /// Children run sequentially with "follows" dependencies between them.
+    #[default]
+    Then,
+    /// Children run in parallel with no dependencies between them.
+    Also,
+}
+
 /// Input for creating a task tree.
+/// Supports all fields from task creation, plus tree-specific fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskTreeInput {
-    /// Custom task ID (optional, UUID7 generated if not provided)
+    /// Reference to an existing task ID to include in the tree.
+    /// If set, this node references an existing task rather than creating a new one.
+    /// Other fields are ignored when ref is set.
+    #[serde(rename = "ref")]
+    pub ref_id: Option<String>,
+    
+    /// Custom task ID (optional, UUID7 generated if not provided).
+    /// Ignored if ref is set.
     pub id: Option<String>,
-    pub title: String,
-    pub description: Option<String>,
-    pub priority: Option<Priority>,
-    /// If true, children run in parallel (no follows dependencies).
-    /// If false (default), children run sequentially (follows dependencies created).
+    
+    /// Task title (required for new tasks, optional if ref is set).
     #[serde(default)]
-    pub parallel: bool,
+    pub title: String,
+    
+    /// Task description.
+    pub description: Option<String>,
+    
+    /// Task priority.
+    pub priority: Option<Priority>,
+    
+    /// How children of this node relate to each other.
+    /// "then" = sequential (follows deps), "also" = parallel (no deps).
+    #[serde(default)]
+    pub join_mode: JoinMode,
+    
+    /// Story points / complexity estimate.
     pub points: Option<i32>,
+    
+    /// Estimated duration in milliseconds.
     pub time_estimate_ms: Option<i64>,
-    pub needed_tags: Option<Vec<String>>,
-    pub wanted_tags: Option<Vec<String>>,
+    
+    /// Tags that claiming agent must have ALL of (AND logic).
+    pub agent_tags_all: Option<Vec<String>>,
+    
+    /// Tags that claiming agent must have AT LEAST ONE of (OR logic).
+    pub agent_tags_any: Option<Vec<String>>,
+    
+    /// Categorization/discovery tags for the task.
     pub tags: Option<Vec<String>>,
+    
+    /// Child nodes in the tree.
     #[serde(default)]
     pub children: Vec<TaskTreeInput>,
 }
@@ -247,13 +282,9 @@ pub struct Stats {
     pub completed_points: i64,
     pub total_time_estimate_ms: i64,
     pub total_time_actual_ms: i64,
-    pub total_tokens_in: i64,
-    pub total_tokens_cached: i64,
-    pub total_tokens_out: i64,
-    pub total_tokens_thinking: i64,
-    pub total_tokens_image: i64,
-    pub total_tokens_audio: i64,
     pub total_cost_usd: f64,
+    /// Aggregated metrics [metric_0..metric_7]
+    pub total_metrics: [i64; 8],
 }
 
 /// Compact task representation for list views.
@@ -266,6 +297,22 @@ pub struct TaskSummary {
     pub owner_agent: Option<String>,
     pub points: Option<i32>,
     pub current_thought: Option<String>,
+}
+
+/// Result of scanning the task graph from a starting task.
+/// Contains tasks organized by traversal direction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanResult {
+    /// The task that was scanned from
+    pub root: Task,
+    /// Tasks that block this task (predecessors via blocks/follows)
+    pub before: Vec<Task>,
+    /// Tasks that this task blocks (successors via blocks/follows)
+    pub after: Vec<Task>,
+    /// Parent chain (ancestors via contains)
+    pub above: Vec<Task>,
+    /// Children tree (descendants via contains)
+    pub below: Vec<Task>,
 }
 
 

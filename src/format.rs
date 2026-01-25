@@ -1,7 +1,7 @@
 //! Output formatting utilities for markdown and JSON.
 
 use crate::config::StatesConfig;
-use crate::types::{priority_to_str, Task, TaskTree, WorkerInfo, PRIORITY_MEDIUM};
+use crate::types::{priority_to_str, ScanResult, Task, TaskTree, WorkerInfo, PRIORITY_MEDIUM};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -205,12 +205,72 @@ pub fn format_workers_markdown(workers: &[WorkerInfo]) -> String {
     md
 }
 
+
+/// Format attachments as markdown.
+pub fn format_attachments_markdown(attachments: &[crate::types::AttachmentMeta]) -> String {
+    let mut md = String::new();
+
+    md.push_str(&format!("# Attachments ({})\n\n", attachments.len()));
+
+    if attachments.is_empty() {
+        md.push_str("_No attachments found._\n");
+        return md;
+    }
+
+    for attachment in attachments {
+        md.push_str(&format!("## {}\n", attachment.name));
+        md.push_str(&format!("- **index**: {}\n", attachment.order_index));
+        md.push_str(&format!("- **mime**: {}\n", attachment.mime_type));
+        
+        if let Some(ref fp) = attachment.file_path {
+            md.push_str(&format!("- **file**: `{}`\n", fp));
+        }
+        
+        // Format created_at as relative time if possible
+        let created_secs = attachment.created_at / 1000;
+        md.push_str(&format!("- **created**: {}\n", created_secs));
+        
+        md.push('\n');
+    }
+
+    md
+}
+
 /// Convert markdown to JSON value for uniform response handling.
 pub fn markdown_to_json(md: String) -> Value {
     serde_json::json!({
         "format": "markdown",
         "content": md
     })
+}
+
+/// Result type for tool handlers - allows returning either JSON or raw text.
+#[derive(Debug)]
+pub enum ToolResult {
+    /// JSON value (will be serialized to JSON string)
+    Json(Value),
+    /// Raw text (returned as-is, typically markdown)
+    Raw(String),
+}
+
+impl ToolResult {
+    /// Create a JSON result
+    pub fn json(value: Value) -> Self {
+        ToolResult::Json(value)
+    }
+
+    /// Create a raw text result (for markdown)
+    pub fn raw(text: String) -> Self {
+        ToolResult::Raw(text)
+    }
+
+    /// Convert to the appropriate string representation
+    pub fn into_string(self) -> String {
+        match self {
+            ToolResult::Json(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
+            ToolResult::Raw(s) => s,
+        }
+    }
 }
 
 /// Format a task tree as markdown with visual tree structure.
@@ -287,6 +347,94 @@ fn format_tree_children(children: &[TaskTree], prefix: &str, md: &mut String) {
     }
 }
 
+/// Format a scan result as markdown.
+pub fn format_scan_result_markdown(result: &ScanResult) -> String {
+    let mut md = String::new();
+
+    // Root task header
+    md.push_str(&format!("# Scan: {}\\n", result.root.title));
+    md.push_str(&format!("- **id**: `{}`\\n", result.root.id));
+    md.push_str(&format!("- **status**: {}\\n", result.root.status));
+    md.push_str(&format!("- **priority**: {}\\n", priority_to_str(result.root.priority)));
+    
+    if let Some(ref owner) = result.root.owner_agent {
+        md.push_str(&format!("- **owner**: {}\\n", owner));
+    }
+    
+    if let Some(ref desc) = result.root.description {
+        md.push_str(&format!("\\n{}\\n", desc));
+    }
+
+    // Before (predecessors)
+    if !result.before.is_empty() {
+        md.push_str(&format!("\\n## Before ({} tasks)\\n", result.before.len()));
+        md.push_str("_Tasks that block this task via blocks/follows dependencies_\\n\\n");
+        for task in &result.before {
+            md.push_str(&format_scan_task_short(task));
+        }
+    }
+
+    // After (successors)
+    if !result.after.is_empty() {
+        md.push_str(&format!("\\n## After ({} tasks)\\n", result.after.len()));
+        md.push_str("_Tasks that this task blocks via blocks/follows dependencies_\\n\\n");
+        for task in &result.after {
+            md.push_str(&format_scan_task_short(task));
+        }
+    }
+
+    // Above (ancestors)
+    if !result.above.is_empty() {
+        md.push_str(&format!("\\n## Above ({} tasks)\\n", result.above.len()));
+        md.push_str("_Parent chain via contains dependency_\\n\\n");
+        for task in &result.above {
+            md.push_str(&format_scan_task_short(task));
+        }
+    }
+
+    // Below (descendants)
+    if !result.below.is_empty() {
+        md.push_str(&format!("\\n## Below ({} tasks)\\n", result.below.len()));
+        md.push_str("_Descendants via contains dependency_\\n\\n");
+        for task in &result.below {
+            md.push_str(&format_scan_task_short(task));
+        }
+    }
+
+    // Summary
+    let total = result.before.len() + result.after.len() + result.above.len() + result.below.len();
+    md.push_str(&format!("\\n---\\n**Total related tasks**: {}\\n", total));
+
+    md
+}
+
+/// Format a task in short form for scan results.
+fn format_scan_task_short(task: &Task) -> String {
+    let priority_marker = if task.priority > 0 {
+        "!!! "
+    } else {
+        ""
+    };
+
+    let owner = task.owner_agent.as_ref()
+        .map(|o| format!(" @{}", o))
+        .unwrap_or_default();
+
+    let points = task.points
+        .map(|p| format!(" ({} pts)", p))
+        .unwrap_or_default();
+
+    format!(
+        "- {}{} `{}` [{}]{}{}\\n",
+        priority_marker,
+        task.title,
+        &task.id[..8.min(task.id.len())],
+        task.status,
+        owner,
+        points,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,8 +449,8 @@ mod tests {
             priority,
             owner_agent: None,
             claimed_at: None,
-            needed_tags: vec![],
-            wanted_tags: vec![],
+            agent_tags_all: vec![],
+            agent_tags_any: vec![],
             tags: vec![],
             points,
             time_estimate_ms: None,
@@ -310,13 +458,8 @@ mod tests {
             started_at: None,
             completed_at: None,
             current_thought: None,
-            tokens_in: 0,
-            tokens_cached: 0,
-            tokens_out: 0,
-            tokens_thinking: 0,
-            tokens_image: 0,
-            tokens_audio: 0,
             cost_usd: 0.0,
+            metrics: [0; 8],
             user_metrics: None,
             created_at: 0,
             updated_at: 0,

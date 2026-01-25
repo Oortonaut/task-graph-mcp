@@ -106,9 +106,9 @@ create_tree(tree={
   "title": "Feature X",
   "join_mode": "then",
   "children": [
-    {"title": "Design", "needed_tags": ["design"]},
-    {"title": "Implement", "needed_tags": ["backend"]},
-    {"title": "Test", "needed_tags": ["testing"]}
+    {"title": "Design", "agent_tags_all": ["design"]},
+    {"title": "Implement", "agent_tags_all": ["backend"]},
+    {"title": "Test", "agent_tags_all": ["testing"]}
   ]
 })
 ```

@@ -1,6 +1,7 @@
 //! Attachment management tools.
 
-use super::{get_bool, get_i32, get_string, make_tool_with_prompts};
+use super::{get_bool, get_string, make_tool_with_prompts};
+use crate::format::{format_attachments_markdown, markdown_to_json, OutputFormat};
 use crate::config::Prompts;
 use crate::db::Database;
 use crate::error::{ErrorCode, ToolError};
@@ -55,15 +56,20 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "attachments",
-            "Get attachments for a task. Use content=true to get full content.",
+            "Get attachments for a task. Returns metadata only.\n\n\
+             To retrieve attachment content, use the `get_attachment` API (not yet available via MCP).",
             json!({
                 "task": {
                     "type": "string",
                     "description": "Task ID"
                 },
-                "content": {
-                    "type": "boolean",
-                    "description": "Whether to include attachment content (default: false)"
+                "name": {
+                    "type": "string",
+                    "description": "Filter by attachment name pattern (glob syntax: * matches any chars)"
+                },
+                "mime": {
+                    "type": "string",
+                    "description": "Filter by MIME type prefix (e.g., 'image/' matches image/png, image/jpeg)"
                 }
             }),
             vec!["task"],
@@ -71,18 +77,26 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "detach",
-            "Delete an attachment by task and index. If the attachment references a file in .task-graph/media/, that file is also deleted.",
+            "Delete an attachment by task and name.",
             json!({
+                "agent": {
+                    "type": "string",
+                    "description": "Agent ID"
+                },
                 "task": {
                     "type": "string",
                     "description": "Task ID"
                 },
-                "index": {
-                    "type": "integer",
-                    "description": "Attachment order index within the task"
+                "name": {
+                    "type": "string",
+                    "description": "Attachment name to delete"
+                },
+                "delete_file": {
+                    "type": "boolean",
+                    "description": "If true, also delete the file from .task-graph/media/ (default: false)"
                 }
             }),
-            vec!["task", "index"],
+            vec!["agent", "task", "name"],
             prompts,
         ),
     ]
@@ -230,97 +244,68 @@ pub fn attach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     }
 }
 
-pub fn attachments(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
+pub fn attachments(db: &Database, _media_dir: &Path, default_format: OutputFormat, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
-    let include_content = get_bool(&args, "content").unwrap_or(false);
+    let name_pattern = get_string(&args, "name");
+    let mime_pattern = get_string(&args, "mime");
+    let format = get_string(&args, "format")
+        .and_then(|s| OutputFormat::from_str(&s))
+        .unwrap_or(default_format);
 
-    // Suppress unused warning - media_dir may be used for relative path resolution in the future
-    let _ = media_dir;
+    // Get filtered attachments (metadata only)
+    let attachments = db.get_attachments_filtered(
+        &task_id,
+        name_pattern.as_deref(),
+        mime_pattern.as_deref(),
+    )?;
 
-    if include_content {
-        let attachments = db.get_attachments_full(&task_id, true)?;
-        let results: Vec<Value> = attachments
-            .iter()
-            .map(|a| {
-                // If file_path is set, try to read content from file
-                let content = if let Some(ref fp) = a.file_path {
-                    let path = Path::new(fp);
-                    if path.exists() {
-                        std::fs::read_to_string(path).unwrap_or_else(|_| {
-                            // For binary files, read as base64
-                            std::fs::read(path)
-                                .map(|bytes| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes))
-                                .unwrap_or_else(|e| format!("[Error reading file: {}]", e))
-                        })
-                    } else {
-                        format!("[File not found: {}]", fp)
+    match format {
+        OutputFormat::Markdown => Ok(markdown_to_json(format_attachments_markdown(&attachments))),
+        OutputFormat::Json => {
+            let results: Vec<Value> = attachments
+                .iter()
+                .map(|a| {
+                    let mut obj = json!({
+                        "task_id": &a.task_id,
+                        "order_index": a.order_index,
+                        "name": a.name,
+                        "mime_type": a.mime_type,
+                        "created_at": a.created_at
+                    });
+
+                    if let Some(ref fp) = a.file_path {
+                        obj["file_path"] = json!(fp);
                     }
-                } else {
-                    a.content.clone()
-                };
 
-                let mut obj = json!({
-                    "task_id": &a.task_id,
-                    "order_index": a.order_index,
-                    "name": a.name,
-                    "mime_type": a.mime_type,
-                    "content": content,
-                    "created_at": a.created_at
-                });
+                    obj
+                })
+                .collect();
 
-                if let Some(ref fp) = a.file_path {
-                    obj["file_path"] = json!(fp);
-                }
-
-                obj
-            })
-            .collect();
-
-        Ok(json!({ "attachments": results }))
-    } else {
-        let attachments = db.get_attachments(&task_id)?;
-        let results: Vec<Value> = attachments
-            .iter()
-            .map(|a| {
-                let mut obj = json!({
-                    "task_id": &a.task_id,
-                    "order_index": a.order_index,
-                    "name": a.name,
-                    "mime_type": a.mime_type,
-                    "created_at": a.created_at
-                });
-
-                if let Some(ref fp) = a.file_path {
-                    obj["file_path"] = json!(fp);
-                }
-
-                obj
-            })
-            .collect();
-
-        Ok(json!({ "attachments": results }))
+            Ok(json!({ "attachments": results }))
+        }
     }
 }
 
 pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
+    // Agent parameter is optional - for tracking/audit purposes
+    let _agent_id = get_string(&args, "agent");
+    
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
-    let order_index = get_i32(&args, "index")
-        .ok_or_else(|| ToolError::missing_field("index"))?;
+    let name = get_string(&args, "name")
+        .ok_or_else(|| ToolError::missing_field("name"))?;
+    let delete_file = get_bool(&args, "delete_file").unwrap_or(false);
 
-    // Get file path before deletion (to clean up media files)
-    let file_path = db.get_attachment_file_path(&task_id, order_index)?;
+    // Delete from database (returns whether deleted and file_path if one was set)
+    let (deleted, file_path) = db.delete_attachment_by_name_ex(&task_id, &name)?;
 
-    // Delete from database
-    let deleted = db.delete_attachment(&task_id, order_index)?;
-
-    // If attachment had a file in media dir, delete it
+    // If attachment had a file in media dir and delete_file is true, delete it
     let mut file_deleted = false;
-    if deleted {
-        if let Some(fp) = file_path {
-            if is_in_media_dir(&fp, media_dir) {
-                let path = Path::new(&fp);
+    if delete_file {
+        if let Some(fp) = &file_path {
+            if is_in_media_dir(fp, media_dir) {
+                let path = Path::new(fp);
                 if path.exists() {
                     if let Ok(()) = std::fs::remove_file(path) {
                         file_deleted = true;

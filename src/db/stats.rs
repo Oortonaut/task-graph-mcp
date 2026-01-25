@@ -25,13 +25,15 @@ impl Database {
                         0 as completed_points,
                         COALESCE(SUM(time_estimate_ms), 0) as total_time_estimate_ms,
                         COALESCE(SUM(time_actual_ms), 0) as total_time_actual_ms,
-                        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-                        COALESCE(SUM(tokens_cached), 0) as total_tokens_cached,
-                        COALESCE(SUM(tokens_out), 0) as total_tokens_out,
-                        COALESCE(SUM(tokens_thinking), 0) as total_tokens_thinking,
-                        COALESCE(SUM(tokens_image), 0) as total_tokens_image,
-                        COALESCE(SUM(tokens_audio), 0) as total_tokens_audio,
-                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd
+                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd,
+                        COALESCE(SUM(metric_0), 0) as total_metric_0,
+                        COALESCE(SUM(metric_1), 0) as total_metric_1,
+                        COALESCE(SUM(metric_2), 0) as total_metric_2,
+                        COALESCE(SUM(metric_3), 0) as total_metric_3,
+                        COALESCE(SUM(metric_4), 0) as total_metric_4,
+                        COALESCE(SUM(metric_5), 0) as total_metric_5,
+                        COALESCE(SUM(metric_6), 0) as total_metric_6,
+                        COALESCE(SUM(metric_7), 0) as total_metric_7
                     FROM tasks WHERE owner_agent = ?1"
                         .to_string(),
                     vec![aid.to_string()],
@@ -50,13 +52,15 @@ impl Database {
                         0 as completed_points,
                         COALESCE(SUM(time_estimate_ms), 0) as total_time_estimate_ms,
                         COALESCE(SUM(time_actual_ms), 0) as total_time_actual_ms,
-                        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-                        COALESCE(SUM(tokens_cached), 0) as total_tokens_cached,
-                        COALESCE(SUM(tokens_out), 0) as total_tokens_out,
-                        COALESCE(SUM(tokens_thinking), 0) as total_tokens_thinking,
-                        COALESCE(SUM(tokens_image), 0) as total_tokens_image,
-                        COALESCE(SUM(tokens_audio), 0) as total_tokens_audio,
-                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd
+                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd,
+                        COALESCE(SUM(metric_0), 0) as total_metric_0,
+                        COALESCE(SUM(metric_1), 0) as total_metric_1,
+                        COALESCE(SUM(metric_2), 0) as total_metric_2,
+                        COALESCE(SUM(metric_3), 0) as total_metric_3,
+                        COALESCE(SUM(metric_4), 0) as total_metric_4,
+                        COALESCE(SUM(metric_5), 0) as total_metric_5,
+                        COALESCE(SUM(metric_6), 0) as total_metric_6,
+                        COALESCE(SUM(metric_7), 0) as total_metric_7
                     FROM tasks WHERE id IN (SELECT id FROM descendants)"
                         .to_string(),
                     vec![tid.to_string()],
@@ -75,13 +79,15 @@ impl Database {
                         0 as completed_points,
                         COALESCE(SUM(time_estimate_ms), 0) as total_time_estimate_ms,
                         COALESCE(SUM(time_actual_ms), 0) as total_time_actual_ms,
-                        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-                        COALESCE(SUM(tokens_cached), 0) as total_tokens_cached,
-                        COALESCE(SUM(tokens_out), 0) as total_tokens_out,
-                        COALESCE(SUM(tokens_thinking), 0) as total_tokens_thinking,
-                        COALESCE(SUM(tokens_image), 0) as total_tokens_image,
-                        COALESCE(SUM(tokens_audio), 0) as total_tokens_audio,
-                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd
+                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd,
+                        COALESCE(SUM(metric_0), 0) as total_metric_0,
+                        COALESCE(SUM(metric_1), 0) as total_metric_1,
+                        COALESCE(SUM(metric_2), 0) as total_metric_2,
+                        COALESCE(SUM(metric_3), 0) as total_metric_3,
+                        COALESCE(SUM(metric_4), 0) as total_metric_4,
+                        COALESCE(SUM(metric_5), 0) as total_metric_5,
+                        COALESCE(SUM(metric_6), 0) as total_metric_6,
+                        COALESCE(SUM(metric_7), 0) as total_metric_7
                     FROM tasks WHERE id IN (SELECT id FROM descendants) AND owner_agent = ?1"
                         .to_string(),
                     vec![aid.to_string(), tid.to_string()],
@@ -93,83 +99,56 @@ impl Database {
                         0 as completed_points,
                         COALESCE(SUM(time_estimate_ms), 0) as total_time_estimate_ms,
                         COALESCE(SUM(time_actual_ms), 0) as total_time_actual_ms,
-                        COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-                        COALESCE(SUM(tokens_cached), 0) as total_tokens_cached,
-                        COALESCE(SUM(tokens_out), 0) as total_tokens_out,
-                        COALESCE(SUM(tokens_thinking), 0) as total_tokens_thinking,
-                        COALESCE(SUM(tokens_image), 0) as total_tokens_image,
-                        COALESCE(SUM(tokens_audio), 0) as total_tokens_audio,
-                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd
+                        COALESCE(SUM(cost_usd), 0.0) as total_cost_usd,
+                        COALESCE(SUM(metric_0), 0) as total_metric_0,
+                        COALESCE(SUM(metric_1), 0) as total_metric_1,
+                        COALESCE(SUM(metric_2), 0) as total_metric_2,
+                        COALESCE(SUM(metric_3), 0) as total_metric_3,
+                        COALESCE(SUM(metric_4), 0) as total_metric_4,
+                        COALESCE(SUM(metric_5), 0) as total_metric_5,
+                        COALESCE(SUM(metric_6), 0) as total_metric_6,
+                        COALESCE(SUM(metric_7), 0) as total_metric_7
                     FROM tasks"
                         .to_string(),
                     vec![],
                 ),
             };
 
-            // Query base stats
+            // Query base stats - returns 14 columns now
             let (
                 total_tasks,
                 total_points,
                 _completed_points_placeholder,
                 total_time_estimate_ms,
                 total_time_actual_ms,
-                total_tokens_in,
-                total_tokens_cached,
-                total_tokens_out,
-                total_tokens_thinking,
-                total_tokens_image,
-                total_tokens_audio,
                 total_cost_usd,
-            ): (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, f64) = if params_vec.is_empty()
+                m0, m1, m2, m3, m4, m5, m6, m7,
+            ): (i64, i64, i64, i64, i64, f64, i64, i64, i64, i64, i64, i64, i64, i64) = if params_vec.is_empty()
             {
                 conn.query_row(&base_sql, [], |row| {
                     Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(8)?,
-                        row.get(9)?,
-                        row.get(10)?,
-                        row.get(11)?,
+                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+                        row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+                        row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
+                        row.get(12)?, row.get(13)?,
                     ))
                 })?
             } else if params_vec.len() == 1 {
                 conn.query_row(&base_sql, params![params_vec[0]], |row| {
                     Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(8)?,
-                        row.get(9)?,
-                        row.get(10)?,
-                        row.get(11)?,
+                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+                        row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+                        row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
+                        row.get(12)?, row.get(13)?,
                     ))
                 })?
             } else {
                 conn.query_row(&base_sql, params![params_vec[0], params_vec[1]], |row| {
                     Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(8)?,
-                        row.get(9)?,
-                        row.get(10)?,
-                        row.get(11)?,
+                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+                        row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+                        row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
+                        row.get(12)?, row.get(13)?,
                     ))
                 })?
             };
@@ -305,13 +284,8 @@ impl Database {
                 completed_points,
                 total_time_estimate_ms,
                 total_time_actual_ms,
-                total_tokens_in,
-                total_tokens_cached,
-                total_tokens_out,
-                total_tokens_thinking,
-                total_tokens_image,
-                total_tokens_audio,
                 total_cost_usd,
+                total_metrics: [m0, m1, m2, m3, m4, m5, m6, m7],
             })
         })
     }

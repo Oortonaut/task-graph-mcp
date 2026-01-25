@@ -59,8 +59,8 @@ Every worker MUST connect before using task-graph tools:
 ```
 
 **Tags enable task affinity:**
-- `needed_tags` on tasks: Worker must have ALL (AND logic)
-- `wanted_tags` on tasks: Worker must have AT LEAST ONE (OR logic)
+- `agent_tags_all` on tasks: Worker must have ALL (AND logic)
+- `agent_tags_any` on tasks: Worker must have AT LEAST ONE (OR logic)
 
 ---
 
@@ -78,7 +78,7 @@ Every worker MUST connect before using task-graph tools:
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `create` | Single task | `title`, `description`, `parent`, `priority`, `blocked_by[]`, `needed_tags[]`, `wanted_tags[]` |
+| `create` | Single task | `title`, `description`, `parent`, `priority`, `blocked_by[]`, `agent_tags_all[]`, `agent_tags_any[]` |
 | `create_tree` | Nested structure | `tree` (recursive), `parent` |
 | `get` | Fetch task | `task`, `children`, `format` |
 | `list_tasks` | Query tasks | `status`, `ready`, `blocked`, `owner`, `parent`, `worker_id`, `format` |
@@ -116,7 +116,7 @@ Every worker MUST connect before using task-graph tools:
 | `claim_file` | Advisory lock | `worker_id`, `file`, `reason` |
 | `release_file` | Release lock | `worker_id`, `file`, `reason` |
 | `list_files` | Current locks | `worker_id`, `files[]` |
-| `claim_updates` | Poll changes | `worker_id`, `files[]` |
+| `claim_updates` | Poll changes | `worker_id`, `files[]`, `timeout` |
 
 ### Progress & Metrics
 
@@ -133,6 +133,18 @@ Every worker MUST connect before using task-graph tools:
 | `attach` | Add content | `task`, `name`, `content`, `mime`, `file`, `store_as_file` |
 | `attachments` | List/get | `task`, `content` |
 | `detach` | Remove | `task`, `index` |
+
+### Search
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `search` | Full-text search | `query`, `limit`, `include_attachments`, `status_filter` |
+
+**Search features:**
+- FTS5-based relevance ranking
+- Searches task titles, descriptions, and optionally attachments
+- Returns snippets with highlighted matches
+- Filter by task status (e.g., `status_filter="pending"`)
 
 ---
 
@@ -242,6 +254,15 @@ list_tasks(format="markdown")
 get(task=task_id, children=true, format="markdown")
 ```
 
+### Search tasks
+```
+search(query="authentication")
+# Returns: ranked results with highlighted snippets
+
+search(query="auth", include_attachments=true, status_filter="pending")
+# Returns: pending tasks matching "auth" in title, description, or attachments
+```
+
 ---
 
 ## Best Practices
@@ -268,7 +289,7 @@ get(task=task_id, children=true, format="markdown")
 | "Task already claimed" | Another worker owns it | Use `force=true` or pick another |
 | "Dependencies not satisfied" | Blockers incomplete | Wait or help complete blockers |
 | "Worker not found" | Invalid/expired worker_id | Reconnect with `force=true` |
-| "Tag mismatch" | Worker lacks required tags | Check `needed_tags`/`wanted_tags` |
+| "Tag mismatch" | Worker lacks required tags | Check `agent_tags_all`/`agent_tags_any` |
 
 ---
 

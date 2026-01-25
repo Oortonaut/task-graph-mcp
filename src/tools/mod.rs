@@ -5,14 +5,17 @@ pub mod attachments;
 pub mod claiming;
 pub mod deps;
 pub mod files;
+pub mod query;
+pub mod schema;
+pub mod search;
 pub mod skills;
 pub mod tasks;
 pub mod tracking;
 
-use crate::config::{DependenciesConfig, Prompts, StatesConfig};
+use crate::config::{AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::OutputFormat;
+use crate::format::{OutputFormat, ToolResult};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::Value;
@@ -27,6 +30,7 @@ pub struct ToolHandler {
     pub prompts: Arc<Prompts>,
     pub states_config: Arc<StatesConfig>,
     pub deps_config: Arc<DependenciesConfig>,
+    pub auto_advance: Arc<AutoAdvanceConfig>,
     pub default_format: OutputFormat,
 }
 
@@ -38,6 +42,7 @@ impl ToolHandler {
         prompts: Arc<Prompts>,
         states_config: Arc<StatesConfig>,
         deps_config: Arc<DependenciesConfig>,
+        auto_advance: Arc<AutoAdvanceConfig>,
         default_format: OutputFormat,
     ) -> Self {
         Self {
@@ -47,6 +52,7 @@ impl ToolHandler {
             prompts,
             states_config,
             deps_config,
+            auto_advance,
             default_format,
         }
     }
@@ -62,7 +68,7 @@ impl ToolHandler {
         tools.extend(tasks::get_tools(&self.prompts, &self.states_config));
 
         // Tracking tools
-        tools.extend(tracking::get_tools(&self.prompts));
+        tools.extend(tracking::get_tools(&self.prompts, &self.states_config));
 
         // Dependency tools
         tools.extend(deps::get_tools(&self.prompts, &self.deps_config));
@@ -79,56 +85,83 @@ impl ToolHandler {
         // Skill tools (no prompts needed, always available)
         tools.extend(skills::get_tools());
 
+        // Schema introspection tools
+        tools.extend(schema::get_tools());
+
+        // Search tools
+        tools.extend(search::get_tools(&self.prompts));
+
+        // Query tools (read-only SQL)
+        tools.extend(query::get_tools());
+
         tools
     }
 
     /// Call a tool by name.
-    pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value> {
+    /// Call a tool by name.
+    pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<ToolResult> {
+        // Helper to wrap JSON results
+        let json = |r: Result<Value>| r.map(ToolResult::Json);
+
         match name {
             // Worker tools
-            "connect" => agents::connect(&self.db, arguments),
-            "disconnect" => agents::disconnect(&self.db, &self.states_config, arguments),
+            "connect" => json(agents::connect(&self.db, arguments)),
+            "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
             "list_agents" => agents::list_agents(&self.db, self.default_format, arguments),
 
             // Task tools
-            "create" => tasks::create(&self.db, &self.states_config, arguments),
-            "create_tree" => tasks::create_tree(&self.db, &self.states_config, arguments),
-            "get" => tasks::get(&self.db, self.default_format, arguments),
+            "create" => json(tasks::create(&self.db, &self.states_config, arguments)),
+            "create_tree" => json(tasks::create_tree(&self.db, &self.states_config, arguments)),
+            "get" => json(tasks::get(&self.db, self.default_format, arguments)),
             "list_tasks" => {
-                tasks::list_tasks(&self.db, &self.states_config, &self.deps_config, self.default_format, arguments)
+                json(tasks::list_tasks(&self.db, &self.states_config, &self.deps_config, self.default_format, arguments))
             }
-            "update" => tasks::update(&self.db, &self.states_config, arguments),
-            "delete" => tasks::delete(&self.db, arguments),
+            "update" => json(tasks::update(&self.db, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),
+            "delete" => json(tasks::delete(&self.db, arguments)),
+            "scan" => json(tasks::scan(&self.db, self.default_format, arguments)),
 
             // Tracking tools
-            "thinking" => tracking::thinking(&self.db, arguments),
-            "get_state_history" => {
-                tracking::get_state_history(&self.db, &self.states_config, arguments)
+            "thinking" => json(tracking::thinking(&self.db, arguments)),
+            "task_history" => {
+                json(tracking::task_history(&self.db, &self.states_config, self.default_format, arguments))
             }
-            "log_cost" => tracking::log_cost(&self.db, arguments),
+            "log_metrics" => json(tracking::log_metrics(&self.db, arguments)),
+            "get_metrics" => json(tracking::get_metrics(&self.db, arguments)),
+            "project_history" => {
+                json(tracking::project_history(&self.db, self.default_format, arguments))
+            }
 
             // Dependency tools
-            "link" => deps::link(&self.db, &self.deps_config, arguments),
-            "unlink" => deps::unlink(&self.db, arguments),
+            "link" => json(deps::link(&self.db, &self.deps_config, arguments)),
+            "unlink" => json(deps::unlink(&self.db, arguments)),
 
             // Claiming tools
-            "claim" => claiming::claim(&self.db, &self.states_config, arguments),
+            "claim" => json(claiming::claim(&self.db, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),
 
             // File coordination tools
-            "claim_file" => files::claim_file(&self.db, arguments),
-            "release_file" => files::release_file(&self.db, arguments),
-            "list_files" => files::list_files(&self.db, arguments),
-            "claim_updates" => files::claim_updates(&self.db, arguments),
+            "claim_file" => json(files::claim_file(&self.db, arguments)),
+            "release_file" => json(files::release_file(&self.db, arguments)),
+            "list_files" => json(files::list_files(&self.db, self.default_format, arguments)),
+            "claim_updates" => json(files::claim_updates_async(std::sync::Arc::clone(&self.db), arguments).await),
 
             // Attachment tools
-            "attach" => attachments::attach(&self.db, &self.media_dir, arguments),
-            "attachments" => attachments::attachments(&self.db, &self.media_dir, arguments),
-            "detach" => attachments::detach(&self.db, &self.media_dir, arguments),
+            "attach" => json(attachments::attach(&self.db, &self.media_dir, arguments)),
+            "attachments" => json(attachments::attachments(&self.db, &self.media_dir, self.default_format, arguments)),
+            "detach" => json(attachments::detach(&self.db, &self.media_dir, arguments)),
 
             // Skill tools
             name if skills::is_skill_tool(name) => {
-                skills::call_tool(&self.skills_dir, name, &arguments)
+                json(skills::call_tool(&self.skills_dir, name, &arguments))
             }
+
+            // Schema introspection tools
+            "get_schema" => json(schema::get_schema(&self.db, arguments)),
+
+            // Search tools
+            "search" => json(search::search(&self.db, arguments)),
+
+            // Query tools (read-only SQL)
+            "query" => query::query(&self.db, self.default_format, arguments),
 
             _ => Err(ToolError::unknown_tool(name).into()),
         }

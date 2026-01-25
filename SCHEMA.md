@@ -44,8 +44,8 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 | `sibling_order` | INTEGER | NOT NULL DEFAULT 0 | Position among sibling tasks |
 | `owner_agent` | TEXT | FK → agents(id) | Claiming agent |
 | `claimed_at` | INTEGER | | Unix timestamp when claimed |
-| `needed_tags` | TEXT | | JSON array - agent must have ALL (AND logic) for claiming |
-| `wanted_tags` | TEXT | | JSON array - agent must have AT LEAST ONE (OR logic) for claiming |
+| `agent_tags_all` | TEXT | | JSON array - agent must have ALL (AND logic) for claiming |
+| `agent_tags_any` | TEXT | | JSON array - agent must have AT LEAST ONE (OR logic) for claiming |
 | `tags` | TEXT | DEFAULT '[]' | JSON array - categorization/discovery tags (queryable) |
 | `points` | INTEGER | | Story points or complexity estimate |
 | `time_estimate_ms` | INTEGER | | Estimated duration in milliseconds |
@@ -230,14 +230,14 @@ The `tags` column contains a JSON array of strings for categorization and discov
 - Does NOT affect who can claim the task
 - Think of these as "what the task IS" (e.g., `["backend", "api", "urgent"]`)
 
-### Claiming Requirement Tags (`needed_tags` / `wanted_tags`)
+### Claiming Requirement Tags (`agent_tags_all` / `agent_tags_any`)
 
 These control which agents can claim a task:
 
 | Field | Logic | Description |
 |-------|-------|-------------|
-| `needed_tags` | AND | Agent must have ALL tags to claim |
-| `wanted_tags` | OR | Agent must have AT LEAST ONE tag to claim |
+| `agent_tags_all` | AND | Agent must have ALL tags to claim |
+| `agent_tags_any` | OR | Agent must have AT LEAST ONE tag to claim |
 
 ### Query Parameters
 
@@ -247,7 +247,7 @@ The `list_tasks` tool supports tag-based filtering:
 |-----------|-------------|
 | `tags_any` | Return tasks that have ANY of the specified tags (OR) |
 | `tags_all` | Return tasks that have ALL of the specified tags (AND) |
-| `qualified_for` | Return tasks the specified agent is qualified to claim (checks needed_tags/wanted_tags) |
+| `qualified_for` | Return tasks the specified agent is qualified to claim (checks agent_tags_all/agent_tags_any) |
 
 ### Examples
 
@@ -256,8 +256,8 @@ The `list_tasks` tool supports tag-based filtering:
 create(
   title="API endpoint",
   tags=["backend", "api"],           # For discovery
-  needed_tags=["senior"],            # Only seniors can claim
-  wanted_tags=["python", "rust"]     # Must know python OR rust
+  agent_tags_all=["senior"],         # Only seniors can claim
+  agent_tags_any=["python", "rust"]  # Must know python OR rust
 )
 
 # Query by categorization (agent-driven: "what tasks match my interests?")
@@ -301,7 +301,7 @@ list_tasks(qualified_for="agent-1")  # Tasks this agent can claim
 | V007 | 2026-01-24 | Configurable task states via YAML; `status` field is now dynamic string based on config |
 | V008 | 2026-01-24 | Add query indices for common access patterns |
 | V009 | 2026-01-24 | Unified dependency system with typed edges (blocks, follows, contains); remove parent_id, sibling_order, join_mode columns |
-| V010 | 2026-01-24 | Add `tags` column for task categorization/discovery; separate from needed_tags/wanted_tags (claim requirements) |
+| V010 | 2026-01-24 | Add `tags` column for task categorization/discovery; separate from agent_tags_all/agent_tags_any (claim requirements) |
 
 ---
 
@@ -324,7 +324,7 @@ tasks >──────< tasks (via dependencies table, DAG)
 ## Notes
 
 - All timestamps are Unix epoch integers (seconds)
-- JSON fields (`tags`, `needed_tags`, `wanted_tags`, `user_metrics`) are stored as TEXT
+- JSON fields (`tags`, `agent_tags_all`, `agent_tags_any`, `user_metrics`) are stored as TEXT
 - File paths in `file_locks` and `claim_sequence` are relative to the project root
 - Attachment `file_path` references files in `.task-graph/media/` directory
 - Foreign keys use `ON DELETE CASCADE` for automatic cleanup

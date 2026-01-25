@@ -31,35 +31,36 @@ CREATE TRIGGER tasks_fts_delete AFTER DELETE ON tasks BEGIN
 END;
 
 -- FTS5 table for attachment content search
+-- Note: attachments uses composite key (task_id, order_index), not id
 CREATE VIRTUAL TABLE attachments_fts USING fts5(
-    attachment_id UNINDEXED,
     task_id UNINDEXED,
+    order_index UNINDEXED,
     name,
     content
 );
 
 -- Populate FTS table with existing text attachments (skip binary/base64)
-INSERT INTO attachments_fts(attachment_id, task_id, name, content)
-SELECT id, task_id, name, content
+INSERT INTO attachments_fts(task_id, order_index, name, content)
+SELECT task_id, order_index, name, content
 FROM attachments
 WHERE mime_type LIKE 'text/%';
 
 -- Trigger: Keep attachment FTS in sync on INSERT
 CREATE TRIGGER attachments_fts_insert AFTER INSERT ON attachments
 WHEN NEW.mime_type LIKE 'text/%' BEGIN
-    INSERT INTO attachments_fts(attachment_id, task_id, name, content)
-    VALUES (NEW.id, NEW.task_id, NEW.name, NEW.content);
+    INSERT INTO attachments_fts(task_id, order_index, name, content)
+    VALUES (NEW.task_id, NEW.order_index, NEW.name, NEW.content);
 END;
 
 -- Trigger: Keep attachment FTS in sync on UPDATE
 CREATE TRIGGER attachments_fts_update AFTER UPDATE ON attachments BEGIN
-    DELETE FROM attachments_fts WHERE attachment_id = OLD.id;
-    INSERT INTO attachments_fts(attachment_id, task_id, name, content)
-    SELECT NEW.id, NEW.task_id, NEW.name, NEW.content
+    DELETE FROM attachments_fts WHERE task_id = OLD.task_id AND order_index = OLD.order_index;
+    INSERT INTO attachments_fts(task_id, order_index, name, content)
+    SELECT NEW.task_id, NEW.order_index, NEW.name, NEW.content
     WHERE NEW.mime_type LIKE 'text/%';
 END;
 
 -- Trigger: Keep attachment FTS in sync on DELETE
 CREATE TRIGGER attachments_fts_delete AFTER DELETE ON attachments BEGIN
-    DELETE FROM attachments_fts WHERE attachment_id = OLD.id;
+    DELETE FROM attachments_fts WHERE task_id = OLD.task_id AND order_index = OLD.order_index;
 END;

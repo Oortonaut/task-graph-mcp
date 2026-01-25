@@ -83,10 +83,11 @@ Environment variables:
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `create` | `title`, `description?`, `parent?`, `priority?`, `points?`, `time_estimate_ms?`, `needed_tags?`, `wanted_tags?`, `blocked_by?` | Create a new task. |
+| `create` | `title`, `description?`, `parent?`, `priority?`, `points?`, `time_estimate_ms?`, `agent_tags_all?`, `agent_tags_any?`, `blocked_by?` | Create a new task. |
 | `create_tree` | `tree`, `parent?` | Create a nested task tree with `then`/`also` join modes. |
 | `get` | `task`, `children?`, `format?` | Get a task by ID with optional descendants. |
 | `list_tasks` | `status?`, `ready?`, `blocked?`, `owner?`, `parent?`, `agent?`, `limit?`, `format?` | Query tasks with filters. |
+| `search` | `query`, `limit?`, `include_attachments?`, `status_filter?` | Full-text search across tasks and attachments with FTS5 ranking. |
 | `update` | `agent`, `task`, `state`, `title?`, `description?`, `priority?`, `points?` | Update task properties. |
 | `delete` | `task`, `cascade?` | Delete a task. Use `cascade=true` to delete children. |
 
@@ -123,7 +124,7 @@ Environment variables:
 | `claim_file` | `agent`, `file`, `reason?` | Claim advisory lock on a file. |
 | `release_file` | `agent`, `file`, `reason?` | Release file lock. Use `reason` to leave notes. |
 | `list_files` | `files?`, `agent?` | Get current file locks. |
-| `claim_updates` | `agent`, `files?` | Poll for file claim changes since last call. |
+| `claim_updates` | `agent`, `files?`, `timeout?` | Poll for file claim changes. Use `timeout` (ms) for long-polling. |
 
 ### Attachments
 
@@ -180,14 +181,14 @@ Create hierarchical tasks with `then`/`also` join modes:
 
 Tasks can specify required capabilities with a non-empty list. Use either for one tag:
 
-- `needed_tags`: Agent must have ALL of these (AND)
-- `wanted_tags`: Agent must have AT LEAST ONE (OR)
+- `agent_tags_all`: Agent must have ALL of these (AND)
+- `agent_tags_any`: Agent must have AT LEAST ONE (OR)
 
 ```json
 {
   "title": "Deploy to production",
-  "needed_tags": ["deploy", "prod-access"],
-  "wanted_tags": ["aws", "gcp"]
+  "agent_tags_all": ["deploy", "prod-access"],
+  "agent_tags_any": ["aws", "gcp"]
 }
 ```
 

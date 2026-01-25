@@ -5,7 +5,7 @@
 //! a non-timed state (ownership clears automatically).
 
 use super::{get_bool, get_string, make_tool_with_prompts};
-use crate::config::{Prompts, StatesConfig};
+use crate::config::{AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use anyhow::Result;
@@ -37,7 +37,13 @@ pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> 
     ]
 }
 
-pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
+pub fn claim(
+    db: &Database,
+    states_config: &StatesConfig,
+    deps_config: &DependenciesConfig,
+    auto_advance: &AutoAdvanceConfig,
+    args: Value,
+) -> Result<Value> {
     let worker_id = get_string(&args, "worker_id")
         .ok_or_else(|| ToolError::missing_field("worker_id"))?;
     let task_id = get_string(&args, "task")
@@ -53,7 +59,7 @@ pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result
         .unwrap_or_else(|| "in_progress".to_string());
 
     // Use unified update which handles claiming when transitioning to timed state
-    let task = db.update_task_unified(
+    let (task, _auto_advanced) = db.update_task_unified(
         &task_id,
         &worker_id,
         None,             // title
@@ -62,8 +68,14 @@ pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result
         None,             // priority
         None,             // points
         None,             // tags
+        None,             // needed_tags
+        None,             // wanted_tags
+        None,             // time_estimate_ms
+        None,             // reason
         force,
         states_config,
+        deps_config,
+        auto_advance,
     )?;
 
     Ok(json!({

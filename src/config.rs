@@ -6,6 +6,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Auto-advance configuration for automatically transitioning tasks when dependencies are satisfied.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AutoAdvanceConfig {
+    /// Enable auto-advance when dependencies are satisfied (default: false).
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Target state for auto-advanced tasks (e.g., "ready").
+    /// If None, tasks remain in their current state even when unblocked.
+    #[serde(default)]
+    pub target_state: Option<String>,
+}
+
 /// Server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -20,6 +33,9 @@ pub struct Config {
 
     #[serde(default)]
     pub dependencies: DependenciesConfig,
+
+    #[serde(default)]
+    pub auto_advance: AutoAdvanceConfig,
 }
 
 impl Default for Config {
@@ -29,6 +45,7 @@ impl Default for Config {
             paths: PathsConfig::default(),
             states: StatesConfig::default(),
             dependencies: DependenciesConfig::default(),
+            auto_advance: AutoAdvanceConfig::default(),
         }
     }
 }

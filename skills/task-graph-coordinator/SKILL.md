@@ -92,14 +92,14 @@ As a **Coordinator**, you:
 
 ```
 # Require specific expertise (AND - must have ALL)
-needed_tags: ["rust", "database"]
+agent_tags_all: ["rust", "database"]
 
 # Accept any matching skill (OR - must have ONE)
-wanted_tags: ["frontend", "react", "vue"]
+agent_tags_any: ["frontend", "react", "vue"]
 
 # Combine for nuanced matching
-needed_tags: ["senior"]
-wanted_tags: ["python", "rust"]  # Senior + (Python OR Rust)
+agent_tags_all: ["senior"]
+agent_tags_any: ["python", "rust"]  # Senior + (Python OR Rust)
 ```
 
 ---
@@ -117,22 +117,22 @@ wanted_tags: ["python", "rust"]  # Senior + (Python OR Rust)
       {
         "title": "Design API schema",
         "points": 2,
-        "needed_tags": ["api-design"]
+        "agent_tags_all": ["api-design"]
       },
       {
         "title": "Implement backend",
         "points": 5,
-        "needed_tags": ["backend"]
+        "agent_tags_all": ["backend"]
       },
       {
         "title": "Add frontend",
         "points": 3,
-        "needed_tags": ["frontend"]
+        "agent_tags_all": ["frontend"]
       },
       {
         "title": "Write tests",
         "points": 2,
-        "wanted_tags": ["testing", "qa"]
+        "agent_tags_any": ["testing", "qa"]
       }
     ]
   }
@@ -151,16 +151,16 @@ wanted_tags: ["python", "rust"]  # Senior + (Python OR Rust)
         "title": "Backend Track",
         "join_mode": "then",
         "children": [
-          {"title": "API endpoints", "needed_tags": ["backend"]},
-          {"title": "Database migrations", "needed_tags": ["database"]}
+          {"title": "API endpoints", "agent_tags_all": ["backend"]},
+          {"title": "Database migrations", "agent_tags_all": ["database"]}
         ]
       },
       {
         "title": "Frontend Track",
         "join_mode": "then",
         "children": [
-          {"title": "Component library", "needed_tags": ["frontend"]},
-          {"title": "Page integration", "needed_tags": ["frontend"]}
+          {"title": "Component library", "agent_tags_all": ["frontend"]},
+          {"title": "Page integration", "agent_tags_all": ["frontend"]}
         ]
       }
     ]
@@ -252,8 +252,8 @@ Lead Coordinator
   "title": "Implement Feature",
   "join_mode": "then",
   "children": [
-    {"title": "Write code", "needed_tags": ["developer"]},
-    {"title": "Review code", "needed_tags": ["reviewer"]}
+    {"title": "Write code", "agent_tags_all": ["developer"]},
+    {"title": "Review code", "agent_tags_all": ["reviewer"]}
   ]
 }
 ```

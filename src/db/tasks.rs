@@ -2,12 +2,34 @@
 
 use super::state_transitions::record_state_transition;
 use super::{now_ms, Database};
-use crate::config::StatesConfig;
-use crate::types::{parse_priority, priority_to_str, Priority, Task, TaskSummary, TaskTree, TaskTreeInput, Worker, PRIORITY_MEDIUM};
+use crate::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
+use crate::types::{parse_priority, priority_to_str, JoinMode, Priority, Task, TaskSummary, TaskTree, TaskTreeInput, Worker, PRIORITY_MEDIUM};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Build an ORDER BY clause from sort_by and sort_order parameters.
+/// Returns a safe SQL ORDER BY expression.
+fn build_order_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String {
+    let field = match sort_by {
+        Some("priority") => "CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END",
+        Some("created_at") => "t.created_at",
+        Some("updated_at") => "t.updated_at",
+        _ => "t.created_at", // default
+    };
+    
+    let order = match sort_order {
+        Some("asc") => "ASC",
+        Some("desc") => "DESC",
+        _ => {
+            // Default: priority is always ascending (high=0 first), dates are descending
+            if sort_by == Some("priority") { "ASC" } else { "DESC" }
+        }
+    };
+    
+    format!("{} {}", field, order)
+}
 
 pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let id: String = row.get("id")?;
@@ -18,8 +40,8 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let owner_agent: Option<String> = row.get("owner_agent")?;
     let claimed_at: Option<i64> = row.get("claimed_at")?;
 
-    let needed_tags_json: Option<String> = row.get("needed_tags")?;
-    let wanted_tags_json: Option<String> = row.get("wanted_tags")?;
+    let agent_tags_all_json: Option<String> = row.get("agent_tags_all")?;
+    let agent_tags_any_json: Option<String> = row.get("agent_tags_any")?;
     let tags_json: Option<String> = row.get("tags")?;
 
     let points: Option<i32> = row.get("points")?;
@@ -30,13 +52,15 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
 
     let current_thought: Option<String> = row.get("current_thought")?;
 
-    let tokens_in: i64 = row.get("tokens_in")?;
-    let tokens_cached: i64 = row.get("tokens_cached")?;
-    let tokens_out: i64 = row.get("tokens_out")?;
-    let tokens_thinking: i64 = row.get("tokens_thinking")?;
-    let tokens_image: i64 = row.get("tokens_image")?;
-    let tokens_audio: i64 = row.get("tokens_audio")?;
     let cost_usd: f64 = row.get("cost_usd")?;
+    let metric_0: i64 = row.get("metric_0")?;
+    let metric_1: i64 = row.get("metric_1")?;
+    let metric_2: i64 = row.get("metric_2")?;
+    let metric_3: i64 = row.get("metric_3")?;
+    let metric_4: i64 = row.get("metric_4")?;
+    let metric_5: i64 = row.get("metric_5")?;
+    let metric_6: i64 = row.get("metric_6")?;
+    let metric_7: i64 = row.get("metric_7")?;
     let user_metrics_json: Option<String> = row.get("user_metrics")?;
 
     let created_at: i64 = row.get("created_at")?;
@@ -50,10 +74,10 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         priority: parse_priority(&priority),
         owner_agent,
         claimed_at,
-        needed_tags: needed_tags_json
+        agent_tags_all: agent_tags_all_json
             .map(|s| serde_json::from_str(&s).unwrap_or_default())
             .unwrap_or_default(),
-        wanted_tags: wanted_tags_json
+        agent_tags_any: agent_tags_any_json
             .map(|s| serde_json::from_str(&s).unwrap_or_default())
             .unwrap_or_default(),
         tags: tags_json
@@ -65,13 +89,8 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         started_at,
         completed_at,
         current_thought,
-        tokens_in,
-        tokens_cached,
-        tokens_out,
-        tokens_thinking,
-        tokens_image,
-        tokens_audio,
         cost_usd,
+        metrics: [metric_0, metric_1, metric_2, metric_3, metric_4, metric_5, metric_6, metric_7],
         user_metrics: user_metrics_json.map(|s| serde_json::from_str(&s).unwrap_or_default()),
         created_at,
         updated_at,
@@ -146,8 +165,8 @@ impl Database {
         priority: Option<Priority>,
         points: Option<i32>,
         time_estimate_ms: Option<i64>,
-        needed_tags: Option<Vec<String>>,
-        wanted_tags: Option<Vec<String>>,
+        agent_tags_all: Option<Vec<String>>,
+        agent_tags_any: Option<Vec<String>>,
         tags: Option<Vec<String>>,
         states_config: &StatesConfig,
     ) -> Result<Task> {
@@ -156,11 +175,11 @@ impl Database {
         let priority = priority.unwrap_or(PRIORITY_MEDIUM);
         let initial_status = &states_config.initial;
 
-        let needed_tags = needed_tags.unwrap_or_default();
-        let wanted_tags = wanted_tags.unwrap_or_default();
+        let agent_tags_all = agent_tags_all.unwrap_or_default();
+        let agent_tags_any = agent_tags_any.unwrap_or_default();
         let tags = tags.unwrap_or_default();
-        let needed_tags_json = serde_json::to_string(&needed_tags)?;
-        let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
+        let agent_tags_all_json = serde_json::to_string(&agent_tags_all)?;
+        let agent_tags_any_json = serde_json::to_string(&agent_tags_any)?;
         let tags_json = serde_json::to_string(&tags)?;
 
         self.with_conn_mut(|conn| {
@@ -169,7 +188,7 @@ impl Database {
             tx.execute(
                 "INSERT INTO tasks (
                     id, title, description, status, priority,
-                    needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
+                    agent_tags_all, agent_tags_any, tags, points, time_estimate_ms, created_at, updated_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     &task_id,
@@ -177,8 +196,8 @@ impl Database {
                     &description,  // Also store as description
                     initial_status,
                     priority_to_str(priority),
-                    needed_tags_json,
-                    wanted_tags_json,
+                    agent_tags_all_json,
+                    agent_tags_any_json,
                     tags_json,
                     points,
                     time_estimate_ms,
@@ -205,8 +224,8 @@ impl Database {
                 priority,
                 owner_agent: None,
                 claimed_at: None,
-                needed_tags,
-                wanted_tags,
+                agent_tags_all,
+                agent_tags_any,
                 tags,
                 points,
                 time_estimate_ms,
@@ -214,13 +233,8 @@ impl Database {
                 started_at: None,
                 completed_at: None,
                 current_thought: None,
-                tokens_in: 0,
-                tokens_cached: 0,
-                tokens_out: 0,
-                tokens_thinking: 0,
-                tokens_image: 0,
-                tokens_audio: 0,
                 cost_usd: 0.0,
+                metrics: [0; 8],
                 user_metrics: None,
                 created_at: now,
                 updated_at: now,
@@ -432,6 +446,11 @@ impl Database {
     /// - Transition to timed state = CLAIM (set owner, validate tags, check limit)
     /// - Transition from timed to non-timed = RELEASE (clear owner)
     /// - Transition to terminal = COMPLETE (check children, release file locks)
+    /// - Only the owner can update a claimed task (unless force=true)
+    /// 
+    /// Returns the updated task and a list of task IDs that were auto-advanced
+    /// due to their dependencies being satisfied.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_task_unified(
         &self,
         task_id: &str,
@@ -442,9 +461,15 @@ impl Database {
         priority: Option<Priority>,
         points: Option<Option<i32>>,
         tags: Option<Vec<String>>,
+        needed_tags: Option<Vec<String>>,
+        wanted_tags: Option<Vec<String>>,
+        time_estimate_ms: Option<i64>,
+        reason: Option<String>,
         force: bool,
         states_config: &StatesConfig,
-    ) -> Result<Task> {
+        deps_config: &DependenciesConfig,
+        auto_advance: &AutoAdvanceConfig,
+    ) -> Result<(Task, Vec<String>)> {
         let now = now_ms();
 
         self.with_conn_mut(|conn| {
@@ -453,12 +478,25 @@ impl Database {
             let task =
                 get_task_internal(&tx, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
+            // Owner-only validation: if task is claimed, only owner can update (unless force)
+            if let Some(ref current_owner) = task.owner_agent {
+                if current_owner != agent_id && !force {
+                    return Err(anyhow!(
+                        "Task is claimed by agent '{}'. Only the owner can update claimed tasks (use force=true to override)",
+                        current_owner
+                    ));
+                }
+            }
+
             let new_title = title.unwrap_or(task.title.clone());
             let new_description = description.unwrap_or(task.description.clone());
             let new_status = status.unwrap_or(task.status.clone());
             let new_priority = priority.unwrap_or(task.priority);
             let new_points = points.unwrap_or(task.points);
             let new_tags = tags.unwrap_or(task.tags.clone());
+            let new_needed_tags = needed_tags.unwrap_or(task.agent_tags_all.clone());
+            let new_wanted_tags = wanted_tags.unwrap_or(task.agent_tags_any.clone());
+            let new_time_estimate_ms = time_estimate_ms.or(task.time_estimate_ms);
 
             // Validate the new status exists
             if !states_config.is_valid_state(&new_status) {
@@ -513,19 +551,19 @@ impl Database {
                     return Err(anyhow!("Agent has reached claim limit"));
                 }
 
-                // Check tag affinity - needed_tags (AND - must have ALL)
-                if !task.needed_tags.is_empty() {
-                    for needed in &task.needed_tags {
+                // Check tag affinity - agent_tags_all (AND - must have ALL)
+                if !task.agent_tags_all.is_empty() {
+                    for needed in &task.agent_tags_all {
                         if !agent.tags.contains(needed) {
                             return Err(anyhow!("Agent missing required tag: {}", needed));
                         }
                     }
                 }
 
-                // Check tag affinity - wanted_tags (OR - must have AT LEAST ONE)
-                if !task.wanted_tags.is_empty() {
+                // Check tag affinity - agent_tags_any (OR - must have AT LEAST ONE)
+                if !task.agent_tags_any.is_empty() {
                     let has_any = task
-                        .wanted_tags
+                        .agent_tags_any
                         .iter()
                         .any(|wanted| agent.tags.contains(wanted));
                     if !has_any {
@@ -610,14 +648,15 @@ impl Database {
                 task.completed_at
             };
 
-            // Record state transition if status changed
-            if task.status != new_status {
+            // Record state transition if status changed (with reason for audit)
+            let status_changed = task.status != new_status;
+            if status_changed {
                 record_state_transition(
                     &tx,
                     task_id,
                     &new_status,
                     new_owner.as_deref(),
-                    None,
+                    reason.as_deref(),
                     states_config,
                 )?;
             }
@@ -626,8 +665,9 @@ impl Database {
                 "UPDATE tasks SET
                     title = ?1, description = ?2, status = ?3, priority = ?4,
                     points = ?5, started_at = ?6, completed_at = ?7, updated_at = ?8,
-                    tags = ?9, owner_agent = ?10, claimed_at = ?11
-                WHERE id = ?12",
+                    tags = ?9, owner_agent = ?10, claimed_at = ?11,
+                    agent_tags_all = ?12, agent_tags_any = ?13, time_estimate_ms = ?14
+                WHERE id = ?15",
                 params![
                     new_title,
                     new_description,
@@ -640,13 +680,37 @@ impl Database {
                     serde_json::to_string(&new_tags)?,
                     new_owner,
                     new_claimed_at,
+                    serde_json::to_string(&new_needed_tags)?,
+                    serde_json::to_string(&new_wanted_tags)?,
+                    new_time_estimate_ms,
                     task_id,
                 ],
             )?;
 
+            // Auto-advance dependent tasks if this task transitioned FROM blocking TO non-blocking
+            let auto_advanced = if status_changed {
+                let was_blocking = states_config.is_blocking_state(&task.status);
+                let is_blocking = states_config.is_blocking_state(&new_status);
+                
+                if was_blocking && !is_blocking {
+                    super::deps::propagate_unblock_effects(
+                        &tx,
+                        task_id,
+                        Some(agent_id),
+                        states_config,
+                        deps_config,
+                        auto_advance,
+                    )?
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            };
+
             tx.commit()?;
 
-            Ok(Task {
+            Ok((Task {
                 id: task_id.to_string(),
                 title: new_title,
                 description: new_description,
@@ -654,48 +718,117 @@ impl Database {
                 priority: new_priority,
                 points: new_points,
                 tags: new_tags,
+                agent_tags_all: new_needed_tags,
+                agent_tags_any: new_wanted_tags,
+                time_estimate_ms: new_time_estimate_ms,
                 started_at,
                 completed_at,
                 updated_at: now,
                 owner_agent: new_owner,
                 claimed_at: new_claimed_at,
                 ..task
-            })
+            }, auto_advanced))
         })
     }
 
-    /// Delete a task.
-    pub fn delete_task(&self, task_id: &str, cascade: bool) -> Result<()> {
+    /// Delete a task (soft delete by default, hard delete with obliterate=true).
+    ///
+    /// - `worker_id`: The worker attempting to delete (required for ownership check)
+    /// - `cascade`: Whether to delete children (default: false)
+    /// - `reason`: Optional reason for deletion
+    /// - `obliterate`: If true, permanently deletes the task; if false (default), soft deletes
+    /// - `force`: If true, allows deletion even if owned by another worker
+    pub fn delete_task(
+        &self,
+        task_id: &str,
+        worker_id: &str,
+        cascade: bool,
+        reason: Option<String>,
+        obliterate: bool,
+        force: bool,
+    ) -> Result<()> {
+        let now = now_ms();
+
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
 
-            if cascade {
-                // Find all descendants using recursive CTE and delete them
-                // The CTE finds all tasks reachable via 'contains' dependencies
-                tx.execute(
-                    "WITH RECURSIVE descendants AS (
-                        SELECT ?1 AS id
-                        UNION ALL
-                        SELECT dep.to_task_id FROM dependencies dep
-                        INNER JOIN descendants d ON dep.from_task_id = d.id
-                        WHERE dep.dep_type = 'contains'
-                    )
-                    DELETE FROM tasks WHERE id IN (SELECT id FROM descendants)",
-                    params![task_id],
-                )?;
-            } else {
-                // Check for children via dependencies
-                let child_count: i32 = tx.query_row(
-                    "SELECT COUNT(*) FROM dependencies WHERE from_task_id = ?1 AND dep_type = 'contains'",
-                    params![task_id],
-                    |row| row.get(0),
-                )?;
+            // Get the task to check ownership
+            let task = get_task_internal(&tx, task_id)?
+                .ok_or_else(|| anyhow!("Task not found"))?;
 
-                if child_count > 0 {
-                    return Err(anyhow!("Task has children; use cascade=true to delete"));
+            // Check ownership - reject if claimed by another worker (unless force)
+            if let Some(ref owner) = task.owner_agent {
+                if owner != worker_id && !force {
+                    return Err(anyhow!(
+                        "Task is claimed by worker '{}'. Use force=true to override.",
+                        owner
+                    ));
                 }
+            }
 
-                tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
+            if obliterate {
+                // Hard delete - permanently remove from database
+                if cascade {
+                    // Find all descendants using recursive CTE and delete them
+                    // The CTE finds all tasks reachable via 'contains' dependencies
+                    tx.execute(
+                        "WITH RECURSIVE descendants AS (
+                            SELECT ?1 AS id
+                            UNION ALL
+                            SELECT dep.to_task_id FROM dependencies dep
+                            INNER JOIN descendants d ON dep.from_task_id = d.id
+                            WHERE dep.dep_type = 'contains'
+                        )
+                        DELETE FROM tasks WHERE id IN (SELECT id FROM descendants)",
+                        params![task_id],
+                    )?;
+                } else {
+                    // Check for children via dependencies
+                    let child_count: i32 = tx.query_row(
+                        "SELECT COUNT(*) FROM dependencies WHERE from_task_id = ?1 AND dep_type = 'contains'",
+                        params![task_id],
+                        |row| row.get(0),
+                    )?;
+
+                    if child_count > 0 {
+                        return Err(anyhow!("Task has children; use cascade=true to delete"));
+                    }
+
+                    tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
+                }
+            } else {
+                // Soft delete - set deleted_at, deleted_by, deleted_reason
+                if cascade {
+                    // Soft delete all descendants
+                    tx.execute(
+                        "WITH RECURSIVE descendants AS (
+                            SELECT ?1 AS id
+                            UNION ALL
+                            SELECT dep.to_task_id FROM dependencies dep
+                            INNER JOIN descendants d ON dep.from_task_id = d.id
+                            WHERE dep.dep_type = 'contains'
+                        )
+                        UPDATE tasks SET deleted_at = ?2, deleted_by = ?3, deleted_reason = ?4, updated_at = ?2
+                        WHERE id IN (SELECT id FROM descendants) AND deleted_at IS NULL",
+                        params![task_id, now, worker_id, reason],
+                    )?;
+                } else {
+                    // Check for children via dependencies
+                    let child_count: i32 = tx.query_row(
+                        "SELECT COUNT(*) FROM dependencies WHERE from_task_id = ?1 AND dep_type = 'contains'",
+                        params![task_id],
+                        |row| row.get(0),
+                    )?;
+
+                    if child_count > 0 {
+                        return Err(anyhow!("Task has children; use cascade=true to delete"));
+                    }
+
+                    tx.execute(
+                        "UPDATE tasks SET deleted_at = ?1, deleted_by = ?2, deleted_reason = ?3, updated_at = ?1 WHERE id = ?4",
+                        params![now, worker_id, reason, task_id],
+                    )?;
+                }
             }
 
             tx.commit()?;
@@ -710,21 +843,23 @@ impl Database {
         owner: Option<&str>,
         parent_id: Option<Option<&str>>,
         limit: Option<i32>,
+        sort_by: Option<&str>,
+        sort_order: Option<&str>,
     ) -> Result<Vec<TaskSummary>> {
         self.with_conn(|conn| {
             let mut sql = String::from(
                 "SELECT id, title, status, priority, owner_agent, points, current_thought
-                 FROM tasks WHERE 1=1",
+                 FROM tasks t WHERE 1=1",
             );
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
             if let Some(s) = status {
-                sql.push_str(" AND status = ?");
+                sql.push_str(" AND t.status = ?");
                 params_vec.push(Box::new(s.to_string()));
             }
 
             if let Some(o) = owner {
-                sql.push_str(" AND owner_agent = ?");
+                sql.push_str(" AND t.owner_agent = ?");
                 params_vec.push(Box::new(o.to_string()));
             }
 
@@ -732,17 +867,19 @@ impl Database {
             if let Some(p) = parent_id {
                 match p {
                     Some(pid) => {
-                        sql.push_str(" AND id IN (SELECT to_task_id FROM dependencies WHERE from_task_id = ? AND dep_type = 'contains')");
+                        sql.push_str(" AND t.id IN (SELECT to_task_id FROM dependencies WHERE from_task_id = ? AND dep_type = 'contains')");
                         params_vec.push(Box::new(pid.to_string()));
                     }
                     None => {
                         // Root tasks: not contained by any other task
-                        sql.push_str(" AND id NOT IN (SELECT to_task_id FROM dependencies WHERE dep_type = 'contains')");
+                        sql.push_str(" AND t.id NOT IN (SELECT to_task_id FROM dependencies WHERE dep_type = 'contains')");
                     }
                 }
             }
 
-            sql.push_str(" ORDER BY created_at DESC");
+            // Build ORDER BY clause
+            let order_clause = build_order_clause(sort_by, sort_order);
+            sql.push_str(&format!(" ORDER BY {}", order_clause));
 
             if let Some(l) = limit {
                 sql.push_str(&format!(" LIMIT {}", l));
@@ -840,17 +977,13 @@ impl Database {
         })
     }
 
-    /// Log cost and token usage for a task.
-    pub fn log_cost(
+    /// Log metrics and cost for a task.
+    /// Values in the metrics array are aggregated (added) to existing values.
+    pub fn log_metrics(
         &self,
         task_id: &str,
-        tokens_in: Option<i64>,
-        tokens_cached: Option<i64>,
-        tokens_out: Option<i64>,
-        tokens_thinking: Option<i64>,
-        tokens_image: Option<i64>,
-        tokens_audio: Option<i64>,
         cost_usd: Option<f64>,
+        values: &[i64],
         user_metrics: Option<HashMap<String, serde_json::Value>>,
     ) -> Result<Task> {
         let now = now_ms();
@@ -859,18 +992,18 @@ impl Database {
             let task =
                 get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
-            let new_tokens_in = task.tokens_in + tokens_in.unwrap_or(0);
-            let new_tokens_cached = task.tokens_cached + tokens_cached.unwrap_or(0);
-            let new_tokens_out = task.tokens_out + tokens_out.unwrap_or(0);
-            let new_tokens_thinking = task.tokens_thinking + tokens_thinking.unwrap_or(0);
-            let new_tokens_image = task.tokens_image + tokens_image.unwrap_or(0);
-            let new_tokens_audio = task.tokens_audio + tokens_audio.unwrap_or(0);
+            // Aggregate metrics (add new values to existing)
+            let mut new_metrics = task.metrics;
+            for (i, &val) in values.iter().take(8).enumerate() {
+                new_metrics[i] += val;
+            }
+
             let new_cost_usd = task.cost_usd + cost_usd.unwrap_or(0.0);
 
             // Merge user_metrics
-            let new_user_metrics = if let Some(new_metrics) = user_metrics {
+            let new_user_metrics = if let Some(new_mets) = user_metrics {
                 let mut merged = task.user_metrics.clone().unwrap_or_default();
-                for (k, v) in new_metrics {
+                for (k, v) in new_mets {
                     merged.insert(k, v);
                 }
                 Some(merged)
@@ -884,17 +1017,19 @@ impl Database {
 
             conn.execute(
                 "UPDATE tasks SET
-                    tokens_in = ?1, tokens_cached = ?2, tokens_out = ?3,
-                    tokens_thinking = ?4, tokens_image = ?5, tokens_audio = ?6,
-                    cost_usd = ?7, user_metrics = ?8, updated_at = ?9
-                WHERE id = ?10",
+                    metric_0 = ?1, metric_1 = ?2, metric_2 = ?3, metric_3 = ?4,
+                    metric_4 = ?5, metric_5 = ?6, metric_6 = ?7, metric_7 = ?8,
+                    cost_usd = ?9, user_metrics = ?10, updated_at = ?11
+                WHERE id = ?12",
                 params![
-                    new_tokens_in,
-                    new_tokens_cached,
-                    new_tokens_out,
-                    new_tokens_thinking,
-                    new_tokens_image,
-                    new_tokens_audio,
+                    new_metrics[0],
+                    new_metrics[1],
+                    new_metrics[2],
+                    new_metrics[3],
+                    new_metrics[4],
+                    new_metrics[5],
+                    new_metrics[6],
+                    new_metrics[7],
                     new_cost_usd,
                     user_metrics_json,
                     now,
@@ -903,13 +1038,8 @@ impl Database {
             )?;
 
             Ok(Task {
-                tokens_in: new_tokens_in,
-                tokens_cached: new_tokens_cached,
-                tokens_out: new_tokens_out,
-                tokens_thinking: new_tokens_thinking,
-                tokens_image: new_tokens_image,
-                tokens_audio: new_tokens_audio,
                 cost_usd: new_cost_usd,
+                metrics: new_metrics,
                 user_metrics: new_user_metrics,
                 updated_at: now,
                 ..task
@@ -965,19 +1095,19 @@ impl Database {
                 return Err(anyhow!("Agent has reached claim limit"));
             }
 
-            // Check tag affinity - needed_tags (AND - must have ALL)
-            if !task.needed_tags.is_empty() {
-                for needed in &task.needed_tags {
+            // Check tag affinity - agent_tags_all (AND - must have ALL)
+            if !task.agent_tags_all.is_empty() {
+                for needed in &task.agent_tags_all {
                     if !agent.tags.contains(needed) {
                         return Err(anyhow!("Agent missing required tag: {}", needed));
                     }
                 }
             }
 
-            // Check tag affinity - wanted_tags (OR - must have AT LEAST ONE)
-            if !task.wanted_tags.is_empty() {
+            // Check tag affinity - agent_tags_any (OR - must have AT LEAST ONE)
+            if !task.agent_tags_any.is_empty() {
                 let has_any = task
-                    .wanted_tags
+                    .agent_tags_any
                     .iter()
                     .any(|wanted| agent.tags.contains(wanted));
                 if !has_any {
@@ -1117,19 +1247,19 @@ impl Database {
                 return Err(anyhow!("Agent has reached claim limit"));
             }
 
-            // Check tag affinity - needed_tags (AND)
-            if !task.needed_tags.is_empty() {
-                for needed in &task.needed_tags {
+            // Check tag affinity - agent_tags_all (AND)
+            if !task.agent_tags_all.is_empty() {
+                for needed in &task.agent_tags_all {
                     if !agent.tags.contains(needed) {
                         return Err(anyhow!("Agent missing required tag: {}", needed));
                     }
                 }
             }
 
-            // Check tag affinity - wanted_tags (OR)
-            if !task.wanted_tags.is_empty() {
+            // Check tag affinity - agent_tags_any (OR)
+            if !task.agent_tags_any.is_empty() {
                 let has_any = task
-                    .wanted_tags
+                    .agent_tags_any
                     .iter()
                     .any(|wanted| agent.tags.contains(wanted));
                 if !has_any {
@@ -1412,7 +1542,8 @@ impl Database {
 
 /// Helper function to create task tree recursively within a transaction.
 /// Creates 'contains' dependencies from parent to children.
-/// Creates 'follows' dependencies between siblings when parallel=false.
+/// Creates 'follows' dependencies between siblings when join_mode is Then.
+/// Supports referencing existing tasks via ref_id.
 fn create_tree_recursive(
     conn: &Connection,
     input: &TaskTreeInput,
@@ -1421,70 +1552,88 @@ fn create_tree_recursive(
     all_ids: &mut Vec<String>,
     states_config: &StatesConfig,
 ) -> Result<String> {
-    // Use custom id if provided, otherwise generate UUID7
-    let generated_id = Uuid::now_v7().to_string();
-    let task_id = input.id.clone().unwrap_or(generated_id);
-    let now = now_ms();
-    let priority = input.priority.unwrap_or(PRIORITY_MEDIUM);
-    let initial_status = &states_config.initial;
+    // Check if this node references an existing task
+    let task_id = if let Some(ref ref_id) = input.ref_id {
+        // Verify the referenced task exists
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+            params![ref_id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(anyhow::anyhow!("Referenced task '{}' not found", ref_id));
+        }
+        ref_id.clone()
+    } else {
+        // Create a new task
+        let generated_id = Uuid::now_v7().to_string();
+        let task_id = input.id.clone().unwrap_or(generated_id);
+        let now = now_ms();
+        let priority = input.priority.unwrap_or(PRIORITY_MEDIUM);
+        let initial_status = &states_config.initial;
 
-    let needed_tags = input.needed_tags.clone().unwrap_or_default();
-    let wanted_tags = input.wanted_tags.clone().unwrap_or_default();
-    let tags = input.tags.clone().unwrap_or_default();
-    let needed_tags_json = serde_json::to_string(&needed_tags)?;
-    let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
-    let tags_json = serde_json::to_string(&tags)?;
+        let agent_tags_all = input.agent_tags_all.clone().unwrap_or_default();
+        let agent_tags_any = input.agent_tags_any.clone().unwrap_or_default();
+        let tags = input.tags.clone().unwrap_or_default();
+        let agent_tags_all_json = serde_json::to_string(&agent_tags_all)?;
+        let agent_tags_any_json = serde_json::to_string(&agent_tags_any)?;
+        let tags_json = serde_json::to_string(&tags)?;
 
-    conn.execute(
-        "INSERT INTO tasks (
-            id, title, description, status, priority,
-            needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        params![
-            &task_id,
-            &input.description,  // Use description as title
-            &input.description,  // Also store as description
-            initial_status,
-            priority_to_str(priority),
-            needed_tags_json,
-            wanted_tags_json,
-            tags_json,
-            input.points,
-            input.time_estimate_ms,
-            now,
-            now,
-        ],
-    )?;
+        conn.execute(
+            "INSERT INTO tasks (
+                id, title, description, status, priority,
+                agent_tags_all, agent_tags_any, tags, points, time_estimate_ms, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &task_id,
+                &input.title,
+                &input.description,
+                initial_status,
+                priority_to_str(priority),
+                agent_tags_all_json,
+                agent_tags_any_json,
+                tags_json,
+                input.points,
+                input.time_estimate_ms,
+                now,
+                now,
+            ],
+        )?;
+
+        // Record initial state transition
+        record_state_transition(conn, &task_id, initial_status, None, None, states_config)?;
+
+        task_id
+    };
 
     // Create 'contains' dependency from parent if present
     if let Some(pid) = parent_id {
         Database::add_dependency_internal(conn, pid, &task_id, "contains")?;
     }
 
-    // Create 'follows' dependency from previous sibling if sequential (parallel=false)
-    if !input.parallel {
+    // Create 'follows' dependency from previous sibling if sequential (join_mode is Then)
+    if input.join_mode == JoinMode::Then {
         if let Some(prev_id) = prev_sibling_id {
             Database::add_dependency_internal(conn, prev_id, &task_id, "follows")?;
         }
     }
 
-    // Record initial state transition
-    record_state_transition(conn, &task_id, initial_status, None, None, states_config)?;
-
     all_ids.push(task_id.clone());
 
-    // Create children with 'follows' dependencies if not parallel
+    // Create children with 'follows' dependencies based on join_mode
     let mut prev_child_id: Option<String> = None;
     for child in input.children.iter() {
+        // Determine prev_sibling based on THIS node's join_mode (not the child's)
+        let child_prev = if input.join_mode == JoinMode::Then {
+            prev_child_id.as_deref()
+        } else {
+            None
+        };
         let child_id = create_tree_recursive(
             conn,
             child,
             Some(&task_id),
-            if child.parallel {
-                None
-            } else {
-                prev_child_id.as_deref()
-            },
+            child_prev,
             all_ids,
             states_config,
         )?;

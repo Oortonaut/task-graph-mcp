@@ -23,9 +23,8 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
             "time_estimate_ms": t.time_estimate_ms,
             "time_actual_ms": t.time_actual_ms,
             "current_thought": t.current_thought,
-            "tokens_in": t.tokens_in,
-            "tokens_out": t.tokens_out,
             "cost_usd": t.cost_usd,
+            "metrics": t.metrics,
             "created_at": t.created_at,
             "updated_at": t.updated_at
         })).collect::<Vec<_>>(),
@@ -42,7 +41,7 @@ pub fn get_ready_tasks(
     states_config: &StatesConfig,
     deps_config: &DependenciesConfig,
 ) -> Result<Value> {
-    let tasks = db.get_ready_tasks(None, states_config, deps_config)?;
+    let tasks = db.get_ready_tasks(None, states_config, deps_config, None, None)?;
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| json!({
@@ -51,8 +50,8 @@ pub fn get_ready_tasks(
             "description": t.description,
             "priority": priority_to_str(t.priority),
             "points": t.points,
-            "needed_tags": t.needed_tags,
-            "wanted_tags": t.wanted_tags
+            "agent_tags_all": t.agent_tags_all,
+            "agent_tags_any": t.agent_tags_any
         })).collect::<Vec<_>>()
     }))
 }
@@ -62,7 +61,7 @@ pub fn get_blocked_tasks(
     states_config: &StatesConfig,
     deps_config: &DependenciesConfig,
 ) -> Result<Value> {
-    let tasks = db.get_blocked_tasks(states_config, deps_config)?;
+    let tasks = db.get_blocked_tasks(states_config, deps_config, None, None)?;
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| {

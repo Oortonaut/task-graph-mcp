@@ -48,7 +48,7 @@ Mapping:
   issue.title      → task.title
   issue.body       → task.description
   issue.state      → task.status (open→pending, closed→completed)
-  issue.labels     → task.needed_tags
+  issue.labels     → task.agent_tags_all
   issue.milestone  → parent task
 ```
 
@@ -95,7 +95,7 @@ Pattern:
 Mapping:
   [ ]  → status: pending
   [x]  → status: completed
-  @tag → needed_tags
+  @tag → agent_tags_all
   indent level → parent/child hierarchy
 ```
 
@@ -171,7 +171,7 @@ for milestone in milestones:
             title=issue.title,
             description=issue.body,
             status="completed" if issue.state == "closed" else "pending",
-            needed_tags=issue.labels
+            agent_tags_all=issue.labels
         )
 
 # 4. Preserve issue links as attachments
@@ -202,7 +202,7 @@ for task in tasks:
         parent=parent_id,
         title=task.title,
         status="completed" if task.checked else "pending",
-        needed_tags=task.tags
+        agent_tags_all=task.tags
     )
 
     id_map[task] = new_task.id
@@ -316,8 +316,8 @@ for dep in source_dependencies:
 # Convert labels to tag requirements
 create(
     title="Task title",
-    needed_tags=source.labels.filter(is_skill_tag),  # ["backend"]
-    wanted_tags=source.labels.filter(is_optional)    # ["help-wanted"]
+    agent_tags_all=source.labels.filter(is_skill_tag),  # ["backend"]
+    agent_tags_any=source.labels.filter(is_optional)   # ["help-wanted"]
 )
 ```
 

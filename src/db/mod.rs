@@ -4,9 +4,13 @@ pub mod agents;
 pub mod attachments;
 pub mod deps;
 pub mod locks;
+pub mod schema;
+pub mod search;
 pub mod state_transitions;
 pub mod stats;
 pub mod tasks;
+
+pub use search::{AttachmentMatch, SearchResult};
 
 use anyhow::Result;
 use rusqlite::Connection;
