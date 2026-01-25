@@ -55,50 +55,23 @@ impl Priority {
     }
 }
 
-/// Join mode for sibling tasks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum JoinMode {
-    /// This task depends on the previous sibling completing.
-    Then,
-    /// This task runs in parallel with the previous sibling.
-    Also,
-}
-
-impl JoinMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            JoinMode::Then => "then",
-            JoinMode::Also => "also",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "then" => Some(JoinMode::Then),
-            "also" => Some(JoinMode::Also),
-            _ => None,
-        }
-    }
-}
-
 /// A task in the task graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
-    pub parent_id: Option<String>,
     pub title: String,
     pub description: Option<String>,
     pub status: String,
     pub priority: Priority,
-    pub join_mode: JoinMode,
-    pub sibling_order: i32,
     pub owner_agent: Option<String>,
     pub claimed_at: Option<i64>,
 
-    // Affinity (tag-based)
+    // Affinity (tag-based claiming requirements)
     pub needed_tags: Vec<String>,
     pub wanted_tags: Vec<String>,
+
+    // Categorization/discovery tags
+    pub tags: Vec<String>,
 
     // Estimation & tracking
     pub points: Option<i32>,
@@ -133,25 +106,33 @@ pub struct TaskTree {
 }
 
 /// Input for creating a task tree.
+/// Input for creating a task tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskTreeInput {
     pub title: String,
     pub description: Option<String>,
     pub priority: Option<Priority>,
-    pub join_mode: Option<JoinMode>,
+    /// If true, children run in parallel (no follows dependencies).
+    /// If false (default), children run sequentially (follows dependencies created).
+    #[serde(default)]
+    pub parallel: bool,
     pub points: Option<i32>,
     pub time_estimate_ms: Option<i64>,
     pub needed_tags: Option<Vec<String>>,
     pub wanted_tags: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub children: Vec<TaskTreeInput>,
 }
 
-/// A dependency between tasks (from blocks to).
+/// A typed dependency between tasks.
+/// The dependency indicates that from_task_id affects to_task_id based on dep_type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dependency {
     pub from_task_id: String,
     pub to_task_id: String,
+    /// Dependency type: "blocks", "follows", "contains", or custom types.
+    pub dep_type: String,
 }
 
 /// An advisory file lock.
@@ -273,10 +254,10 @@ pub struct Stats {
 }
 
 /// Compact task representation for list views.
+/// Compact task representation for list views.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
     pub id: String,
-    pub parent_id: Option<String>,
     pub title: String,
     pub status: String,
     pub priority: Priority,
@@ -321,34 +302,6 @@ mod tests {
         }
     }
 
-    mod join_mode_tests {
-        use super::*;
 
-        #[test]
-        fn as_str_returns_correct_string_for_all_variants() {
-            assert_eq!(JoinMode::Then.as_str(), "then");
-            assert_eq!(JoinMode::Also.as_str(), "also");
-        }
-
-        #[test]
-        fn from_str_parses_valid_strings() {
-            assert_eq!(JoinMode::from_str("then"), Some(JoinMode::Then));
-            assert_eq!(JoinMode::from_str("also"), Some(JoinMode::Also));
-        }
-
-        #[test]
-        fn from_str_returns_none_for_invalid_strings() {
-            assert_eq!(JoinMode::from_str("invalid"), None);
-            assert_eq!(JoinMode::from_str("THEN"), None);
-            assert_eq!(JoinMode::from_str("parallel"), None);
-        }
-
-        #[test]
-        fn roundtrip_conversion_is_lossless() {
-            for mode in [JoinMode::Then, JoinMode::Also] {
-                assert_eq!(JoinMode::from_str(mode.as_str()), Some(mode));
-            }
-        }
-    }
 
 }

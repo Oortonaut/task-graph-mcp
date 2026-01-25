@@ -6,8 +6,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 /// Output format for query results.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
+    #[default]
     Json,
     Markdown,
 }
@@ -33,10 +35,6 @@ pub fn format_task_markdown(task: &Task, blocked_by: &[String]) -> String {
 
     if let Some(ref owner) = task.owner_agent {
         md.push_str(&format!("- **owner**: {}\n", owner));
-    }
-
-    if let Some(ref parent_id) = task.parent_id {
-        md.push_str(&format!("- **parent_id**: `{}`\n", parent_id));
     }
 
     if !blocked_by.is_empty() {

@@ -1,6 +1,6 @@
 //! Task resource handlers.
 
-use crate::config::StatesConfig;
+use crate::config::{DependenciesConfig, StatesConfig};
 use crate::db::Database;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -12,13 +12,10 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
     Ok(json!({
         "tasks": tasks.iter().map(|t| json!({
             "id": &t.id,
-            "parent_id": &t.parent_id,
             "title": t.title,
             "description": t.description,
             "status": t.status.as_str(),
             "priority": t.priority.as_str(),
-            "join_mode": t.join_mode.as_str(),
-            "sibling_order": t.sibling_order,
             "owner_agent": &t.owner_agent,
             "claimed_at": t.claimed_at,
             "points": t.points,
@@ -33,13 +30,18 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
         })).collect::<Vec<_>>(),
         "dependencies": deps.iter().map(|d| json!({
             "from": &d.from_task_id,
-            "to": &d.to_task_id
+            "to": &d.to_task_id,
+            "type": &d.dep_type
         })).collect::<Vec<_>>()
     }))
 }
 
-pub fn get_ready_tasks(db: &Database, states_config: &StatesConfig) -> Result<Value> {
-    let tasks = db.get_ready_tasks(None, states_config)?;
+pub fn get_ready_tasks(
+    db: &Database,
+    states_config: &StatesConfig,
+    deps_config: &DependenciesConfig,
+) -> Result<Value> {
+    let tasks = db.get_ready_tasks(None, states_config, deps_config)?;
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| json!({
@@ -54,8 +56,12 @@ pub fn get_ready_tasks(db: &Database, states_config: &StatesConfig) -> Result<Va
     }))
 }
 
-pub fn get_blocked_tasks(db: &Database, states_config: &StatesConfig) -> Result<Value> {
-    let tasks = db.get_blocked_tasks(states_config)?;
+pub fn get_blocked_tasks(
+    db: &Database,
+    states_config: &StatesConfig,
+    deps_config: &DependenciesConfig,
+) -> Result<Value> {
+    let tasks = db.get_blocked_tasks(states_config, deps_config)?;
 
     Ok(json!({
         "tasks": tasks.iter().map(|t| {
@@ -87,7 +93,8 @@ pub fn get_claimed_tasks(db: &Database, agent_id: Option<&str>) -> Result<Value>
 }
 
 pub fn get_task_tree(db: &Database, task_id: &str) -> Result<Value> {
-    let tree = db.get_task_tree(task_id)?
+    let tree = db
+        .get_task_tree(task_id)?
         .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
 
     Ok(serde_json::to_value(tree)?)

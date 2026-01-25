@@ -3,26 +3,24 @@
 use super::state_transitions::record_state_transition;
 use super::{now_ms, Database};
 use crate::config::StatesConfig;
-use crate::types::{Agent, JoinMode, Priority, Task, TaskSummary, TaskTree, TaskTreeInput};
+use crate::types::{Agent, Priority, Task, TaskSummary, TaskTree, TaskTreeInput};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use std::collections::HashMap;
-use uuid::Uuid; // Still needed for generating new IDs
+use uuid::Uuid;
 
 pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let id: String = row.get("id")?;
-    let parent_id: Option<String> = row.get("parent_id")?;
     let title: String = row.get("title")?;
     let description: Option<String> = row.get("description")?;
     let status: String = row.get("status")?;
     let priority: String = row.get("priority")?;
-    let join_mode: String = row.get("join_mode")?;
-    let sibling_order: i32 = row.get("sibling_order")?;
     let owner_agent: Option<String> = row.get("owner_agent")?;
     let claimed_at: Option<i64> = row.get("claimed_at")?;
 
     let needed_tags_json: Option<String> = row.get("needed_tags")?;
     let wanted_tags_json: Option<String> = row.get("wanted_tags")?;
+    let tags_json: Option<String> = row.get("tags")?;
 
     let points: Option<i32> = row.get("points")?;
     let time_estimate_ms: Option<i64> = row.get("time_estimate_ms")?;
@@ -46,19 +44,19 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
 
     Ok(Task {
         id,
-        parent_id,
         title,
         description,
         status,
         priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
-        join_mode: JoinMode::from_str(&join_mode).unwrap_or(JoinMode::Then),
-        sibling_order,
         owner_agent,
         claimed_at,
         needed_tags: needed_tags_json
             .map(|s| serde_json::from_str(&s).unwrap_or_default())
             .unwrap_or_default(),
         wanted_tags: wanted_tags_json
+            .map(|s| serde_json::from_str(&s).unwrap_or_default())
+            .unwrap_or_default(),
+        tags: tags_json
             .map(|s| serde_json::from_str(&s).unwrap_or_default())
             .unwrap_or_default(),
         points,
@@ -74,8 +72,7 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         tokens_image,
         tokens_audio,
         cost_usd,
-        user_metrics: user_metrics_json
-            .map(|s| serde_json::from_str(&s).unwrap_or_default()),
+        user_metrics: user_metrics_json.map(|s| serde_json::from_str(&s).unwrap_or_default()),
         created_at,
         updated_at,
     })
@@ -141,6 +138,7 @@ fn get_claim_count_internal(conn: &Connection, agent_id: &str) -> Result<i32> {
 
 impl Database {
     /// Create a new task.
+    /// If parent_id is provided, creates a 'contains' dependency from parent to this task.
     pub fn create_task(
         &self,
         title: String,
@@ -151,6 +149,7 @@ impl Database {
         time_estimate_ms: Option<i64>,
         needed_tags: Option<Vec<String>>,
         wanted_tags: Option<Vec<String>>,
+        tags: Option<Vec<String>>,
         blocked_by: Option<Vec<String>>,
         states_config: &StatesConfig,
     ) -> Result<Task> {
@@ -159,33 +158,30 @@ impl Database {
         let priority = priority.unwrap_or(Priority::Medium);
         let initial_status = &states_config.initial;
 
-        // Calculate sibling order
-        let sibling_order = self.get_next_sibling_order(parent_id.as_deref())?;
-
         let needed_tags = needed_tags.unwrap_or_default();
         let wanted_tags = wanted_tags.unwrap_or_default();
+        let tags = tags.unwrap_or_default();
         let needed_tags_json = serde_json::to_string(&needed_tags)?;
         let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
+        let tags_json = serde_json::to_string(&tags)?;
 
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
 
             tx.execute(
                 "INSERT INTO tasks (
-                    id, parent_id, title, description, status, priority, join_mode, sibling_order,
-                    needed_tags, wanted_tags, points, time_estimate_ms, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    id, title, description, status, priority,
+                    needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     &id,
-                    &parent_id,
                     title,
                     description,
                     initial_status,
                     priority.as_str(),
-                    JoinMode::Then.as_str(),
-                    sibling_order,
                     needed_tags_json,
                     wanted_tags_json,
+                    tags_json,
                     points,
                     time_estimate_ms,
                     now,
@@ -193,13 +189,15 @@ impl Database {
                 ],
             )?;
 
-            // Add dependencies if specified
+            // Create 'contains' dependency if parent_id is provided
+            if let Some(ref pid) = parent_id {
+                Database::add_dependency_internal(&tx, pid, &id, "contains")?;
+            }
+
+            // Add 'blocks' dependencies if specified
             if let Some(blockers) = &blocked_by {
                 for blocker_id in blockers {
-                    tx.execute(
-                        "INSERT OR IGNORE INTO dependencies (from_task_id, to_task_id) VALUES (?1, ?2)",
-                        params![blocker_id, &id],
-                    )?;
+                    Database::add_dependency_internal(&tx, blocker_id, &id, "blocks")?;
                 }
             }
 
@@ -210,17 +208,15 @@ impl Database {
 
             Ok(Task {
                 id,
-                parent_id,
                 title,
                 description,
                 status: initial_status.clone(),
                 priority,
-                join_mode: JoinMode::Then,
-                sibling_order,
                 owner_agent: None,
                 claimed_at: None,
                 needed_tags,
                 wanted_tags,
+                tags,
                 points,
                 time_estimate_ms,
                 time_actual_ms: None,
@@ -241,28 +237,9 @@ impl Database {
         })
     }
 
-    /// Get the next sibling order for a given parent.
-    fn get_next_sibling_order(&self, parent_id: Option<&str>) -> Result<i32> {
-        self.with_conn(|conn| {
-            let max_order: Option<i32> = if let Some(pid) = parent_id {
-                conn.query_row(
-                    "SELECT MAX(sibling_order) FROM tasks WHERE parent_id = ?1",
-                    params![pid],
-                    |row| row.get(0),
-                )?
-            } else {
-                conn.query_row(
-                    "SELECT MAX(sibling_order) FROM tasks WHERE parent_id IS NULL",
-                    [],
-                    |row| row.get(0),
-                )?
-            };
-
-            Ok(max_order.unwrap_or(-1) + 1)
-        })
-    }
-
     /// Create a task tree from nested input.
+    /// Uses 'contains' dependencies for parent-child relationships
+    /// and 'follows' dependencies for sequential children (when parallel=false).
     pub fn create_task_tree(
         &self,
         input: TaskTreeInput,
@@ -277,7 +254,7 @@ impl Database {
                 &tx,
                 &input,
                 parent_id.as_deref(),
-                0,
+                None, // no previous sibling for root
                 &mut all_ids,
                 states_config,
             )?;
@@ -289,9 +266,7 @@ impl Database {
     /// Get a task by ID.
     pub fn get_task(&self, task_id: &str) -> Result<Option<Task>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM tasks WHERE id = ?1",
-            )?;
+            let mut stmt = conn.prepare("SELECT * FROM tasks WHERE id = ?1")?;
 
             let result = stmt.query_row(params![task_id], parse_task_row);
 
@@ -331,14 +306,18 @@ impl Database {
         Ok(result)
     }
 
-    /// Get direct children of a task.
+    /// Get direct children of a task (via 'contains' dependency).
     pub fn get_children(&self, parent_id: &str) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT * FROM tasks WHERE parent_id = ?1 ORDER BY sibling_order",
+                "SELECT t.* FROM tasks t
+                 INNER JOIN dependencies d ON t.id = d.to_task_id
+                 WHERE d.from_task_id = ?1 AND d.dep_type = 'contains'
+                 ORDER BY t.created_at",
             )?;
 
-            let tasks = stmt.query_map(params![parent_id], parse_task_row)?
+            let tasks = stmt
+                .query_map(params![parent_id], parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();
 
@@ -360,8 +339,8 @@ impl Database {
         let now = now_ms();
 
         self.with_conn(|conn| {
-            let task = get_task_internal(conn, task_id)?
-                .ok_or_else(|| anyhow!("Task not found"))?;
+            let task =
+                get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             let new_title = title.unwrap_or(task.title.clone());
             let new_description = description.unwrap_or(task.description.clone());
@@ -393,11 +372,12 @@ impl Database {
 
             // Handle status transitions for timestamps
             // Set started_at when first entering a timed state
-            let started_at = if task.started_at.is_none() && states_config.is_timed_state(&new_status) {
-                Some(now)
-            } else {
-                task.started_at
-            };
+            let started_at =
+                if task.started_at.is_none() && states_config.is_timed_state(&new_status) {
+                    Some(now)
+                } else {
+                    task.started_at
+                };
 
             // Set completed_at when entering a terminal state
             let completed_at = if states_config.is_terminal_state(&new_status) {
@@ -457,12 +437,23 @@ impl Database {
             let tx = conn.transaction()?;
 
             if cascade {
-                // Delete all descendants (CASCADE in foreign key handles this)
-                tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
+                // Find all descendants using recursive CTE and delete them
+                // The CTE finds all tasks reachable via 'contains' dependencies
+                tx.execute(
+                    "WITH RECURSIVE descendants AS (
+                        SELECT ?1 AS id
+                        UNION ALL
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
+                    )
+                    DELETE FROM tasks WHERE id IN (SELECT id FROM descendants)",
+                    params![task_id],
+                )?;
             } else {
-                // Check for children
+                // Check for children via dependencies
                 let child_count: i32 = tx.query_row(
-                    "SELECT COUNT(*) FROM tasks WHERE parent_id = ?1",
+                    "SELECT COUNT(*) FROM dependencies WHERE from_task_id = ?1 AND dep_type = 'contains'",
                     params![task_id],
                     |row| row.get(0),
                 )?;
@@ -489,8 +480,8 @@ impl Database {
     ) -> Result<Vec<TaskSummary>> {
         self.with_conn(|conn| {
             let mut sql = String::from(
-                "SELECT id, parent_id, title, status, priority, owner_agent, points, current_thought
-                 FROM tasks WHERE 1=1"
+                "SELECT id, title, status, priority, owner_agent, points, current_thought
+                 FROM tasks WHERE 1=1",
             );
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -504,14 +495,16 @@ impl Database {
                 params_vec.push(Box::new(o.to_string()));
             }
 
+            // Handle parent filtering via dependencies table
             if let Some(p) = parent_id {
                 match p {
                     Some(pid) => {
-                        sql.push_str(" AND parent_id = ?");
+                        sql.push_str(" AND id IN (SELECT to_task_id FROM dependencies WHERE from_task_id = ? AND dep_type = 'contains')");
                         params_vec.push(Box::new(pid.to_string()));
                     }
                     None => {
-                        sql.push_str(" AND parent_id IS NULL");
+                        // Root tasks: not contained by any other task
+                        sql.push_str(" AND id NOT IN (SELECT to_task_id FROM dependencies WHERE dep_type = 'contains')");
                     }
                 }
             }
@@ -522,32 +515,32 @@ impl Database {
                 sql.push_str(&format!(" LIMIT {}", l));
             }
 
-            let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|b| b.as_ref()).collect();
 
             let mut stmt = conn.prepare(&sql)?;
-            let tasks = stmt.query_map(params_refs.as_slice(), |row| {
-                let id: String = row.get(0)?;
-                let parent_id: Option<String> = row.get(1)?;
-                let title: String = row.get(2)?;
-                let status: String = row.get(3)?;
-                let priority: String = row.get(4)?;
-                let owner_agent: Option<String> = row.get(5)?;
-                let points: Option<i32> = row.get(6)?;
-                let current_thought: Option<String> = row.get(7)?;
+            let tasks = stmt
+                .query_map(params_refs.as_slice(), |row| {
+                    let id: String = row.get(0)?;
+                    let title: String = row.get(1)?;
+                    let status: String = row.get(2)?;
+                    let priority: String = row.get(3)?;
+                    let owner_agent: Option<String> = row.get(4)?;
+                    let points: Option<i32> = row.get(5)?;
+                    let current_thought: Option<String> = row.get(6)?;
 
-                Ok(TaskSummary {
-                    id,
-                    parent_id,
-                    title,
-                    status,
-                    priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
-                    owner_agent,
-                    points,
-                    current_thought,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
+                    Ok(TaskSummary {
+                        id,
+                        title,
+                        status,
+                        priority: Priority::from_str(&priority).unwrap_or(Priority::Medium),
+                        owner_agent,
+                        points,
+                        current_thought,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
             Ok(tasks)
         })
@@ -579,7 +572,8 @@ impl Database {
                     params_vec.push(Box::new(id.clone()));
                 }
 
-                let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+                let params_refs: Vec<&dyn rusqlite::ToSql> =
+                    params_vec.iter().map(|b| b.as_ref()).collect();
                 conn.execute(&sql, params_refs.as_slice())?
             } else {
                 conn.execute(
@@ -629,8 +623,8 @@ impl Database {
         let now = now_ms();
 
         self.with_conn(|conn| {
-            let task = get_task_internal(conn, task_id)?
-                .ok_or_else(|| anyhow!("Task not found"))?;
+            let task =
+                get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             let new_tokens_in = task.tokens_in + tokens_in.unwrap_or(0);
             let new_tokens_cached = task.tokens_cached + tokens_cached.unwrap_or(0);
@@ -651,7 +645,9 @@ impl Database {
                 task.user_metrics.clone()
             };
 
-            let user_metrics_json = new_user_metrics.as_ref().map(|m| serde_json::to_string(m).unwrap());
+            let user_metrics_json = new_user_metrics
+                .as_ref()
+                .map(|m| serde_json::to_string(m).unwrap());
 
             conn.execute(
                 "UPDATE tasks SET
@@ -708,8 +704,8 @@ impl Database {
 
         self.with_conn(|conn| {
             // Get the task (using internal helper to avoid deadlock)
-            let task = get_task_internal(conn, task_id)?
-                .ok_or_else(|| anyhow!("Task not found"))?;
+            let task =
+                get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             // Check if already claimed
             if task.owner_agent.is_some() {
@@ -727,8 +723,8 @@ impl Database {
             }
 
             // Get the agent (using internal helper to avoid deadlock)
-            let agent = get_agent_internal(conn, agent_id)?
-                .ok_or_else(|| anyhow!("Agent not found"))?;
+            let agent =
+                get_agent_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
 
             // Check claim limit (using internal helper to avoid deadlock)
             let current_claims = get_claim_count_internal(conn, agent_id)?;
@@ -747,7 +743,10 @@ impl Database {
 
             // Check tag affinity - wanted_tags (OR - must have AT LEAST ONE)
             if !task.wanted_tags.is_empty() {
-                let has_any = task.wanted_tags.iter().any(|wanted| agent.tags.contains(wanted));
+                let has_any = task
+                    .wanted_tags
+                    .iter()
+                    .any(|wanted| agent.tags.contains(wanted));
                 if !has_any {
                     return Err(anyhow!("Agent has none of the wanted tags"));
                 }
@@ -756,18 +755,18 @@ impl Database {
             conn.execute(
                 "UPDATE tasks SET owner_agent = ?1, claimed_at = ?2, status = ?3, started_at = ?4, updated_at = ?5
                  WHERE id = ?6",
-                params![
-                    agent_id,
-                    now,
-                    claim_status,
-                    now,
-                    now,
-                    task_id,
-                ],
+                params![agent_id, now, claim_status, now, now, task_id,],
             )?;
 
             // Record state transition (accumulates time if coming from timed state)
-            record_state_transition(conn, task_id, claim_status, Some(agent_id), None, states_config)?;
+            record_state_transition(
+                conn,
+                task_id,
+                claim_status,
+                Some(agent_id),
+                None,
+                states_config,
+            )?;
 
             // Refresh agent heartbeat
             conn.execute(
@@ -797,15 +796,22 @@ impl Database {
         let release_status = &states_config.initial;
 
         self.with_conn(|conn| {
-            let task = get_task_internal(conn, task_id)?
-                .ok_or_else(|| anyhow!("Task not found"))?;
+            let task =
+                get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             if task.owner_agent.as_deref() != Some(agent_id) {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
             // Record state transition (accumulates time if coming from timed state)
-            record_state_transition(conn, task_id, release_status, Some(agent_id), None, states_config)?;
+            record_state_transition(
+                conn,
+                task_id,
+                release_status,
+                Some(agent_id),
+                None,
+                states_config,
+            )?;
 
             conn.execute(
                 "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
@@ -823,8 +829,8 @@ impl Database {
         let release_status = &states_config.initial;
 
         self.with_conn(|conn| {
-            let task = get_task_internal(conn, task_id)?
-                .ok_or_else(|| anyhow!("Task not found"))?;
+            let task =
+                get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             // Record state transition (accumulates time if coming from timed state)
             record_state_transition(
@@ -865,12 +871,12 @@ impl Database {
 
         self.with_conn(|conn| {
             // Get the task
-            let task = get_task_internal(conn, task_id)?
-                .ok_or_else(|| anyhow!("Task not found"))?;
+            let task =
+                get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             // Get the agent
-            let agent = get_agent_internal(conn, agent_id)?
-                .ok_or_else(|| anyhow!("Agent not found"))?;
+            let agent =
+                get_agent_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
 
             // Check claim limit
             let current_claims = get_claim_count_internal(conn, agent_id)?;
@@ -889,7 +895,10 @@ impl Database {
 
             // Check tag affinity - wanted_tags (OR)
             if !task.wanted_tags.is_empty() {
-                let has_any = task.wanted_tags.iter().any(|wanted| agent.tags.contains(wanted));
+                let has_any = task
+                    .wanted_tags
+                    .iter()
+                    .any(|wanted| agent.tags.contains(wanted));
                 if !has_any {
                     return Err(anyhow!("Agent has none of the wanted tags"));
                 }
@@ -898,18 +907,18 @@ impl Database {
             conn.execute(
                 "UPDATE tasks SET owner_agent = ?1, claimed_at = ?2, status = ?3, started_at = COALESCE(started_at, ?4), updated_at = ?5
                  WHERE id = ?6",
-                params![
-                    agent_id,
-                    now,
-                    claim_status,
-                    now,
-                    now,
-                    task_id,
-                ],
+                params![agent_id, now, claim_status, now, now, task_id,],
             )?;
 
             // Record state transition (accumulates time if coming from timed state)
-            record_state_transition(conn, task_id, claim_status, Some(agent_id), None, states_config)?;
+            record_state_transition(
+                conn,
+                task_id,
+                claim_status,
+                Some(agent_id),
+                None,
+                states_config,
+            )?;
 
             // Refresh agent heartbeat
             conn.execute(
@@ -939,8 +948,8 @@ impl Database {
         let now = now_ms();
 
         self.with_conn(|conn| {
-            let task = get_task_internal(conn, task_id)?
-                .ok_or_else(|| anyhow!("Task not found"))?;
+            let task =
+                get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             if task.owner_agent.as_deref() != Some(agent_id) {
                 return Err(anyhow!("Task is not owned by this agent"));
@@ -1007,9 +1016,9 @@ impl Database {
         })
     }
 
-
     /// Complete a task and release file locks held by the agent.
     /// Uses "completed" state by default, which should be a terminal state.
+    /// Checks that all children (via 'contains' dependencies) are complete.
     pub fn complete_task(
         &self,
         task_id: &str,
@@ -1046,6 +1055,26 @@ impl Database {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
+            // Check for incomplete children (blocking completion)
+            let incomplete_children: i32 = tx.query_row(
+                "SELECT COUNT(*) FROM dependencies d
+                 INNER JOIN tasks child ON d.to_task_id = child.id
+                 WHERE d.from_task_id = ?1 AND d.dep_type = 'contains'
+                 AND child.status IN (SELECT value FROM json_each(?2))",
+                params![
+                    task_id,
+                    serde_json::to_string(&states_config.blocking_states)?
+                ],
+                |row| row.get(0),
+            )?;
+
+            if incomplete_children > 0 {
+                return Err(anyhow!(
+                    "Cannot complete task: {} child task(s) are not complete",
+                    incomplete_children
+                ));
+            }
+
             // Validate transition
             if !states_config.is_valid_transition(&task.status, complete_status) {
                 let exits = states_config.get_exits(&task.status);
@@ -1057,7 +1086,14 @@ impl Database {
             }
 
             // Record state transition (accumulates time from timed state)
-            record_state_transition(&tx, task_id, complete_status, Some(agent_id), None, states_config)?;
+            record_state_transition(
+                &tx,
+                task_id,
+                complete_status,
+                Some(agent_id),
+                None,
+                states_config,
+            )?;
 
             // Update task to completed
             tx.execute(
@@ -1096,7 +1132,8 @@ impl Database {
     pub fn get_all_tasks(&self) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tasks ORDER BY created_at")?;
-            let tasks = stmt.query_map([], parse_task_row)?
+            let tasks = stmt
+                .query_map([], parse_task_row)?
                 .filter_map(|r| r.ok())
                 .collect();
             Ok(tasks)
@@ -1107,7 +1144,8 @@ impl Database {
     #[allow(dead_code)]
     pub fn get_tasks_by_status(&self, status: &str) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT * FROM tasks WHERE status = ?1 ORDER BY created_at")?;
+            let mut stmt =
+                conn.prepare("SELECT * FROM tasks WHERE status = ?1 ORDER BY created_at")?;
             let tasks = stmt
                 .query_map(params![status], parse_task_row)?
                 .filter_map(|r| r.ok())
@@ -1120,15 +1158,14 @@ impl Database {
     pub fn get_claimed_tasks(&self, agent_id: Option<&str>) -> Result<Vec<Task>> {
         self.with_conn(|conn| {
             let tasks = if let Some(aid) = agent_id {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM tasks WHERE owner_agent = ?1 ORDER BY claimed_at"
-                )?;
+                let mut stmt = conn
+                    .prepare("SELECT * FROM tasks WHERE owner_agent = ?1 ORDER BY claimed_at")?;
                 stmt.query_map(params![aid], parse_task_row)?
                     .filter_map(|r| r.ok())
                     .collect()
             } else {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM tasks WHERE owner_agent IS NOT NULL ORDER BY claimed_at"
+                    "SELECT * FROM tasks WHERE owner_agent IS NOT NULL ORDER BY claimed_at",
                 )?;
                 stmt.query_map([], parse_task_row)?
                     .filter_map(|r| r.ok())
@@ -1141,41 +1178,42 @@ impl Database {
 }
 
 /// Helper function to create task tree recursively within a transaction.
+/// Creates 'contains' dependencies from parent to children.
+/// Creates 'follows' dependencies between siblings when parallel=false.
 fn create_tree_recursive(
     conn: &Connection,
     input: &TaskTreeInput,
     parent_id: Option<&str>,
-    sibling_order: i32,
+    prev_sibling_id: Option<&str>,
     all_ids: &mut Vec<String>,
     states_config: &StatesConfig,
 ) -> Result<String> {
     let id = Uuid::now_v7().to_string();
     let now = now_ms();
     let priority = input.priority.unwrap_or(Priority::Medium);
-    let join_mode = input.join_mode.unwrap_or(JoinMode::Then);
     let initial_status = &states_config.initial;
 
     let needed_tags = input.needed_tags.clone().unwrap_or_default();
     let wanted_tags = input.wanted_tags.clone().unwrap_or_default();
+    let tags = input.tags.clone().unwrap_or_default();
     let needed_tags_json = serde_json::to_string(&needed_tags)?;
     let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
+    let tags_json = serde_json::to_string(&tags)?;
 
     conn.execute(
         "INSERT INTO tasks (
-            id, parent_id, title, description, status, priority, join_mode, sibling_order,
-            needed_tags, wanted_tags, points, time_estimate_ms, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            id, title, description, status, priority,
+            needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             &id,
-            parent_id,
             input.title,
             input.description,
             initial_status,
             priority.as_str(),
-            join_mode.as_str(),
-            sibling_order,
             needed_tags_json,
             wanted_tags_json,
+            tags_json,
             input.points,
             input.time_estimate_ms,
             now,
@@ -1183,14 +1221,39 @@ fn create_tree_recursive(
         ],
     )?;
 
+    // Create 'contains' dependency from parent if present
+    if let Some(pid) = parent_id {
+        Database::add_dependency_internal(conn, pid, &id, "contains")?;
+    }
+
+    // Create 'follows' dependency from previous sibling if sequential (parallel=false)
+    if !input.parallel {
+        if let Some(prev_id) = prev_sibling_id {
+            Database::add_dependency_internal(conn, prev_id, &id, "follows")?;
+        }
+    }
+
     // Record initial state transition
     record_state_transition(conn, &id, initial_status, None, None, states_config)?;
 
     all_ids.push(id.clone());
 
-    // Create children
-    for (i, child) in input.children.iter().enumerate() {
-        create_tree_recursive(conn, child, Some(&id), i as i32, all_ids, states_config)?;
+    // Create children with 'follows' dependencies if not parallel
+    let mut prev_child_id: Option<String> = None;
+    for child in input.children.iter() {
+        let child_id = create_tree_recursive(
+            conn,
+            child,
+            Some(&id),
+            if child.parallel {
+                None
+            } else {
+                prev_child_id.as_deref()
+            },
+            all_ids,
+            states_config,
+        )?;
+        prev_child_id = Some(child_id);
     }
 
     Ok(id)

@@ -1,7 +1,7 @@
 //! Task CRUD tools.
 
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
-use crate::config::{Prompts, StatesConfig};
+use crate::config::{DependenciesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
@@ -54,6 +54,11 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Tags agent must have AT LEAST ONE of to claim (OR)"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Categorization/discovery tags (what the task IS, for querying)"
                 },
                 "blocked_by": {
                     "type": "array",
@@ -141,6 +146,20 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "string",
                     "description": "With ready=true, pre-filters by agent's tags"
                 },
+                "tags_any": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Filter tasks that have ANY of these tags (OR)"
+                },
+                "tags_all": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Filter tasks that have ALL of these tags (AND)"
+                },
+                "qualified_for": {
+                    "type": "string",
+                    "description": "Filter tasks that this agent is qualified to claim (checks needed_tags/wanted_tags)"
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of tasks to return"
@@ -221,6 +240,7 @@ pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
     let time_estimate_ms = get_i64(&args, "time_estimate_ms");
     let needed_tags = get_string_array(&args, "needed_tags");
     let wanted_tags = get_string_array(&args, "wanted_tags");
+    let tags = get_string_array(&args, "tags");
     let blocked_by = get_string_array(&args, "blocked_by");
 
     let task = db.create_task(
@@ -232,13 +252,13 @@ pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
         time_estimate_ms,
         needed_tags,
         wanted_tags,
+        tags,
         blocked_by,
         states_config,
     )?;
 
     Ok(json!({
         "task_id": &task.id,
-        "parent_id": task.parent_id,
         "title": task.title,
         "status": task.status,
         "priority": task.priority.as_str(),
@@ -262,13 +282,13 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
     }))
 }
 
-pub fn get(db: &Database, args: Value) -> Result<Value> {
+pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
     let include_children = get_bool(&args, "children").unwrap_or(false);
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::from_str(&s))
-        .unwrap_or(OutputFormat::Json);
+        .unwrap_or(default_format);
 
     if include_children {
         let tree = db.get_task_tree(&task_id)?
@@ -295,26 +315,48 @@ pub fn get(db: &Database, args: Value) -> Result<Value> {
     }
 }
 
-pub fn list_tasks(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
+pub fn list_tasks(
+    db: &Database,
+    states_config: &StatesConfig,
+    deps_config: &DependenciesConfig,
+    default_format: OutputFormat,
+    args: Value,
+) -> Result<Value> {
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::from_str(&s))
-        .unwrap_or(OutputFormat::Json);
+        .unwrap_or(default_format);
 
     let ready = get_bool(&args, "ready").unwrap_or(false);
     let blocked = get_bool(&args, "blocked").unwrap_or(false);
     let limit = get_i32(&args, "limit");
 
+    // Extract tag filtering parameters
+    let tags_any = get_string_array(&args, "tags_any");
+    let tags_all = get_string_array(&args, "tags_all");
+    let qualified_for = get_string(&args, "qualified_for");
+
     // Get tasks based on filters
     let tasks = if ready {
         // Ready tasks: in initial state, unclaimed, all deps satisfied
         let agent_id = get_string(&args, "agent");
-        db.get_ready_tasks(agent_id.as_deref(), states_config)?
+        db.get_ready_tasks(agent_id.as_deref(), states_config, deps_config)?
     } else if blocked {
         // Blocked tasks: have unsatisfied deps
-        db.get_blocked_tasks(states_config)?
+        db.get_blocked_tasks(states_config, deps_config)?
     } else {
         // General query with filters
-        let status = get_string(&args, "status");
+        // Handle status which can be string or array
+        let status_vec: Option<Vec<String>> = if let Some(status_val) = args.get("status") {
+            if let Some(s) = status_val.as_str() {
+                Some(vec![s.to_string()])
+            } else if let Some(arr) = status_val.as_array() {
+                Some(arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let owner = get_string(&args, "owner");
         let parent_id_str = get_string(&args, "parent");
         let parent_id: Option<Option<&str>> = match &parent_id_str {
@@ -323,17 +365,40 @@ pub fn list_tasks(db: &Database, states_config: &StatesConfig, args: Value) -> R
             None => None,
         };
 
-        // Use list_tasks but get full Task objects
-        let summaries = db.list_tasks(status.as_deref(), owner.as_deref(), parent_id, limit)?;
+        // Check if tag filtering is needed
+        let has_tag_filters = tags_any.is_some() || tags_all.is_some() || qualified_for.is_some();
 
-        // Convert summaries to full tasks
-        let mut tasks = Vec::new();
-        for summary in summaries {
-            if let Some(task) = db.get_task(&summary.id)? {
-                tasks.push(task);
+        if has_tag_filters {
+            // Use the tag-filtered query
+            let qualified_agent_tags = if let Some(agent_id) = &qualified_for {
+                Some(db.get_agent_tags(agent_id)?)
+            } else {
+                None
+            };
+
+            db.list_tasks_with_tag_filters(
+                status_vec,
+                owner.as_deref(),
+                parent_id,
+                tags_any,
+                tags_all,
+                qualified_agent_tags,
+                limit,
+            )?
+        } else {
+            // Use list_tasks but get full Task objects (only supports single status)
+            let status = status_vec.as_ref().and_then(|v| v.first().map(|s| s.as_str()));
+            let summaries = db.list_tasks(status, owner.as_deref(), parent_id, limit)?;
+
+            // Convert summaries to full tasks
+            let mut tasks = Vec::new();
+            for summary in summaries {
+                if let Some(task) = db.get_task(&summary.id)? {
+                    tasks.push(task);
+                }
             }
+            tasks
         }
-        tasks
     };
 
     // Apply limit

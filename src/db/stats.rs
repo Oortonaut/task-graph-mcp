@@ -40,8 +40,9 @@ impl Database {
                     "WITH RECURSIVE descendants AS (
                         SELECT id FROM tasks WHERE id = ?1
                         UNION ALL
-                        SELECT t.id FROM tasks t
-                        INNER JOIN descendants d ON t.parent_id = d.id
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
                     )
                     SELECT
                         COUNT(*) as total_tasks,
@@ -64,8 +65,9 @@ impl Database {
                     "WITH RECURSIVE descendants AS (
                         SELECT id FROM tasks WHERE id = ?2
                         UNION ALL
-                        SELECT t.id FROM tasks t
-                        INNER JOIN descendants d ON t.parent_id = d.id
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
                     )
                     SELECT
                         COUNT(*) as total_tasks,
@@ -181,20 +183,22 @@ impl Database {
                     "WITH RECURSIVE descendants AS (
                         SELECT id FROM tasks WHERE id = ?1
                         UNION ALL
-                        SELECT t.id FROM tasks t
-                        INNER JOIN descendants d ON t.parent_id = d.id
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
                     )
-                    SELECT status, COUNT(*) as cnt FROM tasks 
+                    SELECT status, COUNT(*) as cnt FROM tasks
                     WHERE id IN (SELECT id FROM descendants) GROUP BY status"
                 }
                 (Some(_aid), Some(_tid)) => {
                     "WITH RECURSIVE descendants AS (
                         SELECT id FROM tasks WHERE id = ?2
                         UNION ALL
-                        SELECT t.id FROM tasks t
-                        INNER JOIN descendants d ON t.parent_id = d.id
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
                     )
-                    SELECT status, COUNT(*) as cnt FROM tasks 
+                    SELECT status, COUNT(*) as cnt FROM tasks
                     WHERE id IN (SELECT id FROM descendants) AND owner_agent = ?1 GROUP BY status"
                 }
                 (None, None) => "SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status",
@@ -243,21 +247,23 @@ impl Database {
                     "WITH RECURSIVE descendants AS (
                         SELECT id FROM tasks WHERE id = ?1
                         UNION ALL
-                        SELECT t.id FROM tasks t
-                        INNER JOIN descendants d ON t.parent_id = d.id
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
                     )
-                    SELECT COALESCE(SUM(points), 0) FROM tasks 
-                    WHERE id IN (SELECT id FROM descendants) 
+                    SELECT COALESCE(SUM(points), 0) FROM tasks
+                    WHERE id IN (SELECT id FROM descendants)
                     AND status NOT IN (SELECT value FROM json_each(?2))"
                 }
                 (Some(_aid), Some(_tid)) => {
                     "WITH RECURSIVE descendants AS (
                         SELECT id FROM tasks WHERE id = ?2
                         UNION ALL
-                        SELECT t.id FROM tasks t
-                        INNER JOIN descendants d ON t.parent_id = d.id
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
                     )
-                    SELECT COALESCE(SUM(points), 0) FROM tasks 
+                    SELECT COALESCE(SUM(points), 0) FROM tasks
                     WHERE id IN (SELECT id FROM descendants) AND owner_agent = ?1
                     AND status NOT IN (SELECT value FROM json_each(?3))"
                 }

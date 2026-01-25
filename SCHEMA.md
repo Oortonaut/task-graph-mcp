@@ -1,6 +1,6 @@
 # Task Graph MCP - Database Schema
 
-> **Current Version:** V007
+> **Current Version:** V010
 > **Last Updated:** 2026-01-24
 > **Database:** SQLite 3
 
@@ -44,8 +44,9 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 | `sibling_order` | INTEGER | NOT NULL DEFAULT 0 | Position among sibling tasks |
 | `owner_agent` | TEXT | FK → agents(id) | Claiming agent |
 | `claimed_at` | INTEGER | | Unix timestamp when claimed |
-| `needed_tags` | TEXT | | JSON array - agent must have ALL (AND logic) |
-| `wanted_tags` | TEXT | | JSON array - agent must have AT LEAST ONE (OR logic) |
+| `needed_tags` | TEXT | | JSON array - agent must have ALL (AND logic) for claiming |
+| `wanted_tags` | TEXT | | JSON array - agent must have AT LEAST ONE (OR logic) for claiming |
+| `tags` | TEXT | DEFAULT '[]' | JSON array - categorization/discovery tags (queryable) |
 | `points` | INTEGER | | Story points or complexity estimate |
 | `time_estimate_ms` | INTEGER | | Estimated duration in milliseconds |
 | `time_actual_ms` | INTEGER | | Actual duration in milliseconds |
@@ -67,6 +68,7 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 - `idx_tasks_parent` on `parent_id`
 - `idx_tasks_owner` on `owner_agent`
 - `idx_tasks_status` on `status`
+- `idx_tasks_tags` on `tags`
 
 ---
 
@@ -217,6 +219,57 @@ states:
 
 ---
 
+## Tagging System
+
+Tasks support two types of tags:
+
+### Categorization Tags (`tags`)
+
+The `tags` column contains a JSON array of strings for categorization and discovery:
+- Used for querying/filtering tasks by category
+- Does NOT affect who can claim the task
+- Think of these as "what the task IS" (e.g., `["backend", "api", "urgent"]`)
+
+### Claiming Requirement Tags (`needed_tags` / `wanted_tags`)
+
+These control which agents can claim a task:
+
+| Field | Logic | Description |
+|-------|-------|-------------|
+| `needed_tags` | AND | Agent must have ALL tags to claim |
+| `wanted_tags` | OR | Agent must have AT LEAST ONE tag to claim |
+
+### Query Parameters
+
+The `list_tasks` tool supports tag-based filtering:
+
+| Parameter | Description |
+|-----------|-------------|
+| `tags_any` | Return tasks that have ANY of the specified tags (OR) |
+| `tags_all` | Return tasks that have ALL of the specified tags (AND) |
+| `qualified_for` | Return tasks the specified agent is qualified to claim (checks needed_tags/wanted_tags) |
+
+### Examples
+
+```
+# Create a task with both tag types
+create(
+  title="API endpoint",
+  tags=["backend", "api"],           # For discovery
+  needed_tags=["senior"],            # Only seniors can claim
+  wanted_tags=["python", "rust"]     # Must know python OR rust
+)
+
+# Query by categorization (agent-driven: "what tasks match my interests?")
+list_tasks(tags_any=["backend", "frontend"])  # Tasks in either category
+list_tasks(tags_all=["urgent", "api"])        # Tasks with BOTH tags
+
+# Query by qualification (task-driven: "what tasks want me?")
+list_tasks(qualified_for="agent-1")  # Tasks this agent can claim
+```
+
+---
+
 ## Enums (Application Layer)
 
 ### Priority
@@ -246,6 +299,9 @@ states:
 | V005 | 2026-01-23 | Add `file_path` column to attachments for media file references |
 | V006 | 2026-01-24 | Add `task_state_sequence` table for automatic time tracking; add `end_timestamp` to `claim_sequence` |
 | V007 | 2026-01-24 | Configurable task states via YAML; `status` field is now dynamic string based on config |
+| V008 | 2026-01-24 | Add query indices for common access patterns |
+| V009 | 2026-01-24 | Unified dependency system with typed edges (blocks, follows, contains); remove parent_id, sibling_order, join_mode columns |
+| V010 | 2026-01-24 | Add `tags` column for task categorization/discovery; separate from needed_tags/wanted_tags (claim requirements) |
 
 ---
 

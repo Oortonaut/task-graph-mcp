@@ -95,10 +95,10 @@ pub fn disconnect(db: &Database, args: Value) -> Result<Value> {
     }))
 }
 
-pub fn list_agents(db: &Database, args: Value) -> Result<Value> {
+pub fn list_agents(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::from_str(&s))
-        .unwrap_or(OutputFormat::Json);
+        .unwrap_or(default_format);
 
     let agents = db.list_agents_info()?;
 
