@@ -1,6 +1,6 @@
 # Task Graph MCP - Database Schema
 
-> **Current Version:** V010
+> **Current Version:** V019
 > **Last Updated:** 2026-01-24
 > **Database:** SQLite 3
 
@@ -12,14 +12,13 @@ The Task Graph MCP server uses a SQLite database to store tasks, agents, depende
 
 ## Tables
 
-### `agents`
+### `workers`
 
-Session-based agent registration for multi-agent coordination.
+Session-based worker registration for multi-agent coordination.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | Unique agent identifier |
-| `name` | TEXT | | Human-readable agent name |
+| `id` | TEXT | PRIMARY KEY | Unique worker identifier |
 | `tags` | TEXT | | JSON array of freeform capability tags |
 | `max_claims` | INTEGER | NOT NULL DEFAULT 5 | Maximum concurrent task claims |
 | `registered_at` | INTEGER | NOT NULL | Unix timestamp of registration |
@@ -42,10 +41,10 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 | `priority` | TEXT | NOT NULL DEFAULT 'medium' | One of: low, medium, high, critical |
 | `join_mode` | TEXT | NOT NULL DEFAULT 'then' | 'then' (sequential) or 'also' (parallel) |
 | `sibling_order` | INTEGER | NOT NULL DEFAULT 0 | Position among sibling tasks |
-| `owner_agent` | TEXT | FK → agents(id) | Claiming agent |
+| `worker_id` | TEXT | FK → workers(id) | Claiming worker |
 | `claimed_at` | INTEGER | | Unix timestamp when claimed |
-| `agent_tags_all` | TEXT | | JSON array - agent must have ALL (AND logic) for claiming |
-| `agent_tags_any` | TEXT | | JSON array - agent must have AT LEAST ONE (OR logic) for claiming |
+| `needed_tags` | TEXT | | JSON array - worker must have ALL (AND logic) for claiming |
+| `wanted_tags` | TEXT | | JSON array - worker must have AT LEAST ONE (OR logic) for claiming |
 | `tags` | TEXT | DEFAULT '[]' | JSON array - categorization/discovery tags (queryable) |
 | `points` | INTEGER | | Story points or complexity estimate |
 | `time_estimate_ms` | INTEGER | | Estimated duration in milliseconds |
@@ -66,7 +65,7 @@ Core task storage with hierarchy, estimation, tracking, and cost accounting.
 
 **Indexes:**
 - `idx_tasks_parent` on `parent_id`
-- `idx_tasks_owner` on `owner_agent`
+- `idx_tasks_worker` on `worker_id`
 - `idx_tasks_status` on `status`
 - `idx_tasks_tags` on `tags`
 
@@ -116,12 +115,12 @@ Advisory file locks for coordinating file access between agents.
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `file_path` | TEXT | PRIMARY KEY | Locked file path |
-| `agent_id` | TEXT | NOT NULL, FK → agents(id) | Lock owner |
+| `worker_id` | TEXT | NOT NULL, FK → workers(id) | Lock owner |
 | `reason` | TEXT | | Reason for the lock |
 | `locked_at` | INTEGER | NOT NULL | Unix timestamp of lock acquisition |
 
 **Indexes:**
-- `idx_file_locks_agent` on `agent_id`
+- `idx_file_locks_worker` on `worker_id`
 
 ---
 
@@ -290,14 +289,14 @@ The `tags` column contains a JSON array of strings for categorization and discov
 - Does NOT affect who can claim the task
 - Think of these as "what the task IS" (e.g., `["backend", "api", "urgent"]`)
 
-### Claiming Requirement Tags (`agent_tags_all` / `agent_tags_any`)
+### Claiming Requirement Tags (`needed_tags` / `wanted_tags`)
 
-These control which agents can claim a task:
+These control which workers can claim a task:
 
 | Field | Logic | Description |
 |-------|-------|-------------|
-| `agent_tags_all` | AND | Agent must have ALL tags to claim |
-| `agent_tags_any` | OR | Agent must have AT LEAST ONE tag to claim |
+| `needed_tags` | AND | Worker must have ALL tags to claim |
+| `wanted_tags` | OR | Worker must have AT LEAST ONE tag to claim |
 
 ### Query Parameters
 
@@ -307,7 +306,7 @@ The `list_tasks` tool supports tag-based filtering:
 |-----------|-------------|
 | `tags_any` | Return tasks that have ANY of the specified tags (OR) |
 | `tags_all` | Return tasks that have ALL of the specified tags (AND) |
-| `qualified_for` | Return tasks the specified agent is qualified to claim (checks agent_tags_all/agent_tags_any) |
+| `qualified_for` | Return tasks the specified worker is qualified to claim (checks needed_tags/wanted_tags) |
 
 ### Examples
 
@@ -316,8 +315,8 @@ The `list_tasks` tool supports tag-based filtering:
 create(
   title="API endpoint",
   tags=["backend", "api"],           # For discovery
-  agent_tags_all=["senior"],         # Only seniors can claim
-  agent_tags_any=["python", "rust"]  # Must know python OR rust
+  needed_tags=["senior"],            # Only seniors can claim
+  wanted_tags=["python", "rust"]     # Must know python OR rust
 )
 
 # Query by categorization (agent-driven: "what tasks match my interests?")
@@ -361,17 +360,18 @@ list_tasks(qualified_for="agent-1")  # Tasks this agent can claim
 | V007 | 2026-01-24 | Configurable task states via YAML; `status` field is now dynamic string based on config |
 | V008 | 2026-01-24 | Add query indices for common access patterns |
 | V009 | 2026-01-24 | Unified dependency system with typed edges (blocks, follows, contains); remove parent_id, sibling_order, join_mode columns |
-| V010 | 2026-01-24 | Add `tags` column for task categorization/discovery; separate from agent_tags_all/agent_tags_any (claim requirements) |
+| V010 | 2026-01-24 | Add `tags` column for task categorization/discovery; separate from needed_tags/wanted_tags (claim requirements) |
+| V019 | 2026-01-25 | Standardize naming: rename `owner_agent` → `worker_id`, `agent_tags_all` → `needed_tags`, `agent_tags_any` → `wanted_tags`; rename `agents` table to `workers` |
 
 ---
 
 ## Entity Relationships
 
 ```
-agents 1──────< tasks (owner_agent)
-agents 1──────< file_locks (agent_id)
-agents 1──────< claim_sequence (agent_id)
-agents 1──────< task_state_sequence (agent_id, optional)
+workers 1──────< tasks (worker_id)
+workers 1──────< file_locks (worker_id)
+workers 1──────< claim_sequence (agent_id)
+workers 1──────< task_state_sequence (agent_id, optional)
 
 tasks 1──────< tasks (parent_id, self-referential hierarchy)
 tasks 1──────< attachments (task_id)
@@ -384,7 +384,7 @@ tasks >──────< tasks (via dependencies table, DAG)
 ## Notes
 
 - All timestamps are Unix epoch integers (seconds)
-- JSON fields (`tags`, `agent_tags_all`, `agent_tags_any`, `user_metrics`) are stored as TEXT
+- JSON fields (`tags`, `needed_tags`, `wanted_tags`, `user_metrics`) are stored as TEXT
 - File paths in `file_locks` and `claim_sequence` are relative to the project root
 - Attachment `file_path` references files in `.task-graph/media/` directory
 - Foreign keys use `ON DELETE CASCADE` for automatic cleanup

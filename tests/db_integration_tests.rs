@@ -275,8 +275,8 @@ mod task_tests {
                 None, // priority
                 None, // points
                 None, // time_estimate
-                None, // agent_tags_all
-                None, // agent_tags_any
+                None, // needed_tags
+                None, // wanted_tags
                 None, // tags
                 &states_config,
             )
@@ -286,7 +286,7 @@ mod task_tests {
         assert_eq!(task.description, Some("Test Task".to_string()));
         assert_eq!(task.status, "pending");
         assert_eq!(task.priority, PRIORITY_DEFAULT);
-        assert!(task.owner_agent.is_none());
+        assert!(task.worker_id.is_none());
     }
 
     #[test]
@@ -302,8 +302,8 @@ mod task_tests {
                 Some(8),
                 Some(5),
                 Some(3600000),
-                Some(vec!["rust".to_string()]), // agent_tags_all
-                Some(vec!["backend".to_string()]), // agent_tags_any
+                Some(vec!["rust".to_string()]), // needed_tags
+                Some(vec!["backend".to_string()]), // wanted_tags
                 None, // tags
                 &states_config,
             )
@@ -314,8 +314,8 @@ mod task_tests {
         assert_eq!(task.priority, 8);
         assert_eq!(task.points, Some(5));
         assert_eq!(task.time_estimate_ms, Some(3600000));
-        assert_eq!(task.agent_tags_all, vec!["rust"]);
-        assert_eq!(task.agent_tags_any, vec!["backend"]);
+        assert_eq!(task.needed_tags, vec!["rust"]);
+        assert_eq!(task.wanted_tags, vec!["backend"]);
     }
 
     #[test]
@@ -587,7 +587,7 @@ mod task_claiming_tests {
 
         let claimed = db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
-        assert_eq!(claimed.owner_agent, Some(agent.id.clone()));
+        assert_eq!(claimed.worker_id, Some(agent.id.clone()));
         assert_eq!(claimed.status, "in_progress");
         assert!(claimed.claimed_at.is_some());
         assert!(claimed.started_at.is_some());
@@ -657,7 +657,7 @@ mod task_claiming_tests {
     }
 
     #[test]
-    fn claim_task_succeeds_if_agent_has_agent_tags_all() {
+    fn claim_task_succeeds_if_agent_has_needed_tags() {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
@@ -684,7 +684,7 @@ mod task_claiming_tests {
     }
 
     #[test]
-    fn claim_task_fails_if_agent_has_none_of_agent_tags_any() {
+    fn claim_task_fails_if_agent_has_none_of_wanted_tags() {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
@@ -723,7 +723,7 @@ mod task_claiming_tests {
         db.release_task(&task.id, &agent.id, &states_config).unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
-        assert!(updated.owner_agent.is_none());
+        assert!(updated.worker_id.is_none());
         assert_eq!(updated.status, "pending");
     }
 
@@ -756,7 +756,7 @@ mod task_claiming_tests {
         db.force_release(&task.id, &states_config).unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
-        assert!(updated.owner_agent.is_none());
+        assert!(updated.worker_id.is_none());
     }
 
     // Tests for unified update with claim/release behavior
@@ -789,7 +789,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(updated.status, "in_progress");
-        assert_eq!(updated.owner_agent, Some(agent.id.clone()));
+        assert_eq!(updated.worker_id, Some(agent.id.clone()));
         assert!(updated.claimed_at.is_some());
         assert!(auto_advanced.is_empty()); // No auto-advance with default config
     }
@@ -839,7 +839,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(updated.status, "pending");
-        assert!(updated.owner_agent.is_none());
+        assert!(updated.worker_id.is_none());
         assert!(updated.claimed_at.is_none());
     }
 
@@ -875,7 +875,7 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        assert_eq!(updated.owner_agent, Some(agent2.id.clone()));
+        assert_eq!(updated.worker_id, Some(agent2.id.clone()));
     }
 
     #[test]
@@ -925,7 +925,7 @@ mod task_claiming_tests {
                 None,
                 "Needs Rust".to_string(),
                 None, None, None, None,
-                Some(vec!["rust".to_string()]), // agent_tags_all
+                Some(vec!["rust".to_string()]), // needed_tags
                 None, None,
                 &states_config,
             )
@@ -981,7 +981,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(updated.status, "completed");
-        assert!(updated.owner_agent.is_none());
+        assert!(updated.worker_id.is_none());
         assert!(updated.completed_at.is_some());
     }
 
@@ -1069,7 +1069,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(updated.status, "in_progress");
-        assert_eq!(updated.owner_agent, Some(agent.id.clone()));
+        assert_eq!(updated.worker_id, Some(agent.id.clone()));
 
         // Transition to second timed state - should preserve ownership
         let (updated, _, _) = db
@@ -1089,7 +1089,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(updated.status, "reviewing");
-        assert_eq!(updated.owner_agent, Some(agent.id.clone())); // Still owned
+        assert_eq!(updated.worker_id, Some(agent.id.clone())); // Still owned
         assert!(updated.claimed_at.is_some()); // Still has claimed_at
 
         // Verify state history was recorded for both transitions
@@ -1138,7 +1138,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(updated.status, "in_progress");
-        assert_eq!(updated.owner_agent, Some(agent.id.clone()));
+        assert_eq!(updated.worker_id, Some(agent.id.clone()));
 
         // Verify no additional history was recorded (status didn't change)
         let history = db.get_task_state_history(&task.id).unwrap();
@@ -1177,7 +1177,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(failed_task.status, "failed");
-        assert!(failed_task.owner_agent.is_none()); // Released on transition to terminal-ish state
+        assert!(failed_task.worker_id.is_none()); // Released on transition to terminal-ish state
 
         // Now transition from failed (untimed) to pending (untimed)
         let (updated, _, _) = db
@@ -1197,7 +1197,7 @@ mod task_claiming_tests {
             .unwrap();
 
         assert_eq!(updated.status, "pending");
-        assert!(updated.owner_agent.is_none()); // Still no owner
+        assert!(updated.worker_id.is_none()); // Still no owner
         assert!(updated.claimed_at.is_none());
 
         // Verify state history was recorded for all transitions
@@ -1681,8 +1681,8 @@ mod stats_tests {
         let stats = db.get_stats(None, None, &states_config).unwrap();
 
         assert_eq!(stats.total_tasks, 2);
-        assert_eq!(*stats.tasks_by_state.get("pending").unwrap_or(&0), 1);
-        assert_eq!(*stats.tasks_by_state.get("completed").unwrap_or(&0), 1);
+        assert_eq!(*stats.tasks_by_status.get("pending").unwrap_or(&0), 1);
+        assert_eq!(*stats.tasks_by_status.get("completed").unwrap_or(&0), 1);
         assert_eq!(stats.total_points, 8);
         assert_eq!(stats.completed_points, 5);
     }

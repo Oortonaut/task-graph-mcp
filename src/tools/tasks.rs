@@ -108,7 +108,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "ready": {
                     "type": "boolean",
-                    "description": "Filter for claimable tasks: in initial state, unclaimed, all start-blocking deps satisfied. When combined with 'agent', also filters by agent's tag qualifications."
+                    "description": "Filter for claimable tasks: in initial status, unclaimed, all start-blocking deps satisfied. When combined with 'agent', also filters by agent's tag qualifications."
                 },
                 "blocked": {
                     "type": "boolean",
@@ -160,7 +160,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "update",
-            "Update a task's properties. State changes handle ownership automatically: transitioning to a timed state (e.g., in_progress) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it. For push coordination: use assignee to assign a task to another agent (sets owner and transitions to 'assigned' state). Only the owner can update a claimed task unless force=true.",
+            "Update a task's properties. Status changes handle ownership automatically: transitioning to a timed status (e.g., in_progress) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it. For push coordination: use assignee to assign a task to another agent (sets owner and transitions to 'assigned' status). Only the owner can update a claimed task unless force=true.",
             json!({
                 "worker_id": {
                     "type": "string",
@@ -172,7 +172,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "assignee": {
                     "type": "string",
-                    "description": "Agent ID to assign the task to (push coordination). Sets owner_agent to assignee and transitions to 'assigned' state. The assignee can then claim (transition to in_progress) when ready."
+                    "description": "Agent ID to assign the task to (push coordination). Sets owner_agent to assignee and transitions to 'assigned' status. The assignee can then claim (transition to in_progress) when ready."
                 },
                 "status": {
                     "type": "string",

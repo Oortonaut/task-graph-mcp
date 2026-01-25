@@ -1,7 +1,7 @@
 //! Worker CRUD operations.
 
 use super::{now_ms, Database};
-use crate::types::{DisconnectSummary, Worker};
+use crate::types::{CleanupSummary, DisconnectSummary, Worker};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
 
@@ -242,7 +242,7 @@ impl Database {
 
             // Return current claim count
             let count: i32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE owner_agent = ?1 AND status = 'in_progress'",
+                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'in_progress'",
                 params![worker_id],
                 |row| row.get(0),
             )?;
@@ -253,15 +253,15 @@ impl Database {
 
     /// Unregister a worker (releases all claims).
     /// Returns a summary of released tasks and files.
-    pub fn unregister_worker(&self, worker_id: &str, final_state: &str) -> Result<DisconnectSummary> {
+    pub fn unregister_worker(&self, worker_id: &str, final_status: &str) -> Result<DisconnectSummary> {
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
 
-            // Release all task claims, setting them to final_state
+            // Release all task claims, setting them to final_status
             let tasks_released = tx.execute(
-                "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?2
-                 WHERE owner_agent = ?1",
-                params![worker_id, final_state],
+                "UPDATE tasks SET worker_id = NULL, claimed_at = NULL, status = ?2
+                 WHERE worker_id = ?1",
+                params![worker_id, final_status],
             )? as i32;
 
             // Remove all file locks
@@ -280,7 +280,7 @@ impl Database {
             Ok(DisconnectSummary {
                 tasks_released,
                 files_released,
-                final_state: final_state.to_string(),
+                final_status: final_status.to_string(),
             })
         })
     }
@@ -324,8 +324,8 @@ impl Database {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
-                        (SELECT COUNT(*) FROM tasks WHERE owner_agent = w.id AND status = 'in_progress') as claim_count,
-                        (SELECT current_thought FROM tasks WHERE owner_agent = w.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
+                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'in_progress') as claim_count,
+                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
                  FROM workers w ORDER BY w.registered_at DESC",
             )?;
 
@@ -376,8 +376,8 @@ impl Database {
             // Start with base query
             let mut sql = String::from(
                 "SELECT DISTINCT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
-                        (SELECT COUNT(*) FROM tasks WHERE owner_agent = w.id AND status = 'in_progress') as claim_count,
-                        (SELECT current_thought FROM tasks WHERE owner_agent = w.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
+                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'in_progress') as claim_count,
+                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
                  FROM workers w WHERE 1=1",
             );
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -395,7 +395,7 @@ impl Database {
                 if !related_task_ids.is_empty() {
                     let placeholders: Vec<String> = related_task_ids.iter().map(|_| "?".to_string()).collect();
                     sql.push_str(&format!(
-                        " AND w.id IN (SELECT DISTINCT owner_agent FROM tasks WHERE id IN ({}) AND owner_agent IS NOT NULL)",
+                        " AND w.id IN (SELECT DISTINCT worker_id FROM tasks WHERE id IN ({}) AND worker_id IS NOT NULL)",
                         placeholders.join(", ")
                     ));
                     for task in related_task_ids {
@@ -510,7 +510,6 @@ impl Database {
     }
 
     /// Get workers with stale heartbeats.
-    #[allow(dead_code)]
     pub fn get_stale_workers(&self, timeout_seconds: i64) -> Result<Vec<Worker>> {
         let cutoff = now_ms() - (timeout_seconds * 1000);
 
@@ -546,11 +545,41 @@ impl Database {
         })
     }
 
+    /// Cleanup stale workers by evicting them and releasing their claims.
+    /// Returns a summary of the cleanup operation.
+    pub fn cleanup_stale_workers(&self, timeout_seconds: i64, final_status: &str) -> Result<CleanupSummary> {
+        let stale_workers = self.get_stale_workers(timeout_seconds)?;
+        
+        let mut total_tasks_released = 0;
+        let mut total_files_released = 0;
+        let mut evicted_worker_ids = Vec::new();
+        
+        for worker in &stale_workers {
+            // Release file locks first
+            let _ = self.release_worker_locks(&worker.id);
+            
+            // Unregister the worker
+            if let Ok(summary) = self.unregister_worker(&worker.id, final_status) {
+                total_tasks_released += summary.tasks_released;
+                total_files_released += summary.files_released;
+                evicted_worker_ids.push(worker.id.clone());
+            }
+        }
+        
+        Ok(CleanupSummary {
+            workers_evicted: evicted_worker_ids.len() as i32,
+            tasks_released: total_tasks_released,
+            files_released: total_files_released,
+            final_status: final_status.to_string(),
+            evicted_worker_ids,
+        })
+    }
+
     /// Get claim count for a worker.
     pub fn get_claim_count(&self, worker_id: &str) -> Result<i32> {
         self.with_conn(|conn| {
             let count: i32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE owner_agent = ?1 AND status = 'in_progress'",
+                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'in_progress'",
                 params![worker_id],
                 |row| row.get(0),
             )?;

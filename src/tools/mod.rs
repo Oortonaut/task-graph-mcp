@@ -110,7 +110,8 @@ impl ToolHandler {
             // Worker tools
             "connect" => json(agents::connect(&self.db, arguments)),
             "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
-            "list_agents" => agents::list_agents(&self.db, self.default_format, arguments),
+            "list_agents" => agents::list_agents(&self.db, &self.states_config, self.default_format, arguments),
+            "cleanup_stale" => json(agents::cleanup_stale(&self.db, &self.states_config, arguments)),
 
             // Task tools
             "create" => json(tasks::create(&self.db, &self.states_config, arguments)),
@@ -137,6 +138,7 @@ impl ToolHandler {
             // Dependency tools
             "link" => json(deps::link(&self.db, &self.deps_config, arguments)),
             "unlink" => json(deps::unlink(&self.db, arguments)),
+            "relink" => json(deps::relink(&self.db, &self.deps_config, arguments)),
 
             // Claiming tools
             "claim" => json(claiming::claim(&self.db, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),

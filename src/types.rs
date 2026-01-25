@@ -50,12 +50,12 @@ pub struct Task {
     pub description: Option<String>,
     pub status: String,
     pub priority: Priority,
-    pub owner_agent: Option<String>,
+    pub worker_id: Option<String>,
     pub claimed_at: Option<i64>,
 
     // Affinity (tag-based claiming requirements)
-    pub agent_tags_all: Vec<String>,
-    pub agent_tags_any: Vec<String>,
+    pub needed_tags: Vec<String>,
+    pub wanted_tags: Vec<String>,
 
     // Categorization/discovery tags
     pub tags: Vec<String>,
@@ -135,10 +135,10 @@ pub struct TaskTreeInput {
     pub time_estimate_ms: Option<i64>,
     
     /// Tags that claiming agent must have ALL of (AND logic).
-    pub agent_tags_all: Option<Vec<String>>,
-    
+    pub needed_tags: Option<Vec<String>>,
+
     /// Tags that claiming agent must have AT LEAST ONE of (OR logic).
-    pub agent_tags_any: Option<Vec<String>>,
+    pub wanted_tags: Option<Vec<String>>,
     
     /// Categorization/discovery tags for the task.
     pub tags: Option<Vec<String>>,
@@ -263,7 +263,7 @@ pub struct AttachmentMeta {
 pub struct Stats {
     pub total_tasks: i64,
     /// Task counts by state (dynamic based on config).
-    pub tasks_by_state: HashMap<String, i64>,
+    pub tasks_by_status: HashMap<String, i64>,
     pub total_points: i64,
     pub completed_points: i64,
     pub total_time_estimate_ms: i64,
@@ -280,7 +280,7 @@ pub struct TaskSummary {
     pub title: String,
     pub status: String,
     pub priority: Priority,
-    pub owner_agent: Option<String>,
+    pub worker_id: Option<String>,
     pub points: Option<i32>,
     pub current_thought: Option<String>,
 }
@@ -309,8 +309,23 @@ pub struct DisconnectSummary {
     pub tasks_released: i32,
     /// Number of file locks that were released.
     pub files_released: i32,
-    /// The final state applied to released tasks.
-    pub final_state: String,
+    /// The final status applied to released tasks.
+    pub final_status: String,
+}
+
+/// Summary of stale worker cleanup operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CleanupSummary {
+    /// Number of stale workers evicted.
+    pub workers_evicted: i32,
+    /// Total number of tasks released across all evicted workers.
+    pub tasks_released: i32,
+    /// Total number of file locks released across all evicted workers.
+    pub files_released: i32,
+    /// The final status applied to released tasks.
+    pub final_status: String,
+    /// IDs of evicted workers.
+    pub evicted_worker_ids: Vec<String>,
 }
 
 #[cfg(test)]

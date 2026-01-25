@@ -67,8 +67,8 @@ pub struct ProjectStateStats {
     pub total_transitions: i64,
     pub total_time_ms: i64,
     pub tasks_affected: i64,
-    pub transitions_by_state: std::collections::HashMap<String, i64>,
-    pub time_by_state_ms: std::collections::HashMap<String, i64>,
+    pub transitions_by_status: std::collections::HashMap<String, i64>,
+    pub time_by_status_ms: std::collections::HashMap<String, i64>,
     pub transitions_by_agent: std::collections::HashMap<String, i64>,
     pub time_by_agent_ms: std::collections::HashMap<String, i64>,
 }
@@ -209,8 +209,8 @@ impl Database {
         to_timestamp: Option<i64>,
     ) -> Result<ProjectStateStats> {
         self.with_conn(|conn| {
-            let mut transitions_by_state = std::collections::HashMap::new();
-            let mut time_by_state = std::collections::HashMap::new();
+            let mut transitions_by_status = std::collections::HashMap::new();
+            let mut time_by_status = std::collections::HashMap::new();
             let mut transitions_by_agent = std::collections::HashMap::new();
             let mut time_by_agent = std::collections::HashMap::new();
             let mut tasks_touched = std::collections::HashSet::new();
@@ -248,7 +248,7 @@ impl Database {
                 total_transitions += 1;
                 tasks_touched.insert(task_id);
 
-                *transitions_by_state.entry(event.clone()).or_insert(0i64) += 1;
+                *transitions_by_status.entry(event.clone()).or_insert(0i64) += 1;
 
                 if let Some(ref agent) = worker_id {
                     *transitions_by_agent.entry(agent.clone()).or_insert(0i64) += 1;
@@ -258,7 +258,7 @@ impl Database {
                 if let Some(end_ts) = end_timestamp {
                     let duration = end_ts - timestamp;
                     total_time_ms += duration;
-                    *time_by_state.entry(event).or_insert(0i64) += duration;
+                    *time_by_status.entry(event).or_insert(0i64) += duration;
 
                     if let Some(agent) = worker_id {
                         *time_by_agent.entry(agent).or_insert(0i64) += duration;
@@ -270,8 +270,8 @@ impl Database {
                 total_transitions,
                 total_time_ms,
                 tasks_affected: tasks_touched.len() as i64,
-                transitions_by_state,
-                time_by_state_ms: time_by_state,
+                transitions_by_status,
+                time_by_status_ms: time_by_status,
                 transitions_by_agent,
                 time_by_agent_ms: time_by_agent,
             })

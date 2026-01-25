@@ -16,7 +16,7 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
             "description": t.description,
             "status": &t.status,
             "priority": t.priority,
-            "owner_agent": &t.owner_agent,
+            "worker_id": &t.worker_id,
             "claimed_at": t.claimed_at,
             "points": t.points,
             "time_estimate_ms": t.time_estimate_ms,
@@ -49,8 +49,8 @@ pub fn get_ready_tasks(
             "description": t.description,
             "priority": t.priority,
             "points": t.points,
-            "agent_tags_all": t.agent_tags_all,
-            "agent_tags_any": t.agent_tags_any
+            "needed_tags": t.needed_tags,
+            "wanted_tags": t.wanted_tags
         })).collect::<Vec<_>>()
     }))
 }
@@ -84,7 +84,7 @@ pub fn get_claimed_tasks(db: &Database, agent_id: Option<&str>) -> Result<Value>
             "title": t.title,
             "status": &t.status,
             "priority": t.priority,
-            "owner_agent": &t.owner_agent,
+            "worker_id": &t.worker_id,
             "claimed_at": t.claimed_at,
             "current_thought": t.current_thought
         })).collect::<Vec<_>>()

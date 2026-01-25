@@ -7,6 +7,78 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashSet, VecDeque};
 
+/// Result of a relink operation.
+#[derive(Debug)]
+pub struct RelinkResult {
+    /// Dependencies that were unlinked (from, to).
+    pub unlinked: Vec<(String, String)>,
+    /// Dependencies that were linked (from, to).
+    pub linked: Vec<(String, String)>,
+}
+
+/// Check if adding a dependency would create a cycle (transaction-safe version).
+fn would_create_cycle_in_tx(
+    tx: &rusqlite::Transaction,
+    from_task_id: &str,
+    to_task_id: &str,
+    dep_type: &str,
+    deps_config: &DependenciesConfig,
+) -> Result<bool> {
+    let def = deps_config.get_definition(dep_type).unwrap();
+
+    // A cycle would occur if to_task can already reach from_task
+    // through the same "graph" (horizontal or vertical)
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    queue.push_back(to_task_id.to_string());
+
+    while let Some(current) = queue.pop_front() {
+        if current == from_task_id {
+            return Ok(true); // Would create a cycle
+        }
+
+        if visited.contains(&current) {
+            continue;
+        }
+        visited.insert(current.clone());
+
+        // Get all tasks that current points to (in the relevant graph)
+        let deps: Vec<String> = if def.display == DependencyDisplay::Vertical {
+            // For vertical deps, only check containment relationships
+            let mut stmt = tx.prepare(
+                "SELECT to_task_id FROM dependencies d
+                 JOIN (SELECT value FROM json_each(?1)) types
+                 WHERE d.from_task_id = ?2 AND d.dep_type = types.value"
+            )?;
+            let vertical_types: Vec<&str> = deps_config.vertical_types();
+            let types_json = serde_json::to_string(&vertical_types)?;
+            stmt.query_map(params![&types_json, &current], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        } else {
+            // For horizontal deps, check all start-blocking relationships
+            let mut stmt = tx.prepare(
+                "SELECT to_task_id FROM dependencies d
+                 JOIN (SELECT value FROM json_each(?1)) types
+                 WHERE d.from_task_id = ?2 AND d.dep_type = types.value"
+            )?;
+            let start_blocking: Vec<&str> = deps_config.start_blocking_types();
+            let types_json = serde_json::to_string(&start_blocking)?;
+            stmt.query_map(params![&types_json, &current], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        for dep in deps {
+            if !visited.contains(&dep) {
+                queue.push_back(dep);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 /// Build an ORDER BY clause from sort_by and sort_order parameters.
 /// Returns a safe SQL ORDER BY expression.
 fn build_order_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String {
@@ -165,28 +237,33 @@ impl Database {
         from_task_id: &str,
         dep_type: &str,
     ) -> Result<Vec<Dependency>> {
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
             // First get the dependencies that will be removed
-            let mut stmt = conn.prepare(
-                "SELECT from_task_id, to_task_id, dep_type FROM dependencies WHERE from_task_id = ?1 AND dep_type = ?2"
-            )?;
-            let deps: Vec<Dependency> = stmt
-                .query_map(params![from_task_id, dep_type], |row| {
-                    Ok(Dependency {
-                        from_task_id: row.get(0)?,
-                        to_task_id: row.get(1)?,
-                        dep_type: row.get(2)?,
-                    })
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
+            let deps: Vec<Dependency> = {
+                let mut stmt = tx.prepare(
+                    "SELECT from_task_id, to_task_id, dep_type FROM dependencies WHERE from_task_id = ?1 AND dep_type = ?2"
+                )?;
+                stmt
+                    .query_map(params![from_task_id, dep_type], |row| {
+                        Ok(Dependency {
+                            from_task_id: row.get(0)?,
+                            to_task_id: row.get(1)?,
+                            dep_type: row.get(2)?,
+                        })
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            };
 
             // Then delete them
-            conn.execute(
+            tx.execute(
                 "DELETE FROM dependencies WHERE from_task_id = ?1 AND dep_type = ?2",
                 params![from_task_id, dep_type],
             )?;
 
+            tx.commit()?;
             Ok(deps)
         })
     }
@@ -198,28 +275,33 @@ impl Database {
         to_task_id: &str,
         dep_type: &str,
     ) -> Result<Vec<Dependency>> {
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
             // First get the dependencies that will be removed
-            let mut stmt = conn.prepare(
-                "SELECT from_task_id, to_task_id, dep_type FROM dependencies WHERE to_task_id = ?1 AND dep_type = ?2"
-            )?;
-            let deps: Vec<Dependency> = stmt
-                .query_map(params![to_task_id, dep_type], |row| {
-                    Ok(Dependency {
-                        from_task_id: row.get(0)?,
-                        to_task_id: row.get(1)?,
-                        dep_type: row.get(2)?,
-                    })
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
+            let deps: Vec<Dependency> = {
+                let mut stmt = tx.prepare(
+                    "SELECT from_task_id, to_task_id, dep_type FROM dependencies WHERE to_task_id = ?1 AND dep_type = ?2"
+                )?;
+                stmt
+                    .query_map(params![to_task_id, dep_type], |row| {
+                        Ok(Dependency {
+                            from_task_id: row.get(0)?,
+                            to_task_id: row.get(1)?,
+                            dep_type: row.get(2)?,
+                        })
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            };
 
             // Then delete them
-            conn.execute(
+            tx.execute(
                 "DELETE FROM dependencies WHERE to_task_id = ?1 AND dep_type = ?2",
                 params![to_task_id, dep_type],
             )?;
 
+            tx.commit()?;
             Ok(deps)
         })
     }
@@ -641,7 +723,7 @@ impl Database {
                 "SELECT t.*
                  FROM tasks t
                  WHERE t.status = ?1
-                 AND t.owner_agent IS NULL
+                 AND t.worker_id IS NULL
                  AND t.deleted_at IS NULL
                  AND NOT EXISTS (
                      SELECT 1 FROM dependencies d
@@ -829,7 +911,7 @@ impl Database {
 
             // Owner filter
             if let Some(o) = owner {
-                sql.push_str(&format!(" AND t.owner_agent = ?{}", param_idx));
+                sql.push_str(&format!(" AND t.worker_id = ?{}", param_idx));
                 params_vec.push(Box::new(o.to_string()));
                 param_idx += 1;
             }
@@ -998,6 +1080,101 @@ impl Database {
             params![from_task_id, to_task_id, dep_type],
         )?;
         Ok(())
+    }
+
+
+    /// Atomically relink dependencies: unlink all prev_from→prev_to, then link all from→to.
+    /// This is a transaction-safe operation for moving children between parents.
+    /// Returns a result with unlinked and linked pairs.
+    pub fn relink(
+        &self,
+        prev_from_ids: &[String],
+        prev_to_ids: &[String],
+        from_ids: &[String],
+        to_ids: &[String],
+        dep_type: &str,
+        deps_config: &DependenciesConfig,
+    ) -> Result<RelinkResult> {
+        // Validate dependency type upfront
+        if !deps_config.is_valid_dep_type(dep_type) {
+            return Err(anyhow!(
+                "Invalid dependency type '{}'. Valid types: {:?}",
+                dep_type,
+                deps_config.dep_type_names()
+            ));
+        }
+
+        let def = deps_config.get_definition(dep_type).unwrap();
+        let is_vertical = def.display == DependencyDisplay::Vertical;
+
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
+            let mut unlinked = Vec::new();
+            let mut linked = Vec::new();
+            let mut errors = Vec::new();
+
+            // Phase 1: Unlink all prev_from × prev_to
+            for prev_from in prev_from_ids {
+                for prev_to in prev_to_ids {
+                    let rows = tx.execute(
+                        "DELETE FROM dependencies WHERE from_task_id = ?1 AND to_task_id = ?2 AND dep_type = ?3",
+                        params![prev_from, prev_to, dep_type],
+                    )?;
+                    if rows > 0 {
+                        unlinked.push((prev_from.clone(), prev_to.clone()));
+                    }
+                }
+            }
+
+            // Phase 2: Link all from × to (with validation)
+            for from_id in from_ids {
+                for to_id in to_ids {
+                    // For vertical deps, check single-parent constraint
+                    if is_vertical {
+                        let existing_parent: Option<String> = tx.query_row(
+                            "SELECT from_task_id FROM dependencies WHERE to_task_id = ?1 AND dep_type = 'contains'",
+                            params![to_id],
+                            |row| row.get(0),
+                        ).optional()?;
+
+                        if let Some(ref parent) = existing_parent {
+                            if parent != from_id {
+                                errors.push(format!(
+                                    "Task {} already has parent {}",
+                                    to_id, parent
+                                ));
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Check for cycles using temporary view within transaction
+                    if would_create_cycle_in_tx(&tx, from_id, to_id, dep_type, deps_config)? {
+                        errors.push(format!(
+                            "Adding dependency {}→{} would create a cycle",
+                            from_id, to_id
+                        ));
+                        continue;
+                    }
+
+                    tx.execute(
+                        "INSERT OR IGNORE INTO dependencies (from_task_id, to_task_id, dep_type) VALUES (?1, ?2, ?3)",
+                        params![from_id, to_id, dep_type],
+                    )?;
+                    linked.push((from_id.clone(), to_id.clone()));
+                }
+            }
+
+            if !errors.is_empty() {
+                // Rollback on validation errors
+                tx.rollback()?;
+                return Err(anyhow!("Relink failed: {}", errors.join("; ")));
+            }
+
+            tx.commit()?;
+            Ok(RelinkResult { unlinked, linked })
+        })
     }
 
     // ============================================================================
@@ -1281,7 +1458,7 @@ pub(crate) fn propagate_unblock_effects(
         }
 
         // Skip if task is already claimed
-        if task.owner_agent.is_some() {
+        if task.worker_id.is_some() {
             continue;
         }
 

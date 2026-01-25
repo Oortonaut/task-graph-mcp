@@ -10,7 +10,7 @@ pub fn get_stats_summary(db: &Database, states_config: &StatesConfig) -> Result<
 
     Ok(json!({
         "total_tasks": stats.total_tasks,
-        "by_status": stats.tasks_by_state,
+        "by_status": stats.tasks_by_status,
         "points": {
             "total": stats.total_points,
             "completed": stats.completed_points,
@@ -58,7 +58,7 @@ pub fn get_acp_plan(db: &Database) -> Result<Value> {
             "status": status,
             "priority": t.priority,
             "blockedBy": blockers,
-            "assignee": &t.owner_agent,
+            "assignee": &t.worker_id,
             "metadata": {
                 "points": t.points,
                 "timeEstimateMs": t.time_estimate_ms,

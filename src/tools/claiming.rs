@@ -16,7 +16,7 @@ pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> 
     vec![
         make_tool_with_prompts(
             "claim",
-            "Commit to working on a task (like adding to a changelist). Fails if: already claimed, deps unsatisfied, worker at max_claims limit, or worker lacks required tags. Sets status to timed (working) state.",
+            "Commit to working on a task (like adding to a changelist). Fails if: already claimed, deps unsatisfied, worker at max_claims limit, or worker lacks required tags. Sets status to timed (working) status.",
             json!({
                 "worker_id": {
                     "type": "string",
@@ -86,7 +86,7 @@ pub fn claim(
             "id": &task.id,
             "title": task.title,
             "status": task.status,
-            "owner_agent": task.owner_agent,
+            "worker_id": task.worker_id,
             "claimed_at": task.claimed_at
         }
     }))

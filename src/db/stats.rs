@@ -34,7 +34,7 @@ impl Database {
                         COALESCE(SUM(metric_5), 0) as total_metric_5,
                         COALESCE(SUM(metric_6), 0) as total_metric_6,
                         COALESCE(SUM(metric_7), 0) as total_metric_7
-                    FROM tasks WHERE owner_agent = ?1"
+                    FROM tasks WHERE worker_id = ?1"
                         .to_string(),
                     vec![aid.to_string()],
                 ),
@@ -88,7 +88,7 @@ impl Database {
                         COALESCE(SUM(metric_5), 0) as total_metric_5,
                         COALESCE(SUM(metric_6), 0) as total_metric_6,
                         COALESCE(SUM(metric_7), 0) as total_metric_7
-                    FROM tasks WHERE id IN (SELECT id FROM descendants) AND owner_agent = ?1"
+                    FROM tasks WHERE id IN (SELECT id FROM descendants) AND worker_id = ?1"
                         .to_string(),
                     vec![aid.to_string(), tid.to_string()],
                 ),
@@ -156,7 +156,7 @@ impl Database {
             // Now query task counts by state
             let count_sql = match (agent_id, task_id) {
                 (Some(_aid), None) => {
-                    "SELECT status, COUNT(*) as cnt FROM tasks WHERE owner_agent = ?1 GROUP BY status"
+                    "SELECT status, COUNT(*) as cnt FROM tasks WHERE worker_id = ?1 GROUP BY status"
                 }
                 (None, Some(_tid)) => {
                     "WITH RECURSIVE descendants AS (
@@ -178,16 +178,16 @@ impl Database {
                         WHERE dep.dep_type = 'contains'
                     )
                     SELECT status, COUNT(*) as cnt FROM tasks
-                    WHERE id IN (SELECT id FROM descendants) AND owner_agent = ?1 GROUP BY status"
+                    WHERE id IN (SELECT id FROM descendants) AND worker_id = ?1 GROUP BY status"
                 }
                 (None, None) => "SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status",
             };
 
-            let mut tasks_by_state: HashMap<String, i64> = HashMap::new();
+            let mut tasks_by_status: HashMap<String, i64> = HashMap::new();
 
             // Initialize all defined states to 0
             for state in states_config.state_names() {
-                tasks_by_state.insert(state.to_string(), 0);
+                tasks_by_status.insert(state.to_string(), 0);
             }
 
             // Query and fill in actual counts
@@ -213,14 +213,14 @@ impl Database {
             };
 
             for (status, count) in status_counts {
-                tasks_by_state.insert(status, count);
+                tasks_by_status.insert(status, count);
             }
 
             // Calculate completed_points (points for tasks in non-blocking states)
             let completed_points_sql = match (agent_id, task_id) {
                 (Some(_aid), None) => {
                     "SELECT COALESCE(SUM(points), 0) FROM tasks 
-                     WHERE owner_agent = ?1 AND status NOT IN (SELECT value FROM json_each(?2))"
+                     WHERE worker_id = ?1 AND status NOT IN (SELECT value FROM json_each(?2))"
                 }
                 (None, Some(_tid)) => {
                     "WITH RECURSIVE descendants AS (
@@ -243,7 +243,7 @@ impl Database {
                         WHERE dep.dep_type = 'contains'
                     )
                     SELECT COALESCE(SUM(points), 0) FROM tasks
-                    WHERE id IN (SELECT id FROM descendants) AND owner_agent = ?1
+                    WHERE id IN (SELECT id FROM descendants) AND worker_id = ?1
                     AND status NOT IN (SELECT value FROM json_each(?3))"
                 }
                 (None, None) => {
@@ -279,7 +279,7 @@ impl Database {
 
             Ok(Stats {
                 total_tasks,
-                tasks_by_state,
+                tasks_by_status,
                 total_points,
                 completed_points,
                 total_time_estimate_ms,

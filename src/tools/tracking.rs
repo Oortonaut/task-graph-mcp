@@ -64,7 +64,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "task_history",
-            "Get the state transition history for a task, including automatic time tracking data and aggregate statistics.",
+            "Get the status transition history for a task, including automatic time tracking data and aggregate statistics.",
             json!({
                 "task": {
                     "type": "string",
@@ -73,7 +73,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "states": {
                     "type": "array",
                     "items": { "type": "string", "enum": state_enum },
-                    "description": "Filter to only show transitions involving these states"
+                    "description": "Filter to only show transitions involving these statuses"
                 }
             }),
             vec!["task"],
@@ -110,7 +110,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "project_history",
-            "Get project-wide state transition history and aggregate statistics. Like task_history but across all tasks with date/time range filters.",
+            "Get project-wide status transition history and aggregate statistics. Like task_history but across all tasks with date/time range filters.",
             json!({
                 "from": {
                     "type": "string",
@@ -123,7 +123,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "states": {
                     "type": "array",
                     "items": { "type": "string", "enum": state_enum },
-                    "description": "Filter to only show transitions involving these states"
+                    "description": "Filter to only show transitions involving these statuses"
                 },
                 "limit": {
                     "type": "integer",
@@ -180,7 +180,7 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
     let history = db.get_task_state_history(&task_id)?;
     let current_duration = db.get_current_state_duration(&task_id, states_config)?;
 
-    // Filter history by states if specified
+    // Filter history by statuses if specified
     let filtered_history: Vec<_> = if let Some(ref states) = state_filter {
         history
             .into_iter()
@@ -191,13 +191,13 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
     };
 
     // Calculate aggregate stats
-    let mut time_per_state: HashMap<String, i64> = HashMap::new();
+    let mut time_per_status: HashMap<String, i64> = HashMap::new();
     let mut time_per_agent: HashMap<String, i64> = HashMap::new();
 
     for event in &filtered_history {
         if let Some(end_ts) = event.end_timestamp {
             let duration = end_ts - event.timestamp;
-            *time_per_state.entry(event.event.clone()).or_insert(0) += duration;
+            *time_per_status.entry(event.event.clone()).or_insert(0) += duration;
             if let Some(ref agent) = event.worker_id {
                 *time_per_agent.entry(agent.clone()).or_insert(0) += duration;
             }
@@ -210,7 +210,7 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
             if last_event.end_timestamp.is_none() {
                 // Include in state filter check
                 if state_filter.is_none() || state_filter.as_ref().unwrap().contains(&last_event.event) {
-                    *time_per_state.entry(last_event.event.clone()).or_insert(0) += current_dur;
+                    *time_per_status.entry(last_event.event.clone()).or_insert(0) += current_dur;
                     if let Some(ref agent) = last_event.worker_id {
                         *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
                     }
@@ -224,11 +224,11 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
             let mut md = String::from("# Task History\n\n");
 
             // History table
-            md.push_str("## State Transitions\n\n");
+            md.push_str("## Status Transitions\n\n");
             if filtered_history.is_empty() {
-                md.push_str("No state transitions found.\n");
+                md.push_str("No status transitions found.\n");
             } else {
-                md.push_str("| # | State | Agent | Timestamp | Duration |\n");
+                md.push_str("| # | Status | Agent | Timestamp | Duration |\n");
                 md.push_str("|---|-------|-------|-----------|----------|\n");
                 for (i, event) in filtered_history.iter().enumerate() {
                     let duration = if let Some(end_ts) = event.end_timestamp {
@@ -251,16 +251,16 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
             }
 
             // Aggregate stats
-            md.push_str("\n## Time per State\n\n");
-            if time_per_state.is_empty() {
-                md.push_str("No completed state durations.\n");
+            md.push_str("\n## Time per Status\n\n");
+            if time_per_status.is_empty() {
+                md.push_str("No completed status durations.\n");
             } else {
-                md.push_str("| State | Total Time |\n");
-                md.push_str("|-------|------------|\n");
-                let mut sorted_states: Vec<_> = time_per_state.iter().collect();
-                sorted_states.sort_by_key(|(k, _)| k.as_str());
-                for (state, time) in sorted_states {
-                    md.push_str(&format!("| {} | {} |\n", state, format_duration_ms(*time)));
+                md.push_str("| Status | Total Time |\n");
+                md.push_str("|--------|------------|\n");
+                let mut sorted_statuses: Vec<_> = time_per_status.iter().collect();
+                sorted_statuses.sort_by_key(|(k, _)| k.as_str());
+                for (status, time) in sorted_statuses {
+                    md.push_str(&format!("| {} | {} |\n", status, format_duration_ms(*time)));
                 }
             }
 
@@ -283,7 +283,7 @@ pub fn task_history(db: &Database, states_config: &StatesConfig, default_format:
             Ok(json!({
                 "history": filtered_history,
                 "current_duration_ms": current_duration,
-                "time_per_state_ms": time_per_state,
+                "time_per_status_ms": time_per_status,
                 "time_per_agent_ms": time_per_agent
             }))
         }
@@ -397,9 +397,9 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
             // Recent transitions table
             md.push_str("## Recent Transitions\n\n");
             if history.is_empty() {
-                md.push_str("No state transitions found.\n");
+                md.push_str("No status transitions found.\n");
             } else {
-                md.push_str("| # | Task | State | Agent | Timestamp | Duration |\n");
+                md.push_str("| # | Task | Status | Agent | Timestamp | Duration |\n");
                 md.push_str("|---|------|-------|-------|-----------|----------|\n");
                 for (i, event) in history.iter().enumerate() {
                     let duration = if let Some(end_ts) = event.end_timestamp {
@@ -425,18 +425,18 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
                 }
             }
 
-            // Transitions by state
-            md.push_str("\n## Transitions by State\n\n");
-            if stats.transitions_by_state.is_empty() {
+            // Transitions by status
+            md.push_str("\n## Transitions by Status\n\n");
+            if stats.transitions_by_status.is_empty() {
                 md.push_str("No transitions found.\n");
             } else {
-                md.push_str("| State | Count | Total Time |\n");
+                md.push_str("| Status | Count | Total Time |\n");
                 md.push_str("|-------|-------|------------|\n");
-                let mut sorted_states: Vec<_> = stats.transitions_by_state.iter().collect();
-                sorted_states.sort_by_key(|(k, _)| k.as_str());
-                for (state, count) in sorted_states {
-                    let time = stats.time_by_state_ms.get(state).copied().unwrap_or(0);
-                    md.push_str(&format!("| {} | {} | {} |\n", state, count, format_duration_ms(time)));
+                let mut sorted_statuses: Vec<_> = stats.transitions_by_status.iter().collect();
+                sorted_statuses.sort_by_key(|(k, _)| k.as_str());
+                for (status, count) in sorted_statuses {
+                    let time = stats.time_by_status_ms.get(status).copied().unwrap_or(0);
+                    md.push_str(&format!("| {} | {} | {} |\n", status, count, format_duration_ms(time)));
                 }
             }
 
@@ -469,8 +469,8 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
                     "total_time_ms": stats.total_time_ms
                 },
                 "transitions": history,
-                "transitions_by_state": stats.transitions_by_state,
-                "time_by_state_ms": stats.time_by_state_ms,
+                "transitions_by_status": stats.transitions_by_status,
+                "time_by_status_ms": stats.time_by_status_ms,
                 "transitions_by_agent": stats.transitions_by_agent,
                 "time_by_agent_ms": stats.time_by_agent_ms
             }))

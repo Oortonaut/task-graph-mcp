@@ -78,11 +78,11 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let description: Option<String> = row.get("description")?;
     let status: String = row.get("status")?;
     let priority: String = row.get("priority")?;
-    let owner_agent: Option<String> = row.get("owner_agent")?;
+    let worker_id: Option<String> = row.get("worker_id")?;
     let claimed_at: Option<i64> = row.get("claimed_at")?;
 
-    let agent_tags_all_json: Option<String> = row.get("agent_tags_all")?;
-    let agent_tags_any_json: Option<String> = row.get("agent_tags_any")?;
+    let needed_tags_json: Option<String> = row.get("needed_tags")?;
+    let wanted_tags_json: Option<String> = row.get("wanted_tags")?;
     let tags_json: Option<String> = row.get("tags")?;
 
     let points: Option<i32> = row.get("points")?;
@@ -113,12 +113,12 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         description,
         status,
         priority: parse_priority(&priority),
-        owner_agent,
+        worker_id,
         claimed_at,
-        agent_tags_all: agent_tags_all_json
+        needed_tags: needed_tags_json
             .map(|s| serde_json::from_str(&s).unwrap_or_default())
             .unwrap_or_default(),
-        agent_tags_any: agent_tags_any_json
+        wanted_tags: wanted_tags_json
             .map(|s| serde_json::from_str(&s).unwrap_or_default())
             .unwrap_or_default(),
         tags: tags_json
@@ -187,7 +187,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
 /// Internal helper to get claim count using an existing connection (avoids deadlock).
 fn get_claim_count_internal(conn: &Connection, agent_id: &str) -> Result<i32> {
     let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE owner_agent = ?1 AND status = 'in_progress'",
+        "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'in_progress'",
         params![agent_id],
         |row| row.get(0),
     )?;
@@ -216,11 +216,11 @@ impl Database {
         let priority = clamp_priority(priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
 
-        let agent_tags_all = agent_tags_all.unwrap_or_default();
-        let agent_tags_any = agent_tags_any.unwrap_or_default();
+        let needed_tags = agent_tags_all.unwrap_or_default();
+        let wanted_tags = agent_tags_any.unwrap_or_default();
         let tags = tags.unwrap_or_default();
-        let agent_tags_all_json = serde_json::to_string(&agent_tags_all)?;
-        let agent_tags_any_json = serde_json::to_string(&agent_tags_any)?;
+        let needed_tags_json = serde_json::to_string(&needed_tags)?;
+        let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
         let tags_json = serde_json::to_string(&tags)?;
 
         self.with_conn_mut(|conn| {
@@ -229,7 +229,7 @@ impl Database {
             tx.execute(
                 "INSERT INTO tasks (
                     id, title, description, status, priority,
-                    agent_tags_all, agent_tags_any, tags, points, time_estimate_ms, created_at, updated_at
+                    needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     &task_id,
@@ -237,8 +237,8 @@ impl Database {
                     &description,  // Also store as description
                     initial_status,
                     priority.to_string(),
-                    agent_tags_all_json,
-                    agent_tags_any_json,
+                    needed_tags_json,
+                    wanted_tags_json,
                     tags_json,
                     points,
                     time_estimate_ms,
@@ -249,8 +249,8 @@ impl Database {
 
             // Sync tags to junction tables
             sync_task_tags(&tx, &task_id, &tags)?;
-            sync_needed_tags(&tx, &task_id, &agent_tags_all)?;
-            sync_wanted_tags(&tx, &task_id, &agent_tags_any)?;
+            sync_needed_tags(&tx, &task_id, &needed_tags)?;
+            sync_wanted_tags(&tx, &task_id, &wanted_tags)?;
 
             // Create 'contains' dependency if parent_id is provided
             if let Some(ref pid) = parent_id {
@@ -268,10 +268,10 @@ impl Database {
                 description: Some(description),
                 status: initial_status.clone(),
                 priority,
-                owner_agent: None,
+                worker_id: None,
                 claimed_at: None,
-                agent_tags_all,
-                agent_tags_any,
+                needed_tags,
+                wanted_tags,
                 tags,
                 points,
                 time_estimate_ms,
@@ -445,7 +445,7 @@ impl Database {
                     conn,
                     task_id,
                     &new_status,
-                    task.owner_agent.as_deref(),
+                    task.worker_id.as_deref(),
                     None,
                     states_config,
                 )?;
@@ -529,7 +529,7 @@ impl Database {
                 get_task_internal(&tx, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             // Owner-only validation: if task is claimed, only owner can update (unless force)
-            if let Some(ref current_owner) = task.owner_agent {
+            if let Some(ref current_owner) = task.worker_id {
                 if current_owner != agent_id && !force {
                     return Err(anyhow!(
                         "Task is claimed by agent '{}'. Only the owner can update claimed tasks (use force=true to override)",
@@ -549,8 +549,8 @@ impl Database {
             let new_priority = priority.unwrap_or(task.priority);
             let new_points = points.unwrap_or(task.points);
             let new_tags = tags.unwrap_or(task.tags.clone());
-            let new_needed_tags = needed_tags.unwrap_or(task.agent_tags_all.clone());
-            let new_wanted_tags = wanted_tags.unwrap_or(task.agent_tags_any.clone());
+            let new_needed_tags = needed_tags.unwrap_or(task.needed_tags.clone());
+            let new_wanted_tags = wanted_tags.unwrap_or(task.wanted_tags.clone());
             let new_time_estimate_ms = time_estimate_ms.or(task.time_estimate_ms);
 
             // Validate the new status exists
@@ -578,11 +578,11 @@ impl Database {
             // Determine ownership changes based on state transition
             let new_is_timed = states_config.is_timed_state(&new_status);
             let new_is_terminal = states_config.is_terminal_state(&new_status);
-            let current_owner = task.owner_agent.as_deref();
+            let current_owner = task.worker_id.as_deref();
             let is_owned_by_agent = current_owner == Some(agent_id);
             let is_owned_by_other = current_owner.is_some() && !is_owned_by_agent;
 
-            let mut new_owner: Option<String> = task.owner_agent.clone();
+            let mut new_owner: Option<String> = task.worker_id.clone();
             let mut new_claimed_at: Option<i64> = task.claimed_at;
 
             // ASSIGN: Push coordination - coordinator assigns task to another agent
@@ -611,8 +611,8 @@ impl Database {
                 }
 
                 // Check tag affinity for the assignee
-                if !task.agent_tags_all.is_empty() {
-                    for needed in &task.agent_tags_all {
+                if !task.needed_tags.is_empty() {
+                    for needed in &task.needed_tags {
                         if !target.tags.contains(needed) {
                             return Err(anyhow!(
                                 "Assignee '{}' missing required tag: {}",
@@ -623,16 +623,16 @@ impl Database {
                     }
                 }
 
-                if !task.agent_tags_any.is_empty() {
+                if !task.wanted_tags.is_empty() {
                     let has_any = task
-                        .agent_tags_any
+                        .wanted_tags
                         .iter()
                         .any(|wanted| target.tags.contains(wanted));
                     if !has_any {
                         return Err(anyhow!(
                             "Assignee '{}' has none of the wanted tags: {:?}",
                             target_agent,
-                            task.agent_tags_any
+                            task.wanted_tags
                         ));
                     }
                 }
@@ -663,19 +663,19 @@ impl Database {
                     return Err(anyhow!("Agent has reached claim limit"));
                 }
 
-                // Check tag affinity - agent_tags_all (AND - must have ALL)
-                if !task.agent_tags_all.is_empty() {
-                    for needed in &task.agent_tags_all {
+                // Check tag affinity - needed_tags (AND - must have ALL)
+                if !task.needed_tags.is_empty() {
+                    for needed in &task.needed_tags {
                         if !agent.tags.contains(needed) {
                             return Err(anyhow!("Agent missing required tag: {}", needed));
                         }
                     }
                 }
 
-                // Check tag affinity - agent_tags_any (OR - must have AT LEAST ONE)
-                if !task.agent_tags_any.is_empty() {
+                // Check tag affinity - wanted_tags (OR - must have AT LEAST ONE)
+                if !task.wanted_tags.is_empty() {
                     let has_any = task
-                        .agent_tags_any
+                        .wanted_tags
                         .iter()
                         .any(|wanted| agent.tags.contains(wanted));
                     if !has_any {
@@ -695,7 +695,7 @@ impl Database {
             }
 
             // RELEASE: Transitioning to non-timed state (but not terminal)
-            if !new_is_timed && !new_is_terminal && task.owner_agent.is_some() {
+            if !new_is_timed && !new_is_terminal && task.worker_id.is_some() {
                 // Verify ownership (unless force)
                 if is_owned_by_other && !force {
                     return Err(anyhow!("Task is not owned by this agent"));
@@ -709,7 +709,7 @@ impl Database {
             // COMPLETE: Transition to terminal state
             if new_is_terminal {
                 // Verify ownership if task was claimed (unless force)
-                if let Some(ref current_owner) = task.owner_agent {
+                if let Some(ref current_owner) = task.worker_id {
                     if current_owner != agent_id && !force {
                         return Err(anyhow!("Task is not owned by this agent"));
                     }
@@ -777,8 +777,8 @@ impl Database {
                 "UPDATE tasks SET
                     title = ?1, description = ?2, status = ?3, priority = ?4,
                     points = ?5, started_at = ?6, completed_at = ?7, updated_at = ?8,
-                    tags = ?9, owner_agent = ?10, claimed_at = ?11,
-                    agent_tags_all = ?12, agent_tags_any = ?13, time_estimate_ms = ?14
+                    tags = ?9, worker_id = ?10, claimed_at = ?11,
+                    needed_tags = ?12, wanted_tags = ?13, time_estimate_ms = ?14
                 WHERE id = ?15",
                 params![
                     new_title,
@@ -803,10 +803,10 @@ impl Database {
             if new_tags != task.tags {
                 sync_task_tags(&tx, task_id, &new_tags)?;
             }
-            if new_needed_tags != task.agent_tags_all {
+            if new_needed_tags != task.needed_tags {
                 sync_needed_tags(&tx, task_id, &new_needed_tags)?;
             }
-            if new_wanted_tags != task.agent_tags_any {
+            if new_wanted_tags != task.wanted_tags {
                 sync_wanted_tags(&tx, task_id, &new_wanted_tags)?;
             }
 
@@ -841,13 +841,13 @@ impl Database {
                 priority: new_priority,
                 points: new_points,
                 tags: new_tags,
-                agent_tags_all: new_needed_tags,
-                agent_tags_any: new_wanted_tags,
+                needed_tags: new_needed_tags,
+                wanted_tags: new_wanted_tags,
                 time_estimate_ms: new_time_estimate_ms,
                 started_at,
                 completed_at,
                 updated_at: now,
-                owner_agent: new_owner,
+                worker_id: new_owner,
                 claimed_at: new_claimed_at,
                 ..task
             }, unblocked, auto_advanced))
@@ -880,7 +880,7 @@ impl Database {
                 .ok_or_else(|| anyhow!("Task not found"))?;
 
             // Check ownership - reject if claimed by another worker (unless force)
-            if let Some(ref owner) = task.owner_agent {
+            if let Some(ref owner) = task.worker_id {
                 if owner != worker_id && !force {
                     return Err(anyhow!(
                         "Task is claimed by worker '{}'. Use force=true to override.",
@@ -982,7 +982,7 @@ impl Database {
             }
 
             if let Some(o) = owner {
-                sql.push_str(" AND t.owner_agent = ?");
+                sql.push_str(" AND t.worker_id = ?");
                 params_vec.push(Box::new(o.to_string()));
             }
 
@@ -1035,7 +1035,7 @@ impl Database {
                 let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
                 let sql = format!(
                     "UPDATE tasks SET current_thought = ?, updated_at = ?
-                     WHERE owner_agent = ? AND id IN ({})",
+                     WHERE worker_id = ? AND id IN ({})",
                     placeholders.join(", ")
                 );
 
@@ -1052,7 +1052,7 @@ impl Database {
                 conn.execute(&sql, params_refs.as_slice())?
             } else {
                 conn.execute(
-                    "UPDATE tasks SET current_thought = ?, updated_at = ? WHERE owner_agent = ?",
+                    "UPDATE tasks SET current_thought = ?, updated_at = ? WHERE worker_id = ?",
                     params![thought, now, agent_id],
                 )?
             };
@@ -1176,7 +1176,7 @@ impl Database {
                 get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
             // Check if already claimed
-            if task.owner_agent.is_some() {
+            if task.worker_id.is_some() {
                 return Err(anyhow!("Task is already claimed"));
             }
 
@@ -1200,19 +1200,19 @@ impl Database {
                 return Err(anyhow!("Agent has reached claim limit"));
             }
 
-            // Check tag affinity - agent_tags_all (AND - must have ALL)
-            if !task.agent_tags_all.is_empty() {
-                for needed in &task.agent_tags_all {
+            // Check tag affinity - needed_tags (AND - must have ALL)
+            if !task.needed_tags.is_empty() {
+                for needed in &task.needed_tags {
                     if !agent.tags.contains(needed) {
                         return Err(anyhow!("Agent missing required tag: {}", needed));
                     }
                 }
             }
 
-            // Check tag affinity - agent_tags_any (OR - must have AT LEAST ONE)
-            if !task.agent_tags_any.is_empty() {
+            // Check tag affinity - wanted_tags (OR - must have AT LEAST ONE)
+            if !task.wanted_tags.is_empty() {
                 let has_any = task
-                    .agent_tags_any
+                    .wanted_tags
                     .iter()
                     .any(|wanted| agent.tags.contains(wanted));
                 if !has_any {
@@ -1221,7 +1221,7 @@ impl Database {
             }
 
             conn.execute(
-                "UPDATE tasks SET owner_agent = ?1, claimed_at = ?2, status = ?3, started_at = ?4, updated_at = ?5
+                "UPDATE tasks SET worker_id = ?1, claimed_at = ?2, status = ?3, started_at = ?4, updated_at = ?5
                  WHERE id = ?6",
                 params![agent_id, now, claim_status, now, now, task_id,],
             )?;
@@ -1243,7 +1243,7 @@ impl Database {
             )?;
 
             Ok(Task {
-                owner_agent: Some(agent_id.to_string()),
+                worker_id: Some(agent_id.to_string()),
                 claimed_at: Some(now),
                 status: claim_status.to_string(),
                 started_at: Some(now),
@@ -1267,7 +1267,7 @@ impl Database {
             let task =
                 get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
-            if task.owner_agent.as_deref() != Some(agent_id) {
+            if task.worker_id.as_deref() != Some(agent_id) {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
@@ -1282,7 +1282,7 @@ impl Database {
             )?;
 
             conn.execute(
-                "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
+                "UPDATE tasks SET worker_id = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
                  WHERE id = ?3",
                 params![release_status, now, task_id],
             )?;
@@ -1305,13 +1305,13 @@ impl Database {
                 conn,
                 task_id,
                 release_status,
-                task.owner_agent.as_deref(),
+                task.worker_id.as_deref(),
                 None,
                 states_config,
             )?;
 
             conn.execute(
-                "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
+                "UPDATE tasks SET worker_id = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
                  WHERE id = ?3",
                 params![release_status, now, task_id],
             )?;
@@ -1352,19 +1352,19 @@ impl Database {
                 return Err(anyhow!("Agent has reached claim limit"));
             }
 
-            // Check tag affinity - agent_tags_all (AND)
-            if !task.agent_tags_all.is_empty() {
-                for needed in &task.agent_tags_all {
+            // Check tag affinity - needed_tags (AND)
+            if !task.needed_tags.is_empty() {
+                for needed in &task.needed_tags {
                     if !agent.tags.contains(needed) {
                         return Err(anyhow!("Agent missing required tag: {}", needed));
                     }
                 }
             }
 
-            // Check tag affinity - agent_tags_any (OR)
-            if !task.agent_tags_any.is_empty() {
+            // Check tag affinity - wanted_tags (OR)
+            if !task.wanted_tags.is_empty() {
                 let has_any = task
-                    .agent_tags_any
+                    .wanted_tags
                     .iter()
                     .any(|wanted| agent.tags.contains(wanted));
                 if !has_any {
@@ -1373,7 +1373,7 @@ impl Database {
             }
 
             conn.execute(
-                "UPDATE tasks SET owner_agent = ?1, claimed_at = ?2, status = ?3, started_at = COALESCE(started_at, ?4), updated_at = ?5
+                "UPDATE tasks SET worker_id = ?1, claimed_at = ?2, status = ?3, started_at = COALESCE(started_at, ?4), updated_at = ?5
                  WHERE id = ?6",
                 params![agent_id, now, claim_status, now, now, task_id,],
             )?;
@@ -1395,7 +1395,7 @@ impl Database {
             )?;
 
             Ok(Task {
-                owner_agent: Some(agent_id.to_string()),
+                worker_id: Some(agent_id.to_string()),
                 claimed_at: Some(now),
                 status: claim_status.to_string(),
                 started_at: task.started_at.or(Some(now)),
@@ -1419,7 +1419,7 @@ impl Database {
             let task =
                 get_task_internal(conn, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
 
-            if task.owner_agent.as_deref() != Some(agent_id) {
+            if task.worker_id.as_deref() != Some(agent_id) {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
@@ -1454,7 +1454,7 @@ impl Database {
             record_state_transition(conn, task_id, state, Some(agent_id), None, states_config)?;
 
             conn.execute(
-                "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, completed_at = COALESCE(?2, completed_at), updated_at = ?3
+                "UPDATE tasks SET worker_id = NULL, claimed_at = NULL, status = ?1, completed_at = COALESCE(?2, completed_at), updated_at = ?3
                  WHERE id = ?4",
                 params![state, completed_at, now, task_id],
             )?;
@@ -1475,8 +1475,8 @@ impl Database {
 
         self.with_conn(|conn| {
             let updated = conn.execute(
-                "UPDATE tasks SET owner_agent = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
-                 WHERE claimed_at < ?3 AND owner_agent IS NOT NULL",
+                "UPDATE tasks SET worker_id = NULL, claimed_at = NULL, status = ?1, updated_at = ?2
+                 WHERE claimed_at < ?3 AND worker_id IS NOT NULL",
                 params![release_status, now, cutoff],
             )?;
 
@@ -1519,7 +1519,7 @@ impl Database {
             drop(stmt);
 
             // Verify ownership
-            if task.owner_agent.as_deref() != Some(agent_id) {
+            if task.worker_id.as_deref() != Some(agent_id) {
                 return Err(anyhow!("Task is not owned by this agent"));
             }
 
@@ -1566,7 +1566,7 @@ impl Database {
             // Update task to completed
             tx.execute(
                 "UPDATE tasks SET status = ?1, completed_at = ?2, updated_at = ?3,
-                 owner_agent = NULL, claimed_at = NULL
+                 worker_id = NULL, claimed_at = NULL
                  WHERE id = ?4",
                 params![complete_status, now, now, task_id],
             )?;
@@ -1589,7 +1589,7 @@ impl Database {
                 status: complete_status.to_string(),
                 completed_at: Some(now),
                 updated_at: now,
-                owner_agent: None,
+                worker_id: None,
                 claimed_at: None,
                 ..task
             })
@@ -1627,13 +1627,13 @@ impl Database {
         self.with_conn(|conn| {
             let tasks = if let Some(aid) = agent_id {
                 let mut stmt = conn
-                    .prepare("SELECT * FROM tasks WHERE owner_agent = ?1 AND deleted_at IS NULL ORDER BY claimed_at")?;
+                    .prepare("SELECT * FROM tasks WHERE worker_id = ?1 AND deleted_at IS NULL ORDER BY claimed_at")?;
                 stmt.query_map(params![aid], parse_task_row)?
                     .filter_map(|r| r.ok())
                     .collect()
             } else {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM tasks WHERE owner_agent IS NOT NULL AND deleted_at IS NULL ORDER BY claimed_at",
+                    "SELECT * FROM tasks WHERE worker_id IS NOT NULL AND deleted_at IS NULL ORDER BY claimed_at",
                 )?;
                 stmt.query_map([], parse_task_row)?
                     .filter_map(|r| r.ok())
@@ -1677,17 +1677,17 @@ fn create_tree_recursive(
         let priority = clamp_priority(input.priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
 
-        let agent_tags_all = input.agent_tags_all.clone().unwrap_or_default();
-        let agent_tags_any = input.agent_tags_any.clone().unwrap_or_default();
+        let needed_tags = input.needed_tags.clone().unwrap_or_default();
+        let wanted_tags = input.wanted_tags.clone().unwrap_or_default();
         let tags = input.tags.clone().unwrap_or_default();
-        let agent_tags_all_json = serde_json::to_string(&agent_tags_all)?;
-        let agent_tags_any_json = serde_json::to_string(&agent_tags_any)?;
+        let needed_tags_json = serde_json::to_string(&needed_tags)?;
+        let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
         let tags_json = serde_json::to_string(&tags)?;
 
         conn.execute(
             "INSERT INTO tasks (
                 id, title, description, status, priority,
-                agent_tags_all, agent_tags_any, tags, points, time_estimate_ms, created_at, updated_at
+                needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 &task_id,
@@ -1695,8 +1695,8 @@ fn create_tree_recursive(
                 &input.description,
                 initial_status,
                 priority.to_string(),
-                agent_tags_all_json,
-                agent_tags_any_json,
+                needed_tags_json,
+                wanted_tags_json,
                 tags_json,
                 input.points,
                 input.time_estimate_ms,
@@ -1710,8 +1710,8 @@ fn create_tree_recursive(
 
         // Sync tags to junction tables for indexed lookups
         sync_task_tags(conn, &task_id, &tags)?;
-        sync_needed_tags(conn, &task_id, &agent_tags_all)?;
-        sync_wanted_tags(conn, &task_id, &agent_tags_any)?;
+        sync_needed_tags(conn, &task_id, &needed_tags)?;
+        sync_wanted_tags(conn, &task_id, &wanted_tags)?;
 
         task_id
     };

@@ -33,7 +33,7 @@ pub fn format_task_markdown(task: &Task, blocked_by: &[String]) -> String {
     md.push_str(&format!("- **status**: {}\n", task.status));
     md.push_str(&format!("- **priority**: {}\n", task.priority));
 
-    if let Some(ref owner) = task.owner_agent {
+    if let Some(ref owner) = task.worker_id {
         md.push_str(&format!("- **owner**: {}\n", owner));
     }
 
@@ -160,7 +160,7 @@ fn format_task_short(task: &Task, blocked_by: &[String]) -> String {
         format!(" [blocked by {}]", blocked_by.len())
     };
 
-    let owner = task.owner_agent.as_ref()
+    let owner = task.worker_id.as_ref()
         .map(|o| format!(" @{}", o))
         .unwrap_or_default();
 
@@ -289,7 +289,7 @@ pub fn format_task_tree_markdown(tree: &TaskTree) -> String {
     if let Some(points) = tree.task.points {
         meta_parts.push(format!("{} pts", points));
     }
-    if let Some(ref owner) = tree.task.owner_agent {
+    if let Some(ref owner) = tree.task.worker_id {
         meta_parts.push(format!("@{}", owner));
     }
 
@@ -328,7 +328,7 @@ fn format_tree_children(children: &[TaskTree], prefix: &str, md: &mut String) {
         if let Some(points) = child.task.points {
             meta_parts.push(format!("{} pts", points));
         }
-        if let Some(ref owner) = child.task.owner_agent {
+        if let Some(ref owner) = child.task.worker_id {
             meta_parts.push(format!("@{}", owner));
         }
 
@@ -357,7 +357,7 @@ pub fn format_scan_result_markdown(result: &ScanResult) -> String {
     md.push_str(&format!("- **status**: {}\\n", result.root.status));
     md.push_str(&format!("- **priority**: {}\\n", result.root.priority));
     
-    if let Some(ref owner) = result.root.owner_agent {
+    if let Some(ref owner) = result.root.worker_id {
         md.push_str(&format!("- **owner**: {}\\n", owner));
     }
     
@@ -416,7 +416,7 @@ fn format_scan_task_short(task: &Task) -> String {
         ""
     };
 
-    let owner = task.owner_agent.as_ref()
+    let owner = task.worker_id.as_ref()
         .map(|o| format!(" @{}", o))
         .unwrap_or_default();
 
@@ -447,10 +447,10 @@ mod tests {
             description: None,
             status: status.to_string(),
             priority,
-            owner_agent: None,
+            worker_id: None,
             claimed_at: None,
-            agent_tags_all: vec![],
-            agent_tags_any: vec![],
+            needed_tags: vec![],
+            wanted_tags: vec![],
             tags: vec![],
             points,
             time_estimate_ms: None,
