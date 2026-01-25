@@ -571,6 +571,36 @@ mod task_tests {
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].title, "Completed");
     }
+
+
+    /// Test that the tool-level create function properly handles needed_tags and wanted_tags.
+    /// This is a regression test for BUG-001 where these parameters were silently ignored.
+    #[test]
+    fn create_tool_stores_needed_and_wanted_tags() {
+        use serde_json::json;
+        use task_graph_mcp::tools::tasks::create;
+
+        let db = setup_db();
+        let states_config = default_states_config();
+
+        // Call the tool-level create function with needed_tags and wanted_tags
+        let args = json!({
+            "description": "Task with tags",
+            "needed_tags": ["backend", "admin"],
+            "wanted_tags": ["testing", "senior"]
+        });
+
+        let result = create(&db, &states_config, args).expect("create should succeed");
+
+        // Extract the task ID from the result
+        let task_id = result.get("id").and_then(|v| v.as_str()).expect("result should have id");
+
+        // Fetch the task and verify the tags were stored
+        let task = db.get_task(task_id).unwrap().expect("task should exist");
+
+        assert_eq!(task.needed_tags, vec!["backend", "admin"]);
+        assert_eq!(task.wanted_tags, vec!["testing", "senior"]);
+    }
 }
 
 mod task_claiming_tests {
@@ -605,26 +635,6 @@ mod task_claiming_tests {
 
         db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
         let result = db.claim_task(&task.id, &agent2.id, &states_config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn claim_task_fails_if_agent_at_claim_limit() {
-        let db = setup_db();
-        let states_config = default_states_config();
-        let agent = db.register_worker(None, vec![], false).unwrap();
-        // Set max_claims to 1 via update_worker
-        let agent = db.update_worker(&agent.id, None, Some(1)).unwrap();
-        let task1 = db
-            .create_task(None, "Task 1".to_string(), None, None, None, None, None, None, None, &states_config)
-            .unwrap();
-        let task2 = db
-            .create_task(None, "Task 2".to_string(), None, None, None, None, None, None, None, &states_config)
-            .unwrap();
-
-        db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
-        let result = db.claim_task(&task2.id, &agent.id, &states_config);
 
         assert!(result.is_err());
     }
@@ -1211,6 +1221,187 @@ mod task_claiming_tests {
         let pending_count = states.iter().filter(|&&s| s == "pending").count();
         assert!(pending_count >= 2, "Should have at least 2 pending entries (initial + after failed)");
     }
+
+
+    #[test]
+    fn claim_fails_if_blocked_by_single_task() {
+        // BUG-002 regression: Claim should fail if task has unsatisfied blocking dependencies
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create two tasks: A blocks B
+        let task_a = db
+            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task_b = db
+            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
+
+        // Attempt to claim B (which is blocked by A)
+        let result = db.update_task_unified(
+            &task_b.id,
+            &agent.id,
+            None, None, None,
+            Some("in_progress".to_string()),
+            None, None, None,
+            None, None, None, None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        );
+
+        assert!(result.is_err(), "Claim should fail when task has unsatisfied dependencies");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("unsatisfied dependencies") && err_msg.contains(&task_a.id),
+            "Error should mention unsatisfied dependencies and the blocking task ID. Got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn claim_fails_if_blocked_by_chain() {
+        // BUG-002 regression: A blocks B, B blocks C - claim on C should fail
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create chain: A blocks B, B blocks C
+        let task_a = db
+            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task_b = db
+            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task_c = db
+            .create_task(None, "Task C".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task_b.id, &task_c.id, "blocks", &deps_config).unwrap();
+
+        // Attempt to claim C (which is blocked by B which is blocked by A)
+        let result = db.update_task_unified(
+            &task_c.id,
+            &agent.id,
+            None, None, None,
+            Some("in_progress".to_string()),
+            None, None, None,
+            None, None, None, None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        );
+
+        assert!(result.is_err(), "Claim on C should fail when B is still in blocking state");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("unsatisfied dependencies") && err_msg.contains(&task_b.id),
+            "Error should mention unsatisfied dependencies and the blocking task B ID. Got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn claim_succeeds_after_blocker_completes() {
+        // BUG-002 regression: Claim should succeed once blocking task is completed
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create two tasks: A blocks B
+        let task_a = db
+            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task_b = db
+            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
+
+        // Complete task A
+        db.claim_task(&task_a.id, &agent.id, &states_config).unwrap();
+        db.update_task_unified(
+            &task_a.id,
+            &agent.id,
+            None, None, None,
+            Some("completed".to_string()),
+            None, None, None,
+            None, None, None, None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        ).unwrap();
+
+        // Now claim B should succeed
+        let result = db.update_task_unified(
+            &task_b.id,
+            &agent.id,
+            None, None, None,
+            Some("in_progress".to_string()),
+            None, None, None,
+            None, None, None, None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        );
+
+        assert!(result.is_ok(), "Claim should succeed after blocking task is completed");
+        let (task, _, _) = result.unwrap();
+        assert_eq!(task.status, "in_progress");
+        assert_eq!(task.worker_id.as_deref(), Some(agent.id.as_str()));
+    }
+
+    #[test]
+    fn claim_with_force_bypasses_dependency_check() {
+        // BUG-002 regression: force=true should bypass the dependency check
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create two tasks: A blocks B
+        let task_a = db
+            .create_task(None, "Task A".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task_b = db
+            .create_task(None, "Task B".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &deps_config).unwrap();
+
+        // Claim B with force=true should succeed despite being blocked
+        let result = db.update_task_unified(
+            &task_b.id,
+            &agent.id,
+            None, None, None,
+            Some("in_progress".to_string()),
+            None, None, None,
+            None, None, None, None,
+            true, // force=true
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        );
+
+        assert!(result.is_ok(), "Claim with force=true should succeed even when task has unsatisfied dependencies");
+        let (task, _, _) = result.unwrap();
+        assert_eq!(task.status, "in_progress");
+    }
 }
 
 mod dependency_tests {
@@ -1568,6 +1759,68 @@ mod file_lock_tests {
         assert_eq!(updates.new_claims.len(), 1, "Should only see new.rs");
         assert_eq!(updates.new_claims[0].file_path, "new.rs");
         assert!(updates.dropped_claims.is_empty(), "Should not see old.rs release");
+    }
+
+    /// Regression test for BUG-003/BUG-004: unmark_file and mark_updates failed
+    /// with "no such column: end_timestamp" because claim_sequence table was
+    /// missing the end_timestamp column.
+    #[test]
+    fn regression_unmark_file_after_mark_file() {
+        let db = setup_db();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Mark (lock) a file
+        let lock_result = db.lock_file("test.rs".to_string(), &agent.id, Some("testing".to_string()), None);
+        assert!(lock_result.is_ok(), "lock_file should succeed");
+
+        // Unmark (unlock) the file - this was failing with end_timestamp error
+        let unlock_result = db.unlock_file("test.rs", &agent.id, None);
+        assert!(unlock_result.is_ok(), "unlock_file should succeed (was failing with end_timestamp column error)");
+        assert!(unlock_result.unwrap(), "unlock should return true");
+    }
+
+    /// Regression test for BUG-003/BUG-004: mark_updates failed with
+    /// "no such column: end_timestamp" because claim_sequence table was
+    /// missing the end_timestamp column.
+    #[test]
+    fn regression_mark_updates_after_mark_file() {
+        let db = setup_db();
+        let agent1 = db.register_worker(None, vec![], false).unwrap();
+        let agent2 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 marks a file
+        db.lock_file("test.rs".to_string(), &agent1.id, Some("testing".to_string()), None).unwrap();
+
+        // Agent2 polls for updates - this was failing with end_timestamp error
+        let updates = db.claim_updates(&agent2.id);
+        assert!(updates.is_ok(), "claim_updates should succeed (was failing with end_timestamp column error)");
+
+        let updates = updates.unwrap();
+        assert_eq!(updates.new_claims.len(), 1, "Should see the new claim");
+        assert_eq!(updates.new_claims[0].file_path, "test.rs");
+    }
+
+    /// Regression test: Verify end_timestamp is properly set when unlocking
+    #[test]
+    fn regression_end_timestamp_populated_on_unlock() {
+        let db = setup_db();
+        let agent1 = db.register_worker(None, vec![], false).unwrap();
+        let agent2 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 marks and unmarks a file
+        db.lock_file("test.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.unlock_file("test.rs", &agent1.id, None).unwrap();
+
+        // Agent2 polls for updates
+        let updates = db.claim_updates(&agent2.id).unwrap();
+
+        // Both claim and release should be visible
+        assert_eq!(updates.new_claims.len(), 1, "Should see the claim");
+        assert_eq!(updates.dropped_claims.len(), 1, "Should see the release");
+
+        // The claim event should have an end_timestamp populated
+        let claim_event = &updates.new_claims[0];
+        assert!(claim_event.end_timestamp.is_some(), "Claim event should have end_timestamp set after release");
     }
 }
 
@@ -2223,5 +2476,182 @@ mod auto_advance_tests {
         // So task3 should still be pending
         let task3_updated = db.get_task(&task3.id).unwrap().unwrap();
         assert_eq!(task3_updated.status, "pending"); // Still pending - cascade doesn't happen recursively
+    }
+}
+
+mod attachment_tests {
+    use super::*;
+
+    /// Helper to create a task for attachment tests.
+    fn create_test_task(db: &Database) -> task_graph_mcp::types::Task {
+        db.create_task(
+            None,
+            "Attachment Test".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &default_states_config(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn get_attachments_filtered_by_mime_prefix() {
+        let db = setup_db();
+        let task = create_test_task(&db);
+
+        // Add attachments with different MIME types
+        db.add_attachment(
+            &task.id,
+            "data.json".to_string(),
+            r#"{"key": "value"}"#.to_string(),
+            Some("application/json".to_string()),
+            None,
+        )
+        .unwrap();
+        db.add_attachment(
+            &task.id,
+            "readme.txt".to_string(),
+            "This is a text file".to_string(),
+            Some("text/plain".to_string()),
+            None,
+        )
+        .unwrap();
+        db.add_attachment(
+            &task.id,
+            "notes.md".to_string(),
+            "# Notes\nSome markdown".to_string(),
+            Some("text/markdown".to_string()),
+            None,
+        )
+        .unwrap();
+
+        // Test filtering by exact MIME type prefix
+        let json_attachments = db
+            .get_attachments_filtered(&task.id, None, Some("application/json"))
+            .unwrap();
+        assert_eq!(json_attachments.len(), 1);
+        assert_eq!(json_attachments[0].name, "data.json");
+
+        // Test filtering by MIME type prefix (text/)
+        let text_attachments = db
+            .get_attachments_filtered(&task.id, None, Some("text/"))
+            .unwrap();
+        assert_eq!(text_attachments.len(), 2);
+        let names: Vec<&str> = text_attachments.iter().map(|a| a.name.as_str()).collect();
+        assert!(names.contains(&"readme.txt"));
+        assert!(names.contains(&"notes.md"));
+    }
+
+    #[test]
+    fn get_attachments_filtered_by_name_pattern() {
+        let db = setup_db();
+        let task = create_test_task(&db);
+
+        db.add_attachment(
+            &task.id,
+            "data.json".to_string(),
+            r#"{"key": "value"}"#.to_string(),
+            Some("application/json".to_string()),
+            None,
+        )
+        .unwrap();
+        db.add_attachment(
+            &task.id,
+            "config.json".to_string(),
+            r#"{"setting": true}"#.to_string(),
+            Some("application/json".to_string()),
+            None,
+        )
+        .unwrap();
+        db.add_attachment(
+            &task.id,
+            "readme.txt".to_string(),
+            "Text content".to_string(),
+            Some("text/plain".to_string()),
+            None,
+        )
+        .unwrap();
+
+        // Filter by glob pattern
+        let json_files = db
+            .get_attachments_filtered(&task.id, Some("*.json"), None)
+            .unwrap();
+        assert_eq!(json_files.len(), 2);
+
+        // Filter by specific name
+        let data_file = db
+            .get_attachments_filtered(&task.id, Some("data.json"), None)
+            .unwrap();
+        assert_eq!(data_file.len(), 1);
+        assert_eq!(data_file[0].name, "data.json");
+    }
+
+    #[test]
+    fn get_attachments_filtered_by_both_name_and_mime() {
+        let db = setup_db();
+        let task = create_test_task(&db);
+
+        db.add_attachment(
+            &task.id,
+            "data.json".to_string(),
+            r#"{"key": "value"}"#.to_string(),
+            Some("application/json".to_string()),
+            None,
+        )
+        .unwrap();
+        db.add_attachment(
+            &task.id,
+            "schema.json".to_string(),
+            r#"{"type": "object"}"#.to_string(),
+            Some("application/json".to_string()),
+            None,
+        )
+        .unwrap();
+        db.add_attachment(
+            &task.id,
+            "data.txt".to_string(),
+            "Plain text".to_string(),
+            Some("text/plain".to_string()),
+            None,
+        )
+        .unwrap();
+
+        // Filter by both name pattern and MIME type
+        let result = db
+            .get_attachments_filtered(&task.id, Some("data.*"), Some("application/json"))
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "data.json");
+    }
+
+    #[test]
+    fn get_attachments_no_filter_returns_all() {
+        let db = setup_db();
+        let task = create_test_task(&db);
+
+        db.add_attachment(
+            &task.id,
+            "file1.txt".to_string(),
+            "Content 1".to_string(),
+            Some("text/plain".to_string()),
+            None,
+        )
+        .unwrap();
+        db.add_attachment(
+            &task.id,
+            "file2.json".to_string(),
+            "{}".to_string(),
+            Some("application/json".to_string()),
+            None,
+        )
+        .unwrap();
+
+        let all = db.get_attachments_filtered(&task.id, None, None).unwrap();
+        assert_eq!(all.len(), 2);
     }
 }

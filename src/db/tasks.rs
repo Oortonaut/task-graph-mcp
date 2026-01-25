@@ -184,16 +184,6 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
     }
 }
 
-/// Internal helper to get claim count using an existing connection (avoids deadlock).
-fn get_claim_count_internal(conn: &Connection, agent_id: &str) -> Result<i32> {
-    let count: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'in_progress'",
-        params![agent_id],
-        |row| row.get(0),
-    )?;
-    Ok(count)
-}
-
 impl Database {
     /// Create a new task.
     /// If id is provided, uses it as the task ID; otherwise generates UUID7.
@@ -600,16 +590,6 @@ impl Database {
                 let target = get_worker_internal(&tx, target_agent)?
                     .ok_or_else(|| anyhow!("Assignee agent '{}' not found", target_agent))?;
 
-                // Check the assignee's claim limit
-                let assignee_claims = get_claim_count_internal(&tx, target_agent)?;
-                if !force && assignee_claims >= target.max_claims {
-                    return Err(anyhow!(
-                        "Assignee '{}' has reached claim limit ({})",
-                        target_agent,
-                        target.max_claims
-                    ));
-                }
-
                 // Check tag affinity for the assignee
                 if !task.needed_tags.is_empty() {
                     for needed in &task.needed_tags {
@@ -653,15 +633,25 @@ impl Database {
                     ));
                 }
 
+                // Check for unsatisfied blocking dependencies (skip if force)
+                if !force {
+                    let unsatisfied_blockers = super::deps::get_unsatisfied_start_blockers_in_tx(
+                        &tx,
+                        task_id,
+                        states_config,
+                        deps_config,
+                    )?;
+                    if !unsatisfied_blockers.is_empty() {
+                        return Err(anyhow!(
+                            "Task has unsatisfied dependencies: [{}]",
+                            unsatisfied_blockers.join(", ")
+                        ));
+                    }
+                }
+
                 // Get the agent
                 let agent = get_worker_internal(&tx, agent_id)?
                     .ok_or_else(|| anyhow!("Agent not found"))?;
-
-                // Check claim limit (skip if force)
-                let current_claims = get_claim_count_internal(&tx, agent_id)?;
-                if !force && current_claims >= agent.max_claims {
-                    return Err(anyhow!("Agent has reached claim limit"));
-                }
 
                 // Check tag affinity - needed_tags (AND - must have ALL)
                 if !task.needed_tags.is_empty() {
@@ -1194,12 +1184,6 @@ impl Database {
             let agent =
                 get_worker_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
 
-            // Check claim limit (using internal helper to avoid deadlock)
-            let current_claims = get_claim_count_internal(conn, agent_id)?;
-            if current_claims >= agent.max_claims {
-                return Err(anyhow!("Agent has reached claim limit"));
-            }
-
             // Check tag affinity - needed_tags (AND - must have ALL)
             if !task.needed_tags.is_empty() {
                 for needed in &task.needed_tags {
@@ -1345,12 +1329,6 @@ impl Database {
             // Get the agent
             let agent =
                 get_worker_internal(conn, agent_id)?.ok_or_else(|| anyhow!("Agent not found"))?;
-
-            // Check claim limit
-            let current_claims = get_claim_count_internal(conn, agent_id)?;
-            if current_claims >= agent.max_claims {
-                return Err(anyhow!("Agent has reached claim limit"));
-            }
 
             // Check tag affinity - needed_tags (AND)
             if !task.needed_tags.is_empty() {

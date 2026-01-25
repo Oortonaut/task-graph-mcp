@@ -167,7 +167,7 @@ Analyze agent activity:
 | `registered_at` | timestamp | When connected |
 | `last_heartbeat` | timestamp | Last activity |
 | `tags` | array | Capabilities |
-| `max_claims` | int | Claim limit |
+| `max_claims` | int | Claim limit (not enforced) |
 
 ---
 
@@ -316,7 +316,7 @@ Day 3: {total_points - completed_day_3}
 ```
 1. list_agents()
 2. For each agent:
-   - Current claims / max_claims = utilization
+   - Current claims = active work count
    - Time since last_heartbeat = idle_time
 3. Flag: utilization 0 or idle_time > threshold
 ```

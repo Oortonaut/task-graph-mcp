@@ -104,7 +104,7 @@ impl Database {
             None => None,
         };
         let now = now_ms();
-        let max_claims = 5; // Default, TODO: make configurable
+        let max_claims = i32::MAX; // Effectively unlimited until overclaiming becomes a problem
         let tags_json = serde_json::to_string(&tags)?;
 
         self.with_conn(|conn| {

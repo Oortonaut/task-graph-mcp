@@ -106,7 +106,6 @@ server:
   db_path: .task-graph/tasks.db
   media_dir: .task-graph/media  # Directory for file attachments
   skills_dir: .task-graph/skills  # Custom skill overrides
-  claim_limit: 5
   stale_timeout_seconds: 900
   default_format: json  # or markdown
 
@@ -242,6 +241,7 @@ Environment variables:
 - `TASK_GRAPH_CONFIG_PATH`: Path to configuration file (takes precedence over `.task-graph/config.yaml`)
 - `TASK_GRAPH_DB_PATH`: Database file path (fallback if no config file)
 - `TASK_GRAPH_MEDIA_DIR`: Media directory for file attachments (fallback if no config file)
+- `TASK_GRAPH_LOG_DIR`: Log directory path (fallback if no config file)
 
 ## MCP Tools
 
@@ -249,7 +249,7 @@ Environment variables:
 
 | Tool | Description |
 |------|-------------|
-| `connect(worker_id?: worker_str, tags?: str[], force?: bool = false)` | Register a worker session. Returns `worker_id`. Use `force` to reconnect a stuck worker. |
+| `connect(worker_id?, tags?, force?, db_path?, media_dir?, log_dir?, config_path?)` | Register a worker. Returns `worker_id` and active `paths`. Path args are informational (set via env/CLI before server starts). |
 | `disconnect(worker_id: worker_str, final_status?: status_str = "pending")` | Unregister worker and release all claims/locks. |
 | `list_workers(tags?: str[], file?: filename, task?: task_str, depth?: int)` | List connected workers with filters. |
 

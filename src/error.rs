@@ -22,7 +22,6 @@ pub enum ErrorCode {
     AlreadyClaimed,
     AlreadyExists,
     DependencyCycle,
-    ClaimLimitExceeded,
     TagMismatch,
     NotOwner,
     DependencyNotSatisfied,
@@ -113,13 +112,6 @@ impl ToolError {
                 "Adding dependency {} -> {} would create a cycle",
                 blocker, blocked
             ),
-        )
-    }
-
-    pub fn claim_limit(agent_id: &str, limit: i32) -> Self {
-        Self::new(
-            ErrorCode::ClaimLimitExceeded,
-            format!("Agent {} has reached claim limit of {}", agent_id, limit),
         )
     }
 

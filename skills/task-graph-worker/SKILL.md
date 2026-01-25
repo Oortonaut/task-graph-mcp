@@ -296,7 +296,6 @@ claim(worker_id=worker_id, task=task_id, force=true)
 
 ```
 # Claim multiple tasks if you'll work on them
-# (up to your max_claims limit)
 claim(worker_id=worker_id, task=task_1)
 claim(worker_id=worker_id, task=task_2)
 ```
