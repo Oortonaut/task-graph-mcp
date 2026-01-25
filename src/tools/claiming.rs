@@ -59,7 +59,8 @@ pub fn claim(
         .unwrap_or_else(|| "in_progress".to_string());
 
     // Use unified update which handles claiming when transitioning to timed state
-    let (task, _auto_advanced) = db.update_task_unified(
+    // Claim transitions TO a blocking state, so unblocked/auto_advanced will be empty
+    let (task, _unblocked, _auto_advanced) = db.update_task_unified(
         &task_id,
         &worker_id,
         None,             // title

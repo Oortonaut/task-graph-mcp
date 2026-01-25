@@ -1101,152 +1101,163 @@ fn get_task_by_id_internal(conn: &Connection, task_id: &str) -> Result<Option<Ta
 }
 
 /// Propagate unblock effects when a task transitions out of a blocking state.
-/// This is called after a task completes to auto-advance dependent tasks.
+/// This is called after a task completes to find newly unblocked tasks and
+/// optionally auto-advance them.
+///
+/// Returns (unblocked, auto_advanced):
+/// - unblocked: All task IDs that are now ready (all dependencies satisfied)
+/// - auto_advanced: Subset of unblocked that were actually transitioned (when enabled)
 ///
 /// Algorithm:
-/// 1. If auto_advance is disabled or has no target_state, return empty
-/// 2. Find all tasks that have a start-blocking dependency on the completed task
-/// 3. For each candidate:
-///    - Skip if not in initial state
+/// 1. Find all tasks that have a start-blocking dependency on the completed task
+/// 2. For each candidate:
+///    - Skip if not in initial state or already claimed
 ///    - Check if ALL other start-blockers are also satisfied
-///    - If fully unblocked → transition to target_state
-/// 4. Return list of auto-advanced task IDs
+///    - If fully unblocked → add to unblocked list
+///    - If auto_advance enabled → also transition to target_state
+/// 3. Return both lists
 pub(crate) fn propagate_unblock_effects(
-        conn: &Connection,
-        completed_task_id: &str,
-        agent_id: Option<&str>,
-        states_config: &StatesConfig,
-        deps_config: &DependenciesConfig,
-        auto_advance: &AutoAdvanceConfig,
-    ) -> Result<Vec<String>> {
-        // Early return if auto-advance is disabled or no target state
-        if !auto_advance.enabled {
-            return Ok(vec![]);
-        }
-        let target_state = match &auto_advance.target_state {
-            Some(s) => s.clone(),
-            None => return Ok(vec![]),
-        };
+    conn: &Connection,
+    completed_task_id: &str,
+    agent_id: Option<&str>,
+    states_config: &StatesConfig,
+    deps_config: &DependenciesConfig,
+    auto_advance: &AutoAdvanceConfig,
+) -> Result<(Vec<String>, Vec<String>)> {
+    // Get start-blocking dependency types
+    let start_blocking_types = deps_config.start_blocking_types();
+    if start_blocking_types.is_empty() {
+        return Ok((vec![], vec![]));
+    }
 
-        // Validate target state
-        if !states_config.is_valid_state(&target_state) {
+    // Find all tasks that depend on the completed task via start-blocking dependencies
+    let type_placeholders: Vec<String> = start_blocking_types
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 2))
+        .collect();
+    let type_clause = type_placeholders.join(", ");
+
+    let sql = format!(
+        "SELECT to_task_id FROM dependencies WHERE from_task_id = ?1 AND dep_type IN ({})",
+        type_clause
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    params_vec.push(Box::new(completed_task_id.to_string()));
+    for t in &start_blocking_types {
+        params_vec.push(Box::new(t.to_string()));
+    }
+    let params_refs: Vec<&dyn rusqlite::ToSql> =
+        params_vec.iter().map(|b| b.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let dependent_task_ids: Vec<String> = stmt
+        .query_map(params_refs.as_slice(), |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut unblocked = Vec::new();
+    let mut auto_advanced = Vec::new();
+    let now = super::now_ms();
+
+    // Determine if we should auto-advance
+    let should_auto_advance = auto_advance.enabled && auto_advance.target_state.is_some();
+    let target_state = auto_advance.target_state.clone();
+
+    // Validate target state if auto-advance is enabled
+    if should_auto_advance {
+        let ts = target_state.as_ref().unwrap();
+        if !states_config.is_valid_state(ts) {
             return Err(anyhow!(
                 "Auto-advance target state '{}' is not a valid state",
-                target_state
+                ts
             ));
         }
+    }
 
-        // Get start-blocking dependency types
-        let start_blocking_types = deps_config.start_blocking_types();
-        if start_blocking_types.is_empty() {
-            return Ok(vec![]);
+    for task_id in dependent_task_ids {
+        // Get the task
+        let task = match get_task_by_id_internal(conn, &task_id)? {
+            Some(t) => t,
+            None => continue,
+        };
+
+        // Skip if not in initial state
+        if task.status != states_config.initial {
+            continue;
         }
 
-        // Find all tasks that depend on the completed task via start-blocking dependencies
-        let type_placeholders: Vec<String> = start_blocking_types
+        // Skip if task is already claimed
+        if task.owner_agent.is_some() {
+            continue;
+        }
+
+        // Check if ALL start-blockers are now satisfied (not in blocking states)
+        // Build query to count remaining blockers that are still blocking
+        let state_placeholders: Vec<String> = states_config
+            .blocking_states
             .iter()
             .enumerate()
-            .map(|(i, _)| format!("?{}", i + 2))
+            .map(|(i, _)| format!("?{}", i + 3))
             .collect();
-        let type_clause = type_placeholders.join(", ");
+        let state_clause = state_placeholders.join(", ");
 
-        let sql = format!(
-            "SELECT to_task_id FROM dependencies WHERE from_task_id = ?1 AND dep_type IN ({})",
-            type_clause
+        // Reuse type_placeholders from above
+        let type_start = states_config.blocking_states.len() + 3;
+        let type_placeholders2: Vec<String> = start_blocking_types
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", type_start + i))
+            .collect();
+        let type_clause2 = type_placeholders2.join(", ");
+
+        let blocker_sql = format!(
+            "SELECT COUNT(*) FROM dependencies d
+             INNER JOIN tasks blocker ON d.from_task_id = blocker.id
+             WHERE d.to_task_id = ?1
+             AND d.from_task_id != ?2
+             AND d.dep_type IN ({})
+             AND blocker.status IN ({})",
+            type_clause2, state_clause
         );
 
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        params_vec.push(Box::new(completed_task_id.to_string()));
-        for t in &start_blocking_types {
-            params_vec.push(Box::new(t.to_string()));
+        let mut blocker_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        blocker_params.push(Box::new(task_id.clone()));
+        blocker_params.push(Box::new(completed_task_id.to_string()));
+        for state in &states_config.blocking_states {
+            blocker_params.push(Box::new(state.clone()));
         }
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|b| b.as_ref()).collect();
+        for t in &start_blocking_types {
+            blocker_params.push(Box::new(t.to_string()));
+        }
+        let blocker_refs: Vec<&dyn rusqlite::ToSql> =
+            blocker_params.iter().map(|b| b.as_ref()).collect();
 
-        let mut stmt = conn.prepare(&sql)?;
-        let dependent_task_ids: Vec<String> = stmt
-            .query_map(params_refs.as_slice(), |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
+        let remaining_blockers: i32 =
+            conn.query_row(&blocker_sql, blocker_refs.as_slice(), |row| row.get(0))?;
 
-        let mut auto_advanced = Vec::new();
-        let now = super::now_ms();
+        if remaining_blockers > 0 {
+            continue; // Still blocked by other tasks
+        }
 
-        for task_id in dependent_task_ids {
-            // Get the task
-            let task = match get_task_by_id_internal(conn, &task_id)? {
-                Some(t) => t,
-                None => continue,
-            };
+        // Task is now fully unblocked - add to unblocked list
+        unblocked.push(task_id.clone());
 
-            // Skip if not in initial state
-            if task.status != states_config.initial {
-                continue;
-            }
-
-            // Skip if task is already claimed
-            if task.owner_agent.is_some() {
-                continue;
-            }
-
-            // Check if ALL start-blockers are now satisfied (not in blocking states)
-            // Build query to count remaining blockers that are still blocking
-            let state_placeholders: Vec<String> = states_config
-                .blocking_states
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", i + 3))
-                .collect();
-            let state_clause = state_placeholders.join(", ");
-
-            // Reuse type_placeholders from above
-            let type_start = states_config.blocking_states.len() + 3;
-            let type_placeholders2: Vec<String> = start_blocking_types
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", type_start + i))
-                .collect();
-            let type_clause2 = type_placeholders2.join(", ");
-
-            let blocker_sql = format!(
-                "SELECT COUNT(*) FROM dependencies d
-                 INNER JOIN tasks blocker ON d.from_task_id = blocker.id
-                 WHERE d.to_task_id = ?1
-                 AND d.from_task_id != ?2
-                 AND d.dep_type IN ({})
-                 AND blocker.status IN ({})",
-                type_clause2, state_clause
-            );
-
-            let mut blocker_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-            blocker_params.push(Box::new(task_id.clone()));
-            blocker_params.push(Box::new(completed_task_id.to_string()));
-            for state in &states_config.blocking_states {
-                blocker_params.push(Box::new(state.clone()));
-            }
-            for t in &start_blocking_types {
-                blocker_params.push(Box::new(t.to_string()));
-            }
-            let blocker_refs: Vec<&dyn rusqlite::ToSql> =
-                blocker_params.iter().map(|b| b.as_ref()).collect();
-
-            let remaining_blockers: i32 =
-                conn.query_row(&blocker_sql, blocker_refs.as_slice(), |row| row.get(0))?;
-
-            if remaining_blockers > 0 {
-                continue; // Still blocked by other tasks
-            }
-
+        // Auto-advance if enabled and transition is valid
+        if should_auto_advance {
+            let ts = target_state.as_ref().unwrap();
+            
             // Validate transition from initial to target_state
-            if !states_config.is_valid_transition(&states_config.initial, &target_state) {
-                // Skip this task - transition not allowed
+            if !states_config.is_valid_transition(&states_config.initial, ts) {
+                // Skip auto-advance for this task - transition not allowed
                 continue;
             }
 
             // Auto-advance: update the task's status
             conn.execute(
                 "UPDATE tasks SET status = ?1, updated_at = ?2 WHERE id = ?3",
-                params![&target_state, now, &task_id],
+                params![ts, now, &task_id],
             )?;
 
             // Record state transition
@@ -1257,7 +1268,7 @@ pub(crate) fn propagate_unblock_effects(
             super::state_transitions::record_state_transition(
                 conn,
                 &task_id,
-                &target_state,
+                ts,
                 agent_id,
                 Some(&reason),
                 states_config,
@@ -1265,7 +1276,8 @@ pub(crate) fn propagate_unblock_effects(
 
             auto_advanced.push(task_id);
         }
-
-        Ok(auto_advanced)
     }
+
+    Ok((unblocked, auto_advanced))
+}
 

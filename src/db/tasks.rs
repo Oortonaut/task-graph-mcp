@@ -448,8 +448,10 @@ impl Database {
     /// - Transition to terminal = COMPLETE (check children, release file locks)
     /// - Only the owner can update a claimed task (unless force=true)
     /// 
-    /// Returns the updated task and a list of task IDs that were auto-advanced
-    /// due to their dependencies being satisfied.
+    /// Returns (task, unblocked, auto_advanced):
+    /// - task: The updated task
+    /// - unblocked: Task IDs that are now ready (all dependencies satisfied)
+    /// - auto_advanced: Subset of unblocked that were actually transitioned
     #[allow(clippy::too_many_arguments)]
     pub fn update_task_unified(
         &self,
@@ -469,7 +471,7 @@ impl Database {
         states_config: &StatesConfig,
         deps_config: &DependenciesConfig,
         auto_advance: &AutoAdvanceConfig,
-    ) -> Result<(Task, Vec<String>)> {
+    ) -> Result<(Task, Vec<String>, Vec<String>)> {
         let now = now_ms();
 
         self.with_conn_mut(|conn| {
@@ -687,8 +689,8 @@ impl Database {
                 ],
             )?;
 
-            // Auto-advance dependent tasks if this task transitioned FROM blocking TO non-blocking
-            let auto_advanced = if status_changed {
+            // Check for unblocked tasks if this task transitioned FROM blocking TO non-blocking
+            let (unblocked, auto_advanced) = if status_changed {
                 let was_blocking = states_config.is_blocking_state(&task.status);
                 let is_blocking = states_config.is_blocking_state(&new_status);
                 
@@ -702,10 +704,10 @@ impl Database {
                         auto_advance,
                     )?
                 } else {
-                    vec![]
+                    (vec![], vec![])
                 }
             } else {
-                vec![]
+                (vec![], vec![])
             };
 
             tx.commit()?;
@@ -727,7 +729,7 @@ impl Database {
                 owner_agent: new_owner,
                 claimed_at: new_claimed_at,
                 ..task
-            }, auto_advanced))
+            }, unblocked, auto_advanced))
         })
     }
 

@@ -772,7 +772,7 @@ mod task_claiming_tests {
             .unwrap();
 
         // Update to in_progress (timed state) should claim the task
-        let (updated, auto_advanced) = db
+        let (updated, _unblocked, auto_advanced) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -820,7 +820,7 @@ mod task_claiming_tests {
         .unwrap();
 
         // Update back to pending (non-timed) should release
-        let (updated, _) = db
+        let (updated, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -856,7 +856,7 @@ mod task_claiming_tests {
         db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
 
         // Agent2 force claims via update
-        let (updated, _) = db
+        let (updated, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent2.id,
@@ -958,7 +958,7 @@ mod task_claiming_tests {
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
         // Complete via update
-        let (updated, _) = db
+        let (updated, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -1588,5 +1588,302 @@ mod state_transition_tests {
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].event, "pending");
         assert_eq!(history[1].event, "cancelled");
+    }
+}
+
+mod auto_advance_tests {
+    use super::*;
+
+    /// Helper to create an auto-advance config with a specific target state.
+    fn auto_advance_enabled(target_state: &str) -> AutoAdvanceConfig {
+        AutoAdvanceConfig {
+            enabled: true,
+            target_state: Some(target_state.to_string()),
+        }
+    }
+
+    #[test]
+    fn unblocked_reported_even_when_auto_advance_disabled() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance(); // disabled by default
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create two tasks where task1 blocks task2
+        let task1 = db
+            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task2 = db
+            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+
+        // Claim and complete task1
+        db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
+        let (_, unblocked, auto_advanced) = db
+            .update_task_unified(
+                &task1.id,
+                &agent.id,
+                None, None,
+                Some("completed".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // unblocked should contain task2 (now ready to claim)
+        assert_eq!(unblocked.len(), 1);
+        assert_eq!(unblocked[0], task2.id);
+        
+        // auto_advanced should be empty because auto_advance is disabled
+        assert!(auto_advanced.is_empty());
+        
+        // task2 should still be in pending state (not transitioned)
+        let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
+        assert_eq!(task2_updated.status, "pending");
+    }
+
+    #[test]
+    fn auto_advance_single_blocker_completes() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        // Note: We need a "ready" state that tasks can transition to.
+        // By default, StatesConfig may not have "ready" as a valid state.
+        // Let's use the initial state transitions. We'll need to check what's valid.
+        // Actually, for this test, let's just use in_progress since it should be a valid transition.
+        // But in_progress is timed, which would require claiming.
+        // Let's check if pending can go to cancelled (non-timed) for testing.
+        // Actually the plan suggests adding a "ready" state, but we should test with existing states.
+        // We can test by checking if auto_advance returns the list even if the state is the same.
+        // Let's create a custom config for this test.
+        
+        // For now, let's test that when enabled with no valid target state, nothing happens.
+        // In a real scenario, you'd configure states to have a "ready" state.
+        // Let's just verify the list is returned when a dependency is satisfied.
+        
+        // Test with completed as target - but that's terminal and not a valid transition from pending
+        // Let's use in_progress as target - but that would claim the task
+        // The issue is the default state machine doesn't have a non-timed intermediate state
+        
+        // For this test, let's just verify the auto_advanced list is populated
+        // by using cancelled as target (since pending -> cancelled is valid)
+        let auto_advance = auto_advance_enabled("cancelled");
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create two tasks where task1 blocks task2
+        let task1 = db
+            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task2 = db
+            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+
+        // Claim and complete task1
+        db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
+        let (_, unblocked, auto_advanced) = db
+            .update_task_unified(
+                &task1.id,
+                &agent.id,
+                None, None,
+                Some("completed".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // unblocked should contain task2
+        assert_eq!(unblocked.len(), 1);
+        assert_eq!(unblocked[0], task2.id);
+        
+        // auto_advanced should also contain task2 (it was transitioned)
+        assert_eq!(auto_advanced.len(), 1);
+        assert_eq!(auto_advanced[0], task2.id);
+        
+        let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
+        assert_eq!(task2_updated.status, "cancelled");
+    }
+
+    #[test]
+    fn auto_advance_multiple_blockers_waits_for_all() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = auto_advance_enabled("cancelled");
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create three tasks: task1 and task3 both block task2
+        let task1 = db
+            .create_task(None, "Blocker 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task2 = db
+            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task3 = db
+            .create_task(None, "Blocker 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task3.id, &task2.id, "blocks", &deps_config).unwrap();
+
+        // Complete task1 - task2 should NOT advance yet (task3 still blocking)
+        db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
+        let (_, _, auto_advanced_1) = db
+            .update_task_unified(
+                &task1.id,
+                &agent.id,
+                None, None,
+                Some("completed".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert!(auto_advanced_1.is_empty());
+        let task2_status = db.get_task(&task2.id).unwrap().unwrap();
+        assert_eq!(task2_status.status, "pending");
+
+        // Complete task3 - NOW task2 should advance
+        db.claim_task(&task3.id, &agent.id, &states_config).unwrap();
+        let (_, _, auto_advanced_2) = db
+            .update_task_unified(
+                &task3.id,
+                &agent.id,
+                None, None,
+                Some("completed".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert_eq!(auto_advanced_2.len(), 1);
+        assert_eq!(auto_advanced_2[0], task2.id);
+        let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
+        assert_eq!(task2_updated.status, "cancelled");
+    }
+
+    #[test]
+    fn auto_advance_skips_non_initial_state_tasks() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = auto_advance_enabled("cancelled");
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create two tasks where task1 blocks task2
+        let task1 = db
+            .create_task(None, "Blocker".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task2 = db
+            .create_task(None, "Blocked".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+
+        // Manually move task2 to in_progress (not initial state)
+        db.claim_task(&task2.id, &agent.id, &states_config).unwrap();
+
+        // Complete task1
+        db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
+        let (_, _, auto_advanced) = db
+            .update_task_unified(
+                &task1.id,
+                &agent.id,
+                None, None,
+                Some("completed".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // task2 should NOT be auto-advanced because it's not in initial state
+        assert!(auto_advanced.is_empty());
+        let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
+        assert_eq!(task2_updated.status, "in_progress"); // Unchanged
+    }
+
+    #[test]
+    fn auto_advance_cascading_chain() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = auto_advance_enabled("cancelled");
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create a chain: task1 -> task2 -> task3
+        let task1 = db
+            .create_task(None, "Task 1".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task2 = db
+            .create_task(None, "Task 2".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+        let task3 = db
+            .create_task(None, "Task 3".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config).unwrap();
+        db.add_dependency(&task2.id, &task3.id, "blocks", &deps_config).unwrap();
+
+        // Complete task1 - task2 should auto-advance (but not task3 since task2 just changed)
+        db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
+        let (_, _, auto_advanced) = db
+            .update_task_unified(
+                &task1.id,
+                &agent.id,
+                None, None,
+                Some("completed".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // task2 should be auto-advanced to cancelled
+        // task3 should NOT be auto-advanced because "cancelled" is not a blocking state
+        // Wait, cancelled is not in blocking_states (which is [pending, in_progress] by default)
+        // So task2 transitioning to cancelled should NOT trigger task3 to auto-advance
+        // in the same transaction - it would need a separate update
+        assert_eq!(auto_advanced.len(), 1);
+        assert_eq!(auto_advanced[0], task2.id);
+        
+        // Verify states
+        let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
+        assert_eq!(task2_updated.status, "cancelled");
+        
+        // task3 should still be pending since task2's transition to cancelled
+        // doesn't count as "completing" in the cascade - it's in a separate scope
+        // Actually task2 -> cancelled is a non-blocking state, so task3 might advance too
+        // Let me check - "cancelled" is not in blocking_states, so task2 is no longer blocking task3
+        // But the cascade only happens in the same update_task_unified call
+        // So task3 should still be pending
+        let task3_updated = db.get_task(&task3.id).unwrap().unwrap();
+        assert_eq!(task3_updated.status, "pending"); // Still pending - cascade doesn't happen recursively
     }
 }

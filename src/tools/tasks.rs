@@ -583,7 +583,7 @@ pub fn update(
     let reason = get_string(&args, "reason");
     let force = get_bool(&args, "force").unwrap_or(false);
 
-    let (task, auto_advanced) = db.update_task_unified(
+    let (task, unblocked, auto_advanced) = db.update_task_unified(
         &task_id,
         &worker_id,
         title,
@@ -602,10 +602,15 @@ pub fn update(
         auto_advance,
     )?;
 
-    // Build response with task and optional auto_advanced list
+    // Build response with task and unblocked/auto_advanced lists
     let mut response = serde_json::to_value(&task)?;
-    if !auto_advanced.is_empty() {
-        if let Value::Object(ref mut map) = response {
+    if let Value::Object(ref mut map) = response {
+        // Always include unblocked if non-empty (tasks now ready to claim)
+        if !unblocked.is_empty() {
+            map.insert("unblocked".to_string(), json!(unblocked));
+        }
+        // Include auto_advanced if non-empty (tasks that were actually transitioned)
+        if !auto_advanced.is_empty() {
             map.insert("auto_advanced".to_string(), json!(auto_advanced));
         }
     }
