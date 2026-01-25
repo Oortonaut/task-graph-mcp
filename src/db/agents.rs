@@ -12,27 +12,25 @@ pub const MAX_AGENT_ID_LEN: usize = 36;
 /// Internal helper to get an agent using an existing connection (avoids deadlock).
 fn get_agent_internal(conn: &Connection, agent_id: &str) -> Result<Option<Agent>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, tags, max_claims, registered_at, last_heartbeat
+        "SELECT id, tags, max_claims, registered_at, last_heartbeat
          FROM agents WHERE id = ?1",
     )?;
 
     let result = stmt.query_row(params![agent_id], |row| {
         let id: String = row.get(0)?;
-        let name: Option<String> = row.get(1)?;
-        let tags_json: String = row.get(2)?;
-        let max_claims: i32 = row.get(3)?;
-        let registered_at: i64 = row.get(4)?;
-        let last_heartbeat: i64 = row.get(5)?;
+        let tags_json: String = row.get(1)?;
+        let max_claims: i32 = row.get(2)?;
+        let registered_at: i64 = row.get(3)?;
+        let last_heartbeat: i64 = row.get(4)?;
 
-        Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat))
+        Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
     });
 
     match result {
-        Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat)) => {
+        Ok((id, tags_json, max_claims, registered_at, last_heartbeat)) => {
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
             Ok(Some(Agent {
                 id,
-                name,
                 tags,
                 max_claims,
                 registered_at,
@@ -52,7 +50,6 @@ impl Database {
     pub fn register_agent(
         &self,
         agent_id: Option<String>,
-        name: Option<String>,
         tags: Vec<String>,
         max_claims: Option<i32>,
     ) -> Result<Agent> {
@@ -87,14 +84,13 @@ impl Database {
             }
 
             conn.execute(
-                "INSERT INTO agents (id, name, tags, max_claims, registered_at, last_heartbeat)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![&id, name, tags_json, max_claims, now, now],
+                "INSERT INTO agents (id, tags, max_claims, registered_at, last_heartbeat)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![&id, tags_json, max_claims, now, now],
             )?;
 
             Ok(Agent {
                 id,
-                name,
                 tags,
                 max_claims,
                 registered_at: now,
@@ -107,27 +103,25 @@ impl Database {
     pub fn get_agent(&self, agent_id: &str) -> Result<Option<Agent>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, tags, max_claims, registered_at, last_heartbeat
+                "SELECT id, tags, max_claims, registered_at, last_heartbeat
                  FROM agents WHERE id = ?1",
             )?;
 
             let result = stmt.query_row(params![agent_id], |row| {
                 let id: String = row.get(0)?;
-                let name: Option<String> = row.get(1)?;
-                let tags_json: String = row.get(2)?;
-                let max_claims: i32 = row.get(3)?;
-                let registered_at: i64 = row.get(4)?;
-                let last_heartbeat: i64 = row.get(5)?;
+                let tags_json: String = row.get(1)?;
+                let max_claims: i32 = row.get(2)?;
+                let registered_at: i64 = row.get(3)?;
+                let last_heartbeat: i64 = row.get(4)?;
 
-                Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat))
+                Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
             });
 
             match result {
-                Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat)) => {
+                Ok((id, tags_json, max_claims, registered_at, last_heartbeat)) => {
                     let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                     Ok(Some(Agent {
                         id,
-                        name,
                         tags,
                         max_claims,
                         registered_at,
@@ -150,7 +144,6 @@ impl Database {
     pub fn update_agent(
         &self,
         agent_id: &str,
-        name: Option<Option<String>>,
         tags: Option<Vec<String>>,
         max_claims: Option<i32>,
     ) -> Result<Agent> {
@@ -158,19 +151,17 @@ impl Database {
             let agent = get_agent_internal(conn, agent_id)?
                 .ok_or_else(|| anyhow!("Agent not found"))?;
 
-            let new_name = name.unwrap_or(agent.name.clone());
             let new_tags = tags.unwrap_or(agent.tags.clone());
             let new_max_claims = max_claims.unwrap_or(agent.max_claims);
             let tags_json = serde_json::to_string(&new_tags)?;
 
             conn.execute(
-                "UPDATE agents SET name = ?1, tags = ?2, max_claims = ?3 WHERE id = ?4",
-                params![new_name, tags_json, new_max_claims, agent_id],
+                "UPDATE agents SET tags = ?1, max_claims = ?2 WHERE id = ?3",
+                params![tags_json, new_max_claims, agent_id],
             )?;
 
             Ok(Agent {
                 id: agent_id.to_string(),
-                name: new_name,
                 tags: new_tags,
                 max_claims: new_max_claims,
                 registered_at: agent.registered_at,
@@ -237,26 +228,24 @@ impl Database {
     pub fn list_agents(&self) -> Result<Vec<Agent>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, tags, max_claims, registered_at, last_heartbeat
+                "SELECT id, tags, max_claims, registered_at, last_heartbeat
                  FROM agents ORDER BY registered_at DESC",
             )?;
 
             let agents = stmt.query_map([], |row| {
                 let id: String = row.get(0)?;
-                let name: Option<String> = row.get(1)?;
-                let tags_json: String = row.get(2)?;
-                let max_claims: i32 = row.get(3)?;
-                let registered_at: i64 = row.get(4)?;
-                let last_heartbeat: i64 = row.get(5)?;
+                let tags_json: String = row.get(1)?;
+                let max_claims: i32 = row.get(2)?;
+                let registered_at: i64 = row.get(3)?;
+                let last_heartbeat: i64 = row.get(4)?;
 
-                Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat))
+                Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, name, tags_json, max_claims, registered_at, last_heartbeat)| {
+            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat)| {
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                 Agent {
                     id,
-                    name,
                     tags,
                     max_claims,
                     registered_at,
@@ -273,7 +262,7 @@ impl Database {
     pub fn list_agents_info(&self) -> Result<Vec<crate::types::AgentInfo>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT a.id, a.name, a.tags, a.max_claims, a.registered_at, a.last_heartbeat,
+                "SELECT a.id, a.tags, a.max_claims, a.registered_at, a.last_heartbeat,
                         (SELECT COUNT(*) FROM tasks WHERE owner_agent = a.id AND status = 'in_progress') as claim_count,
                         (SELECT current_thought FROM tasks WHERE owner_agent = a.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
                  FROM agents a ORDER BY a.registered_at DESC",
@@ -281,22 +270,20 @@ impl Database {
 
             let agents = stmt.query_map([], |row| {
                 let id: String = row.get(0)?;
-                let name: Option<String> = row.get(1)?;
-                let tags_json: String = row.get(2)?;
-                let max_claims: i32 = row.get(3)?;
-                let registered_at: i64 = row.get(4)?;
-                let last_heartbeat: i64 = row.get(5)?;
-                let claim_count: i32 = row.get(6)?;
-                let current_thought: Option<String> = row.get(7)?;
+                let tags_json: String = row.get(1)?;
+                let max_claims: i32 = row.get(2)?;
+                let registered_at: i64 = row.get(3)?;
+                let last_heartbeat: i64 = row.get(4)?;
+                let claim_count: i32 = row.get(5)?;
+                let current_thought: Option<String> = row.get(6)?;
 
-                Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought))
+                Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, name, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought)| {
+            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought)| {
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                 crate::types::AgentInfo {
                     id,
-                    name,
                     tags,
                     max_claims,
                     claim_count,
@@ -318,26 +305,24 @@ impl Database {
 
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, tags, max_claims, registered_at, last_heartbeat
+                "SELECT id, tags, max_claims, registered_at, last_heartbeat
                  FROM agents WHERE last_heartbeat < ?1",
             )?;
 
             let agents = stmt.query_map(params![cutoff], |row| {
                 let id: String = row.get(0)?;
-                let name: Option<String> = row.get(1)?;
-                let tags_json: String = row.get(2)?;
-                let max_claims: i32 = row.get(3)?;
-                let registered_at: i64 = row.get(4)?;
-                let last_heartbeat: i64 = row.get(5)?;
+                let tags_json: String = row.get(1)?;
+                let max_claims: i32 = row.get(2)?;
+                let registered_at: i64 = row.get(3)?;
+                let last_heartbeat: i64 = row.get(4)?;
 
-                Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat))
+                Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, name, tags_json, max_claims, registered_at, last_heartbeat)| {
+            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat)| {
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                 Agent {
                     id,
-                    name,
                     tags,
                     max_claims,
                     registered_at,

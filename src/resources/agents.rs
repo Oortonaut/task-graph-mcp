@@ -12,7 +12,6 @@ pub fn get_all_agents(db: &Database) -> Result<Value> {
             let claim_count = db.get_claim_count(&a.id).unwrap_or(0);
             json!({
                 "id": &a.id,
-                "name": a.name,
                 "tags": a.tags,
                 "max_claims": a.max_claims,
                 "current_claims": claim_count,

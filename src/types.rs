@@ -7,7 +7,6 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
     pub id: String,
-    pub name: Option<String>,
     pub tags: Vec<String>,
     pub max_claims: i32,
     pub registered_at: i64,
@@ -18,7 +17,6 @@ pub struct Agent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
     pub id: String,
-    pub name: Option<String>,
     pub tags: Vec<String>,
     pub max_claims: i32,
     pub claim_count: i32,

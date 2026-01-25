@@ -94,27 +94,25 @@ fn get_task_internal(conn: &Connection, task_id: &str) -> Result<Option<Task>> {
 /// Internal helper to get an agent using an existing connection (avoids deadlock).
 fn get_agent_internal(conn: &Connection, agent_id: &str) -> Result<Option<Agent>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, tags, max_claims, registered_at, last_heartbeat
+        "SELECT id, tags, max_claims, registered_at, last_heartbeat
          FROM agents WHERE id = ?1",
     )?;
 
     let result = stmt.query_row(params![agent_id], |row| {
         let id: String = row.get(0)?;
-        let name: Option<String> = row.get(1)?;
-        let tags_json: String = row.get(2)?;
-        let max_claims: i32 = row.get(3)?;
-        let registered_at: i64 = row.get(4)?;
-        let last_heartbeat: i64 = row.get(5)?;
+        let tags_json: String = row.get(1)?;
+        let max_claims: i32 = row.get(2)?;
+        let registered_at: i64 = row.get(3)?;
+        let last_heartbeat: i64 = row.get(4)?;
 
-        Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat))
+        Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
     });
 
     match result {
-        Ok((id, name, tags_json, max_claims, registered_at, last_heartbeat)) => {
+        Ok((id, tags_json, max_claims, registered_at, last_heartbeat)) => {
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
             Ok(Some(Agent {
                 id,
-                name,
                 tags,
                 max_claims,
                 registered_at,
@@ -334,6 +332,7 @@ impl Database {
         status: Option<String>,
         priority: Option<Priority>,
         points: Option<Option<i32>>,
+        tags: Option<Vec<String>>,
         states_config: &StatesConfig,
     ) -> Result<Task> {
         let now = now_ms();
@@ -347,6 +346,7 @@ impl Database {
             let new_status = status.unwrap_or(task.status.clone());
             let new_priority = priority.unwrap_or(task.priority);
             let new_points = points.unwrap_or(task.points);
+            let new_tags = tags.unwrap_or(task.tags.clone());
 
             // Validate the new status exists
             if !states_config.is_valid_state(&new_status) {
@@ -401,8 +401,9 @@ impl Database {
             conn.execute(
                 "UPDATE tasks SET
                     title = ?1, description = ?2, status = ?3, priority = ?4,
-                    points = ?5, started_at = ?6, completed_at = ?7, updated_at = ?8
-                WHERE id = ?9",
+                    points = ?5, started_at = ?6, completed_at = ?7, updated_at = ?8,
+                    tags = ?9
+                WHERE id = ?10",
                 params![
                     new_title,
                     new_description,
@@ -412,6 +413,7 @@ impl Database {
                     started_at,
                     completed_at,
                     now,
+                    serde_json::to_string(&new_tags)?,
                     task_id,
                 ],
             )?;
@@ -423,6 +425,7 @@ impl Database {
                 status: new_status,
                 priority: new_priority,
                 points: new_points,
+                tags: new_tags,
                 started_at,
                 completed_at,
                 updated_at: now,

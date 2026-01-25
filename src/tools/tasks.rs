@@ -206,6 +206,11 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "points": {
                     "type": "integer",
                     "description": "New points estimate"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "New categorization/discovery tags"
                 }
             }),
             vec!["agent", "task", "state"],
@@ -450,8 +455,13 @@ pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
     } else {
         None
     };
+    let tags = if args.get("tags").is_some() {
+        Some(get_string_array(&args, "tags").unwrap_or_default())
+    } else {
+        None
+    };
 
-    let task = db.update_task(&task_id, title, description, status, priority, points, states_config)?;
+    let task = db.update_task(&task_id, title, description, status, priority, points, tags, states_config)?;
 
     Ok(serde_json::to_value(task)?)
 }

@@ -186,7 +186,7 @@ pub fn format_agents_markdown(agents: &[AgentInfo]) -> String {
     md.push_str(&format!("# Agents ({})\n\n", agents.len()));
 
     for agent in agents {
-        md.push_str(&format!("## {}\n", agent.name.as_deref().unwrap_or(&agent.id)));
+        md.push_str(&format!("## {}\n", agent.id));
         md.push_str(&format!("- **id**: `{}`\n", agent.id));
         
         if !agent.tags.is_empty() {

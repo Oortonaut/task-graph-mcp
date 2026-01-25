@@ -66,15 +66,13 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 
 pub fn connect(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent");
-    let name = get_string(&args, "name");
     let tags = get_string_array(&args, "tags").unwrap_or_default();
     let max_claims = get_i32(&args, "max_claims");
 
-    let agent = db.register_agent(agent_id, name, tags, max_claims)?;
+    let agent = db.register_agent(agent_id, tags, max_claims)?;
 
     Ok(json!({
         "agent_id": &agent.id,
-        "name": agent.name,
         "tags": agent.tags,
         "max_claims": agent.max_claims,
         "registered_at": agent.registered_at
@@ -110,7 +108,6 @@ pub fn list_agents(db: &Database, default_format: OutputFormat, args: Value) -> 
             Ok(json!({
                 "agents": agents.iter().map(|a| json!({
                     "id": a.id,
-                    "name": a.name,
                     "tags": a.tags,
                     "max_claims": a.max_claims,
                     "claim_count": a.claim_count,
