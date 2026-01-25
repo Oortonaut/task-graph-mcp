@@ -1,6 +1,6 @@
 //! Agent connection and management tools.
 
-use super::{get_i32, get_string, get_string_array, make_tool_with_prompts};
+use super::{get_bool, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::Prompts;
 use crate::db::Database;
 use crate::error::ToolError;
@@ -19,18 +19,14 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                     "type": "string",
                     "description": "Optional custom agent ID (max 36 chars). If not provided, a UUID7 will be generated."
                 },
-                "name": {
-                    "type": "string",
-                    "description": "Optional display name for the agent"
-                },
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Freeform tags for capabilities, roles, etc."
                 },
-                "max_claims": {
-                    "type": "integer",
-                    "description": "Maximum number of tasks this agent can claim (default: 5)"
+                "force": {
+                    "type": "boolean",
+                    "description": "Force reconnection if agent ID already exists (default: false). Use for stuck agent recovery."
                 }
             }),
             vec![],
@@ -67,9 +63,9 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
 pub fn connect(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent");
     let tags = get_string_array(&args, "tags").unwrap_or_default();
-    let max_claims = get_i32(&args, "max_claims");
+    let force = get_bool(&args, "force").unwrap_or(false);
 
-    let agent = db.register_agent(agent_id, tags, max_claims)?;
+    let agent = db.register_agent(agent_id, tags, force)?;
 
     Ok(json!({
         "agent_id": &agent.id,

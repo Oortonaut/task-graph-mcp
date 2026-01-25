@@ -47,11 +47,13 @@ impl Database {
     ///
     /// If `agent_id` is provided, it must be at most 36 characters.
     /// If not provided, a UUID7 (time-sortable) will be generated.
+    /// If `force` is true and the agent already exists, it will be re-registered
+    /// (useful for stuck agent recovery).
     pub fn register_agent(
         &self,
         agent_id: Option<String>,
         tags: Vec<String>,
-        max_claims: Option<i32>,
+        force: bool,
     ) -> Result<Agent> {
         let id = match agent_id {
             Some(id) => {
@@ -70,7 +72,7 @@ impl Database {
             None => Uuid::now_v7().to_string(),
         };
         let now = now_ms();
-        let max_claims = max_claims.unwrap_or(5);
+        let max_claims = 5; // Default, TODO: make configurable
         let tags_json = serde_json::to_string(&tags)?;
 
         self.with_conn(|conn| {
@@ -80,14 +82,22 @@ impl Database {
                 .unwrap_or(false);
 
             if exists {
-                return Err(anyhow!("Agent ID '{}' already registered", id));
+                if force {
+                    // Force reconnection: update existing agent
+                    conn.execute(
+                        "UPDATE agents SET tags = ?1, max_claims = ?2, last_heartbeat = ?3 WHERE id = ?4",
+                        params![tags_json, max_claims, now, &id],
+                    )?;
+                } else {
+                    return Err(anyhow!("Agent ID '{}' already registered. Use force=true to reconnect.", id));
+                }
+            } else {
+                conn.execute(
+                    "INSERT INTO agents (id, tags, max_claims, registered_at, last_heartbeat)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![&id, tags_json, max_claims, now, now],
+                )?;
             }
-
-            conn.execute(
-                "INSERT INTO agents (id, tags, max_claims, registered_at, last_heartbeat)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![&id, tags_json, max_claims, now, now],
-            )?;
 
             Ok(Agent {
                 id,

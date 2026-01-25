@@ -30,7 +30,7 @@ mod agent_tests {
         let db = setup_db();
 
         let agent = db
-            .register_agent(None, vec![], None)
+            .register_agent(None, vec![], false)
             .expect("Failed to register agent");
 
         assert!(agent.tags.is_empty());
@@ -40,19 +40,19 @@ mod agent_tests {
     }
 
     #[test]
-    fn register_agent_with_custom_values() {
+    fn register_agent_with_custom_tags() {
         let db = setup_db();
 
         let agent = db
             .register_agent(
                 None,
                 vec!["rust".to_string(), "backend".to_string()],
-                Some(10),
+                false,
             )
             .expect("Failed to register agent");
 
         assert_eq!(agent.tags, vec!["rust", "backend"]);
-        assert_eq!(agent.max_claims, 10);
+        assert_eq!(agent.max_claims, 5); // default
     }
 
     #[test]
@@ -63,7 +63,7 @@ mod agent_tests {
             .register_agent(
                 Some("my-custom-agent".to_string()),
                 vec![],
-                None,
+                false,
             )
             .expect("Failed to register agent with custom ID");
 
@@ -77,7 +77,7 @@ mod agent_tests {
         let result = db.register_agent(
             Some("this-id-is-way-too-long-and-should-be-rejected-by-the-system".to_string()),
             vec![],
-            None,
+            false,
         );
 
         assert!(result.is_err());
@@ -87,7 +87,7 @@ mod agent_tests {
     fn register_agent_rejects_empty_id() {
         let db = setup_db();
 
-        let result = db.register_agent(Some("".to_string()), vec![], None);
+        let result = db.register_agent(Some("".to_string()), vec![], false);
 
         assert!(result.is_err());
     }
@@ -100,7 +100,7 @@ mod agent_tests {
         let result = db.register_agent(
             Some("duplicate-agent".to_string()),
             vec![],
-            None,
+            false,
         );
         assert!(result.is_ok());
 
@@ -108,17 +108,46 @@ mod agent_tests {
         let result = db.register_agent(
             Some("duplicate-agent".to_string()),
             vec![],
-            None,
+            false,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already registered"));
     }
 
     #[test]
+    fn register_agent_with_force_allows_reconnection() {
+        let db = setup_db();
+
+        // First registration
+        let agent1 = db.register_agent(
+            Some("force-agent".to_string()),
+            vec!["old-tag".to_string()],
+            false,
+        ).unwrap();
+        assert_eq!(agent1.tags, vec!["old-tag"]);
+
+        // Second registration without force should fail
+        let result = db.register_agent(
+            Some("force-agent".to_string()),
+            vec!["new-tag".to_string()],
+            false,
+        );
+        assert!(result.is_err());
+
+        // Third registration with force=true should succeed and update tags
+        let agent2 = db.register_agent(
+            Some("force-agent".to_string()),
+            vec!["new-tag".to_string()],
+            true,
+        ).unwrap();
+        assert_eq!(agent2.tags, vec!["new-tag"]);
+    }
+
+    #[test]
     fn get_agent_returns_registered_agent() {
         let db = setup_db();
         let agent = db
-            .register_agent(None, vec!["finder".to_string()], None)
+            .register_agent(None, vec!["finder".to_string()], false)
             .unwrap();
 
         let found = db.get_agent(&agent.id).unwrap();
@@ -139,7 +168,7 @@ mod agent_tests {
     #[test]
     fn update_agent_modifies_properties() {
         let db = setup_db();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
 
         let updated = db
             .update_agent(
@@ -156,7 +185,7 @@ mod agent_tests {
     #[test]
     fn heartbeat_updates_last_heartbeat_and_returns_claim_count() {
         let db = setup_db();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let original_heartbeat = agent.last_heartbeat;
 
         // Small delay to ensure timestamp difference
@@ -181,7 +210,7 @@ mod agent_tests {
     #[test]
     fn unregister_agent_removes_agent() {
         let db = setup_db();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
 
         db.unregister_agent(&agent.id).unwrap();
 
@@ -192,9 +221,9 @@ mod agent_tests {
     #[test]
     fn list_agents_returns_all_registered_agents() {
         let db = setup_db();
-        db.register_agent(None, vec!["agent1".to_string()], None)
+        db.register_agent(None, vec!["agent1".to_string()], false)
             .unwrap();
-        db.register_agent(None, vec!["agent2".to_string()], None)
+        db.register_agent(None, vec!["agent2".to_string()], false)
             .unwrap();
 
         let agents = db.list_agents().unwrap();
@@ -529,7 +558,7 @@ mod task_claiming_tests {
     fn claim_task_assigns_owner_and_updates_status() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Claim Me".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -546,8 +575,8 @@ mod task_claiming_tests {
     fn claim_task_fails_if_already_claimed() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent1 = db.register_agent(None, vec![], None).unwrap();
-        let agent2 = db.register_agent(None, vec![], None).unwrap();
+        let agent1 = db.register_agent(None, vec![], false).unwrap();
+        let agent2 = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Claimed".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -562,7 +591,9 @@ mod task_claiming_tests {
     fn claim_task_fails_if_agent_at_claim_limit() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], Some(1)).unwrap(); // max 1 claim
+        let agent = db.register_agent(None, vec![], false).unwrap();
+        // Set max_claims to 1 via update_agent
+        let agent = db.update_agent(&agent.id, None, Some(1)).unwrap();
         let task1 = db
             .create_task("Task 1".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -581,7 +612,7 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_agent(None, vec!["python".to_string()], None)
+            .register_agent(None, vec!["python".to_string()], false)
             .unwrap();
         let task = db
             .create_task(
@@ -609,7 +640,7 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_agent(None, vec!["rust".to_string(), "backend".to_string()], None)
+            .register_agent(None, vec!["rust".to_string(), "backend".to_string()], false)
             .unwrap();
         let task = db
             .create_task(
@@ -637,7 +668,7 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_agent(None, vec!["python".to_string()], None)
+            .register_agent(None, vec!["python".to_string()], false)
             .unwrap();
         let task = db
             .create_task(
@@ -664,7 +695,7 @@ mod task_claiming_tests {
     fn release_task_clears_owner_and_resets_status() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Release Me".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -681,8 +712,8 @@ mod task_claiming_tests {
     fn release_task_fails_if_not_owner() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent1 = db.register_agent(None, vec![], None).unwrap();
-        let agent2 = db.register_agent(None, vec![], None).unwrap();
+        let agent1 = db.register_agent(None, vec![], false).unwrap();
+        let agent2 = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Owned".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -697,7 +728,7 @@ mod task_claiming_tests {
     fn force_release_clears_owner_regardless() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Force".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -846,7 +877,7 @@ mod file_lock_tests {
     #[test]
     fn lock_file_creates_lock() {
         let db = setup_db();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
 
         let warning = db.lock_file("src/main.rs".to_string(), &agent.id, None).unwrap();
 
@@ -859,8 +890,8 @@ mod file_lock_tests {
     #[test]
     fn lock_file_returns_warning_if_locked_by_another() {
         let db = setup_db();
-        let agent1 = db.register_agent(None, vec![], None).unwrap();
-        let agent2 = db.register_agent(None, vec![], None).unwrap();
+        let agent1 = db.register_agent(None, vec![], false).unwrap();
+        let agent2 = db.register_agent(None, vec![], false).unwrap();
 
         db.lock_file("src/main.rs".to_string(), &agent1.id, None).unwrap();
         let warning = db.lock_file("src/main.rs".to_string(), &agent2.id, None).unwrap();
@@ -872,7 +903,7 @@ mod file_lock_tests {
     #[test]
     fn lock_file_updates_timestamp_if_same_agent() {
         let db = setup_db();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
 
         db.lock_file("src/main.rs".to_string(), &agent.id, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -884,7 +915,7 @@ mod file_lock_tests {
     #[test]
     fn unlock_file_removes_lock() {
         let db = setup_db();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         db.lock_file("src/main.rs".to_string(), &agent.id, None).unwrap();
 
         let unlocked = db.unlock_file("src/main.rs", &agent.id, None).unwrap();
@@ -897,8 +928,8 @@ mod file_lock_tests {
     #[test]
     fn unlock_file_fails_for_wrong_agent() {
         let db = setup_db();
-        let agent1 = db.register_agent(None, vec![], None).unwrap();
-        let agent2 = db.register_agent(None, vec![], None).unwrap();
+        let agent1 = db.register_agent(None, vec![], false).unwrap();
+        let agent2 = db.register_agent(None, vec![], false).unwrap();
         db.lock_file("src/main.rs".to_string(), &agent1.id, None).unwrap();
 
         let unlocked = db.unlock_file("src/main.rs", &agent2.id, None).unwrap();
@@ -909,8 +940,8 @@ mod file_lock_tests {
     #[test]
     fn get_file_locks_filters_by_agent() {
         let db = setup_db();
-        let agent1 = db.register_agent(None, vec![], None).unwrap();
-        let agent2 = db.register_agent(None, vec![], None).unwrap();
+        let agent1 = db.register_agent(None, vec![], false).unwrap();
+        let agent2 = db.register_agent(None, vec![], false).unwrap();
         db.lock_file("file1.rs".to_string(), &agent1.id, None).unwrap();
         db.lock_file("file2.rs".to_string(), &agent2.id, None).unwrap();
 
@@ -923,7 +954,7 @@ mod file_lock_tests {
     #[test]
     fn release_agent_locks_removes_all_agent_locks() {
         let db = setup_db();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         db.lock_file("file1.rs".to_string(), &agent.id, None).unwrap();
         db.lock_file("file2.rs".to_string(), &agent.id, None).unwrap();
 
@@ -942,7 +973,7 @@ mod tracking_tests {
     fn set_thought_updates_current_thought() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Think".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -1065,7 +1096,7 @@ mod stats_tests {
     fn get_stats_filters_by_agent() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task(
                 "Agent Task".to_string(),
@@ -1182,7 +1213,7 @@ mod state_transition_tests {
     fn claim_task_records_in_progress_transition() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Test".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -1201,7 +1232,7 @@ mod state_transition_tests {
     fn complete_task_accumulates_time_from_in_progress() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Test".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -1222,7 +1253,7 @@ mod state_transition_tests {
     fn multiple_claim_cycles_accumulate_time() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Test".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -1250,7 +1281,7 @@ mod state_transition_tests {
     fn release_to_non_working_state_accumulates_time() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Test".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
@@ -1267,7 +1298,7 @@ mod state_transition_tests {
     fn current_state_duration_returns_elapsed_time_for_working_state() {
         let db = setup_db();
         let states_config = default_states_config();
-        let agent = db.register_agent(None, vec![], None).unwrap();
+        let agent = db.register_agent(None, vec![], false).unwrap();
         let task = db
             .create_task("Test".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
             .unwrap();
