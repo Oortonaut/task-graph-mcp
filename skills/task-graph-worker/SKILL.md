@@ -192,6 +192,25 @@ thinking(worker_id=worker_id, thought="All tests passing, preparing to complete"
 
 Multiple workers may edit the same codebase. Advisory locks prevent conflicts and enable coordination.
 
+### Recommended Discipline
+
+**Claim all files before you begin working on any of them.**
+
+Before writing any code, identify every file you'll need to modify and claim them all upfront in a single call. This prevents mid-task conflicts where another worker claims a file you need, forcing you to wait or redo work.
+
+```
+# Good: Claim all files upfront with task-level reason
+claim_file(worker_id=id,
+           file=["src/types.rs", "src/handler.rs", "tests/handler_test.rs"],
+           reason="Add Status enum and update handlers")
+# Now begin implementation...
+
+# Bad: Claim as you go (risks mid-task conflicts)
+claim_file(worker_id=id, file="src/types.rs", reason="...")
+# Edit types.rs...
+claim_file(worker_id=id, file="src/handler.rs", reason="...")  # May already be claimed!
+```
+
 ### Coordination Model
 
 Claims include a **reason** describing what you're doing:
