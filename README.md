@@ -67,6 +67,38 @@ auto_advance:
   target_state: ready   # Target state (requires custom state in states config)
 ```
 
+### States Configuration
+
+Task states are configurable. Default states: `pending`, `in_progress`, `completed`, `failed`, `cancelled`.
+
+To add a `ready` state for auto-advance:
+
+```yaml
+states:
+  initial: pending
+  blocking_states: [pending, in_progress]
+  definitions:
+    pending:
+      exits: [ready, in_progress, cancelled]
+    ready:
+      exits: [in_progress, cancelled]
+    in_progress:
+      exits: [completed, failed, pending]
+      timed: true    # Time in this state counts toward time_actual_ms
+    completed:
+      exits: []
+    failed:
+      exits: [pending]
+    cancelled:
+      exits: []
+
+auto_advance:
+  enabled: true
+  target_state: ready
+```
+
+See [SCHEMA.md](SCHEMA.md#states-configuration) for full documentation on state definitions.
+
 Environment variables:
 - `TASK_GRAPH_DB_PATH`: Database file path
 - `TASK_GRAPH_MEDIA_DIR`: Media directory for file attachments
