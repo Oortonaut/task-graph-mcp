@@ -2,7 +2,6 @@
 
 use crate::config::StatesConfig;
 use crate::db::Database;
-use crate::types::priority_to_str;
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -57,7 +56,7 @@ pub fn get_acp_plan(db: &Database) -> Result<Value> {
             "title": t.title,
             "description": t.description,
             "status": status,
-            "priority": priority_to_str(t.priority),
+            "priority": t.priority,
             "blockedBy": blockers,
             "assignee": &t.owner_agent,
             "metadata": {

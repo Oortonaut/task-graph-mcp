@@ -3,7 +3,7 @@
 use super::state_transitions::record_state_transition;
 use super::{now_ms, Database};
 use crate::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
-use crate::types::{parse_priority, priority_to_str, JoinMode, Priority, Task, TaskSummary, TaskTree, TaskTreeInput, Worker, PRIORITY_MEDIUM};
+use crate::types::{clamp_priority, parse_priority, JoinMode, Priority, Task, TaskSummary, TaskTree, TaskTreeInput, Worker, PRIORITY_DEFAULT};
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Row};
 use std::collections::HashMap;
@@ -13,21 +13,21 @@ use uuid::Uuid;
 /// Returns a safe SQL ORDER BY expression.
 fn build_order_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String {
     let field = match sort_by {
-        Some("priority") => "CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END",
+        Some("priority") => "CAST(t.priority AS INTEGER)",
         Some("created_at") => "t.created_at",
         Some("updated_at") => "t.updated_at",
         _ => "t.created_at", // default
     };
-    
+
     let order = match sort_order {
         Some("asc") => "ASC",
         Some("desc") => "DESC",
         _ => {
-            // Default: priority is always ascending (high=0 first), dates are descending
-            if sort_by == Some("priority") { "ASC" } else { "DESC" }
+            // Default: priority is descending (higher number = more important), dates are descending
+            "DESC"
         }
     };
-    
+
     format!("{} {}", field, order)
 }
 
@@ -172,7 +172,7 @@ impl Database {
     ) -> Result<Task> {
         let task_id = id.unwrap_or_else(|| Uuid::now_v7().to_string());
         let now = now_ms();
-        let priority = priority.unwrap_or(PRIORITY_MEDIUM);
+        let priority = clamp_priority(priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
 
         let agent_tags_all = agent_tags_all.unwrap_or_default();
@@ -195,7 +195,7 @@ impl Database {
                     &description,  // Use description as title
                     &description,  // Also store as description
                     initial_status,
-                    priority_to_str(priority),
+                    priority.to_string(),
                     agent_tags_all_json,
                     agent_tags_any_json,
                     tags_json,
@@ -415,7 +415,7 @@ impl Database {
                     new_title,
                     new_description,
                     new_status,
-                    priority_to_str(new_priority),
+                    new_priority.to_string(),
                     new_points,
                     started_at,
                     completed_at,
@@ -674,7 +674,7 @@ impl Database {
                     new_title,
                     new_description,
                     new_status,
-                    priority_to_str(new_priority),
+                    new_priority.to_string(),
                     new_points,
                     started_at,
                     completed_at,
@@ -1571,7 +1571,7 @@ fn create_tree_recursive(
         let generated_id = Uuid::now_v7().to_string();
         let task_id = input.id.clone().unwrap_or(generated_id);
         let now = now_ms();
-        let priority = input.priority.unwrap_or(PRIORITY_MEDIUM);
+        let priority = clamp_priority(input.priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
 
         let agent_tags_all = input.agent_tags_all.clone().unwrap_or_default();
@@ -1591,7 +1591,7 @@ fn create_tree_recursive(
                 &input.title,
                 &input.description,
                 initial_status,
-                priority_to_str(priority),
+                priority.to_string(),
                 agent_tags_all_json,
                 agent_tags_any_json,
                 tags_json,

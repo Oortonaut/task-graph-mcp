@@ -11,21 +11,21 @@ use std::collections::{HashSet, VecDeque};
 /// Returns a safe SQL ORDER BY expression.
 fn build_order_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String {
     let field = match sort_by {
-        Some("priority") => "CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END",
+        Some("priority") => "CAST(t.priority AS INTEGER)",
         Some("created_at") => "t.created_at",
         Some("updated_at") => "t.updated_at",
         _ => "t.created_at", // default
     };
-    
+
     let order = match sort_order {
         Some("asc") => "ASC",
         Some("desc") => "DESC",
         _ => {
-            // Default: priority is always ascending (high=0 first), dates are descending
-            if sort_by == Some("priority") { "ASC" } else { "DESC" }
+            // Default: priority is descending (higher number = more important), dates are descending
+            "DESC"
         }
     };
-    
+
     format!("{} {}", field, order)
 }
 
@@ -570,7 +570,7 @@ impl Database {
                 build_order_clause(sort_by, sort_order)
             } else {
                 // Default for ready: priority (high first), then created_at
-                "CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, t.created_at".to_string()
+                "CAST(t.priority AS INTEGER) DESC, t.created_at DESC".to_string()
             };
 
             // Build agent qualification filter if agent_tags is provided

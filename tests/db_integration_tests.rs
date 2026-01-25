@@ -5,7 +5,7 @@
 
 use task_graph_mcp::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
 use task_graph_mcp::db::Database;
-use task_graph_mcp::types::{PRIORITY_HIGH, PRIORITY_MEDIUM};
+use task_graph_mcp::types::PRIORITY_DEFAULT;
 
 /// Helper to create a fresh in-memory database for testing.
 fn setup_db() -> Database {
@@ -285,7 +285,7 @@ mod task_tests {
         assert_eq!(task.title, "Test Task");
         assert_eq!(task.description, Some("Test Task".to_string()));
         assert_eq!(task.status, "pending");
-        assert_eq!(task.priority, PRIORITY_MEDIUM);
+        assert_eq!(task.priority, PRIORITY_DEFAULT);
         assert!(task.owner_agent.is_none());
     }
 
@@ -299,7 +299,7 @@ mod task_tests {
                 None, // id
                 "Full Task - Description".to_string(), // description
                 None, // parent_id
-                Some(PRIORITY_HIGH),
+                Some(8),
                 Some(5),
                 Some(3600000),
                 Some(vec!["rust".to_string()]), // agent_tags_all
@@ -311,7 +311,7 @@ mod task_tests {
 
         assert_eq!(task.title, "Full Task - Description");
         assert_eq!(task.description, Some("Full Task - Description".to_string()));
-        assert_eq!(task.priority, PRIORITY_HIGH);
+        assert_eq!(task.priority, 8);
         assert_eq!(task.points, Some(5));
         assert_eq!(task.time_estimate_ms, Some(3600000));
         assert_eq!(task.agent_tags_all, vec!["rust"]);
@@ -400,7 +400,7 @@ mod task_tests {
                 Some("Updated".to_string()),
                 Some(Some("New Description".to_string())),
                 Some("in_progress".to_string()),
-                Some(PRIORITY_HIGH),
+                Some(8),
                 None,
                 None,
                 &states_config,
@@ -410,7 +410,7 @@ mod task_tests {
         assert_eq!(updated.title, "Updated");
         assert_eq!(updated.description, Some("New Description".to_string()));
         assert_eq!(updated.status, "in_progress");
-        assert_eq!(updated.priority, PRIORITY_HIGH);
+        assert_eq!(updated.priority, 8);
     }
 
     #[test]
@@ -976,6 +976,201 @@ mod task_claiming_tests {
         assert_eq!(updated.status, "completed");
         assert!(updated.owner_agent.is_none());
         assert!(updated.completed_at.is_some());
+    }
+
+    #[test]
+    fn update_between_two_timed_states_preserves_ownership() {
+        use std::collections::HashMap;
+        use task_graph_mcp::config::StateDefinition;
+
+        let db = setup_db();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+
+        // Create a custom StatesConfig with two timed states
+        let mut definitions = HashMap::new();
+        definitions.insert(
+            "pending".to_string(),
+            StateDefinition {
+                exits: vec!["in_progress".to_string(), "cancelled".to_string()],
+                timed: false,
+            },
+        );
+        definitions.insert(
+            "in_progress".to_string(),
+            StateDefinition {
+                exits: vec!["reviewing".to_string(), "completed".to_string(), "failed".to_string(), "pending".to_string()],
+                timed: true,
+            },
+        );
+        definitions.insert(
+            "reviewing".to_string(),
+            StateDefinition {
+                exits: vec!["in_progress".to_string(), "completed".to_string(), "failed".to_string()],
+                timed: true, // Second timed state
+            },
+        );
+        definitions.insert(
+            "completed".to_string(),
+            StateDefinition {
+                exits: vec![],
+                timed: false,
+            },
+        );
+        definitions.insert(
+            "failed".to_string(),
+            StateDefinition {
+                exits: vec!["pending".to_string()],
+                timed: false,
+            },
+        );
+        definitions.insert(
+            "cancelled".to_string(),
+            StateDefinition {
+                exits: vec![],
+                timed: false,
+            },
+        );
+
+        let states_config = task_graph_mcp::config::StatesConfig {
+            initial: "pending".to_string(),
+            disconnect_state: "pending".to_string(),
+            blocking_states: vec!["pending".to_string(), "in_progress".to_string(), "reviewing".to_string()],
+            definitions,
+        };
+
+        let agent = db.register_worker(None, vec![], false).unwrap();
+        let task = db
+            .create_task(None, "Timed to Timed".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Claim via transition to first timed state
+        let (updated, _, _) = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("in_progress".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "in_progress");
+        assert_eq!(updated.owner_agent, Some(agent.id.clone()));
+
+        // Transition to second timed state - should preserve ownership
+        let (updated, _, _) = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("reviewing".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "reviewing");
+        assert_eq!(updated.owner_agent, Some(agent.id.clone())); // Still owned
+        assert!(updated.claimed_at.is_some()); // Still has claimed_at
+    }
+
+    #[test]
+    fn update_to_same_state_succeeds() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+        let task = db
+            .create_task(None, "Same State".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Claim the task first
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+
+        let claimed = db.get_task(&task.id).unwrap().unwrap();
+        assert_eq!(claimed.status, "in_progress");
+
+        // Update to the same state (in_progress -> in_progress)
+        let (updated, _, _) = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("in_progress".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "in_progress");
+        assert_eq!(updated.owner_agent, Some(agent.id.clone()));
+    }
+
+    #[test]
+    fn update_between_two_untimed_states() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+        let task = db
+            .create_task(None, "Untimed to Untimed".to_string(), None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Claim and then fail the task to get to 'failed' state
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+        let (failed_task, _, _) = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("failed".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert_eq!(failed_task.status, "failed");
+        assert!(failed_task.owner_agent.is_none()); // Released on transition to terminal-ish state
+
+        // Now transition from failed (untimed) to pending (untimed)
+        let (updated, _, _) = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("pending".to_string()),
+                None, None, None,
+                None, None, None, None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "pending");
+        assert!(updated.owner_agent.is_none()); // Still no owner
+        assert!(updated.claimed_at.is_none());
     }
 }
 

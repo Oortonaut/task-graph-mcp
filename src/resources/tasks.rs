@@ -2,7 +2,6 @@
 
 use crate::config::{DependenciesConfig, StatesConfig};
 use crate::db::Database;
-use crate::types::priority_to_str;
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -16,7 +15,7 @@ pub fn get_all_tasks(db: &Database) -> Result<Value> {
             "title": t.title,
             "description": t.description,
             "status": &t.status,
-            "priority": priority_to_str(t.priority),
+            "priority": t.priority,
             "owner_agent": &t.owner_agent,
             "claimed_at": t.claimed_at,
             "points": t.points,
@@ -48,7 +47,7 @@ pub fn get_ready_tasks(
             "id": &t.id,
             "title": t.title,
             "description": t.description,
-            "priority": priority_to_str(t.priority),
+            "priority": t.priority,
             "points": t.points,
             "agent_tags_all": t.agent_tags_all,
             "agent_tags_any": t.agent_tags_any
@@ -69,7 +68,7 @@ pub fn get_blocked_tasks(
             json!({
                 "id": &t.id,
                 "title": t.title,
-                "priority": priority_to_str(t.priority),
+                "priority": t.priority,
                 "blocked_by": &blockers
             })
         }).collect::<Vec<_>>()
@@ -84,7 +83,7 @@ pub fn get_claimed_tasks(db: &Database, agent_id: Option<&str>) -> Result<Value>
             "id": &t.id,
             "title": t.title,
             "status": &t.status,
-            "priority": priority_to_str(t.priority),
+            "priority": t.priority,
             "owner_agent": &t.owner_agent,
             "claimed_at": t.claimed_at,
             "current_thought": t.current_thought

@@ -1,7 +1,7 @@
 //! Output formatting utilities for markdown and JSON.
 
 use crate::config::StatesConfig;
-use crate::types::{priority_to_str, ScanResult, Task, TaskTree, WorkerInfo, PRIORITY_MEDIUM};
+use crate::types::{ScanResult, Task, TaskTree, WorkerInfo, PRIORITY_DEFAULT};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -31,7 +31,7 @@ pub fn format_task_markdown(task: &Task, blocked_by: &[String]) -> String {
     md.push_str(&format!("## Task: {}\n", task.title));
     md.push_str(&format!("- **id**: `{}`\n", task.id));
     md.push_str(&format!("- **status**: {}\n", task.status));
-    md.push_str(&format!("- **priority**: {}\n", priority_to_str(task.priority)));
+    md.push_str(&format!("- **priority**: {}\n", task.priority));
 
     if let Some(ref owner) = task.owner_agent {
         md.push_str(&format!("- **owner**: {}\n", owner));
@@ -283,8 +283,8 @@ pub fn format_task_tree_markdown(tree: &TaskTree) -> String {
     // Add root task metadata
     let mut meta_parts = Vec::new();
     meta_parts.push(tree.task.status.to_uppercase());
-    if tree.task.priority != PRIORITY_MEDIUM {
-        meta_parts.push(priority_to_str(tree.task.priority).to_uppercase());
+    if tree.task.priority != PRIORITY_DEFAULT {
+        meta_parts.push(format!("P{}", tree.task.priority));
     }
     if let Some(points) = tree.task.points {
         meta_parts.push(format!("{} pts", points));
@@ -322,8 +322,8 @@ fn format_tree_children(children: &[TaskTree], prefix: &str, md: &mut String) {
         // Build the task line with metadata
         let mut meta_parts = Vec::new();
         meta_parts.push(child.task.status.clone());
-        if child.task.priority != PRIORITY_MEDIUM {
-            meta_parts.push(priority_to_str(child.task.priority).to_uppercase().to_string());
+        if child.task.priority != PRIORITY_DEFAULT {
+            meta_parts.push(format!("P{}", child.task.priority));
         }
         if let Some(points) = child.task.points {
             meta_parts.push(format!("{} pts", points));
@@ -355,7 +355,7 @@ pub fn format_scan_result_markdown(result: &ScanResult) -> String {
     md.push_str(&format!("# Scan: {}\\n", result.root.title));
     md.push_str(&format!("- **id**: `{}`\\n", result.root.id));
     md.push_str(&format!("- **status**: {}\\n", result.root.status));
-    md.push_str(&format!("- **priority**: {}\\n", priority_to_str(result.root.priority)));
+    md.push_str(&format!("- **priority**: {}\\n", result.root.priority));
     
     if let Some(ref owner) = result.root.owner_agent {
         md.push_str(&format!("- **owner**: {}\\n", owner));
@@ -438,7 +438,7 @@ fn format_scan_task_short(task: &Task) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Priority, Task, TaskTree, PRIORITY_HIGH};
+    use crate::types::{Priority, Task, TaskTree, PRIORITY_DEFAULT};
 
     fn make_test_task(id: &str, title: &str, status: &str, priority: Priority, points: Option<i32>) -> Task {
         Task {
@@ -469,37 +469,37 @@ mod tests {
     #[test]
     fn test_format_task_tree_markdown_root_only() {
         let tree = TaskTree {
-            task: make_test_task("root-1", "Root Task", "pending", PRIORITY_HIGH, Some(5)),
+            task: make_test_task("root-1", "Root Task", "pending", 8, Some(5)),
             children: vec![],
         };
 
         let result = format_task_tree_markdown(&tree);
         assert!(result.contains("# Root Task"));
         assert!(result.contains("PENDING"));
-        assert!(result.contains("HIGH"));
+        assert!(result.contains("P8"));
         assert!(result.contains("5 pts"));
     }
 
     #[test]
     fn test_format_task_tree_markdown_with_children() {
         let tree = TaskTree {
-            task: make_test_task("root-1", "API Refactoring Sprint", "in_progress", PRIORITY_HIGH, Some(16)),
+            task: make_test_task("root-1", "API Refactoring Sprint", "in_progress", 8, Some(16)),
             children: vec![
                 TaskTree {
-                    task: make_test_task("child-1", "Tier 1: Prerequisites", "pending", PRIORITY_HIGH, Some(9)),
+                    task: make_test_task("child-1", "Tier 1: Prerequisites", "pending", 8, Some(9)),
                     children: vec![
                         TaskTree {
-                            task: make_test_task("grandchild-1", "Refactor connect", "completed", PRIORITY_MEDIUM, Some(3)),
+                            task: make_test_task("grandchild-1", "Refactor connect", "completed", PRIORITY_DEFAULT, Some(3)),
                             children: vec![],
                         },
                         TaskTree {
-                            task: make_test_task("grandchild-2", "Merge claim/release", "pending", PRIORITY_MEDIUM, Some(5)),
+                            task: make_test_task("grandchild-2", "Merge claim/release", "pending", PRIORITY_DEFAULT, Some(5)),
                             children: vec![],
                         },
                     ],
                 },
                 TaskTree {
-                    task: make_test_task("child-2", "Tier 2: Navigation", "pending", PRIORITY_MEDIUM, Some(7)),
+                    task: make_test_task("child-2", "Tier 2: Navigation", "pending", PRIORITY_DEFAULT, Some(7)),
                     children: vec![],
                 },
             ],
@@ -523,16 +523,16 @@ mod tests {
     #[test]
     fn test_format_task_tree_markdown_deep_nesting() {
         let tree = TaskTree {
-            task: make_test_task("root", "Root", "pending", PRIORITY_MEDIUM, None),
+            task: make_test_task("root", "Root", "pending", PRIORITY_DEFAULT, None),
             children: vec![
                 TaskTree {
-                    task: make_test_task("l1", "Level 1", "pending", PRIORITY_MEDIUM, None),
+                    task: make_test_task("l1", "Level 1", "pending", PRIORITY_DEFAULT, None),
                     children: vec![
                         TaskTree {
-                            task: make_test_task("l2", "Level 2", "pending", PRIORITY_MEDIUM, None),
+                            task: make_test_task("l2", "Level 2", "pending", PRIORITY_DEFAULT, None),
                             children: vec![
                                 TaskTree {
-                                    task: make_test_task("l3", "Level 3", "pending", PRIORITY_MEDIUM, None),
+                                    task: make_test_task("l3", "Level 3", "pending", PRIORITY_DEFAULT, None),
                                     children: vec![],
                                 },
                             ],

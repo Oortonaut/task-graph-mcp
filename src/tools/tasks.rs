@@ -34,7 +34,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "priority": {
                     "type": "integer",
-                    "description": "Task priority as integer (higher = more important, default 0)"
+                    "description": "Task priority 0-10 (higher = more important, default 5)"
                 },
                 "points": {
                     "type": "integer",
@@ -65,7 +65,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                         "id": { "type": "string", "description": "Custom task ID (optional, UUID7 generated if not provided)" },
                         "title": { "type": "string", "description": "Task title (required for new tasks)" },
                         "description": { "type": "string", "description": "Task description" },
-                        "priority": { "type": "string", "enum": ["high", "medium", "low"], "description": "Task priority" },
+                        "priority": { "type": "integer", "description": "Task priority 0-10 (default 5)" },
                         "join_mode": { "type": "string", "enum": ["then", "also"], "description": "How children relate: 'then' = sequential with follows deps (default), 'also' = parallel" },
                         "points": { "type": "integer", "description": "Story points / complexity estimate" },
                         "time_estimate_ms": { "type": "integer", "description": "Estimated duration in milliseconds" },
@@ -185,7 +185,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "priority": {
                     "type": "integer",
-                    "description": "New priority as integer (higher = more important, default 0)"
+                    "description": "New priority 0-10 (higher = more important)"
                 },
                 "points": {
                     "type": "integer",

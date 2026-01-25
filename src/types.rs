@@ -26,34 +26,20 @@ pub struct WorkerInfo {
 }
 
 /// Task priority as an integer (higher = more important).
-/// Default is 0. Typical range: -100 to 100.
+/// Range: 0-10, where 10 is highest priority. Default is 5.
 pub type Priority = i32;
 
-/// Priority constants for convenience.
-pub const PRIORITY_HIGH: Priority = 1;
-pub const PRIORITY_MEDIUM: Priority = 0;
-pub const PRIORITY_LOW: Priority = -1;
+/// Default priority (middle of 0-10 range).
+pub const PRIORITY_DEFAULT: Priority = 5;
 
-/// Parse a priority string ("high", "medium", "low") to an integer.
-/// Returns 0 (medium) for unrecognized values.
+/// Parse a priority value, clamping to 0-10 range.
 pub fn parse_priority(s: &str) -> Priority {
-    match s.to_lowercase().as_str() {
-        "high" => PRIORITY_HIGH,
-        "medium" => PRIORITY_MEDIUM,
-        "low" => PRIORITY_LOW,
-        _ => s.parse().unwrap_or(PRIORITY_MEDIUM),
-    }
+    s.parse().unwrap_or(PRIORITY_DEFAULT).clamp(0, 10)
 }
 
-/// Convert priority integer to string representation.
-pub fn priority_to_str(p: Priority) -> &'static str {
-    if p > 0 {
-        "high"
-    } else if p < 0 {
-        "low"
-    } else {
-        "medium"
-    }
+/// Clamp priority to valid range.
+pub fn clamp_priority(p: Priority) -> Priority {
+    p.clamp(0, 10)
 }
 
 /// A task in the task graph.
