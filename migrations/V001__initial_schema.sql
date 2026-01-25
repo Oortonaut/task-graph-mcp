@@ -47,6 +47,7 @@ CREATE TABLE tasks (
     metric_6 INTEGER NOT NULL DEFAULT 0,
     metric_7 INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0.0,
+    user_metrics TEXT,                            -- JSON object for custom metrics
 
     -- Soft delete
     deleted_at INTEGER,
