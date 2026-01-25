@@ -160,17 +160,18 @@ impl Database {
             }
 
             if let Some(states) = state_filter
-                && !states.is_empty() {
-                    let placeholders: Vec<String> = states
-                        .iter()
-                        .enumerate()
-                        .map(|(i, _)| format!("?{}", param_values.len() + i + 1))
-                        .collect();
-                    sql.push_str(&format!(" AND event IN ({})", placeholders.join(", ")));
-                    for state in states {
-                        param_values.push(Box::new(state.clone()));
-                    }
+                && !states.is_empty()
+            {
+                let placeholders: Vec<String> = states
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", param_values.len() + i + 1))
+                    .collect();
+                sql.push_str(&format!(" AND event IN ({})", placeholders.join(", ")));
+                for state in states {
+                    param_values.push(Box::new(state.clone()));
                 }
+            }
 
             sql.push_str(" ORDER BY timestamp DESC, id DESC");
 

@@ -114,14 +114,15 @@ pub fn load_approved_skills(skills_dir: Option<&Path>) -> HashSet<String> {
     if let Some(dir) = skills_dir {
         let approvals_path = get_approvals_path(dir);
         if approvals_path.exists()
-            && let Ok(content) = std::fs::read_to_string(&approvals_path) {
-                for line in content.lines() {
-                    let name = line.trim();
-                    if !name.is_empty() && !name.starts_with('#') {
-                        approved.insert(name.to_string());
-                    }
+            && let Ok(content) = std::fs::read_to_string(&approvals_path)
+        {
+            for line in content.lines() {
+                let name = line.trim();
+                if !name.is_empty() && !name.starts_with('#') {
+                    approved.insert(name.to_string());
                 }
             }
+        }
     }
 
     approved
@@ -252,10 +253,12 @@ pub fn get_skill(skills_dir: Option<&Path>, name: &str) -> Result<String> {
         // Additional safety: ensure the resolved path is within skills_dir
         if let Ok(canonical_override) = override_path.canonicalize()
             && let Ok(canonical_dir) = dir.canonicalize()
-                && canonical_override.starts_with(&canonical_dir) && override_path.exists() {
-                    return std::fs::read_to_string(&override_path)
-                        .map_err(|e| anyhow::anyhow!("Failed to read skill override: {}", e));
-                }
+            && canonical_override.starts_with(&canonical_dir)
+            && override_path.exists()
+        {
+            return std::fs::read_to_string(&override_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read skill override: {}", e));
+        }
     }
 
     // Fall back to embedded
@@ -298,42 +301,43 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
     // Also check for custom skills in the override directory
     if let Some(dir) = skills_dir
         && dir.exists()
-            && let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let skill_md = path.join("SKILL.md");
-                        if skill_md.exists() {
-                            let name = path.file_name().unwrap().to_string_lossy().to_string();
-                            let normalized = normalize_name(&name);
+        && let Ok(entries) = std::fs::read_dir(dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let skill_md = path.join("SKILL.md");
+                if skill_md.exists() {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    let normalized = normalize_name(&name);
 
-                            // Skip if it's an override of a known skill
-                            if SKILLS
-                                .iter()
-                                .any(|s| s.name == normalized || s.full_name == name)
-                            {
-                                continue;
-                            }
-
-                            // It's a custom skill - check if approved
-                            let is_approved =
-                                approved_set.contains(normalized) || approved_set.contains(&name);
-
-                            skills_list.push(json!({
-                                "name": normalized,
-                                "full_name": name,
-                                "description": "Custom skill (requires approval)",
-                                "role": "custom",
-                                "uri": format!("skills://{}", normalized),
-                                "overridden": false,
-                                "source": "local",
-                                "approved": is_approved,
-                                "trusted": false,
-                            }));
-                        }
+                    // Skip if it's an override of a known skill
+                    if SKILLS
+                        .iter()
+                        .any(|s| s.name == normalized || s.full_name == name)
+                    {
+                        continue;
                     }
+
+                    // It's a custom skill - check if approved
+                    let is_approved =
+                        approved_set.contains(normalized) || approved_set.contains(&name);
+
+                    skills_list.push(json!({
+                        "name": normalized,
+                        "full_name": name,
+                        "description": "Custom skill (requires approval)",
+                        "role": "custom",
+                        "uri": format!("skills://{}", normalized),
+                        "overridden": false,
+                        "source": "local",
+                        "approved": is_approved,
+                        "trusted": false,
+                    }));
                 }
             }
+        }
+    }
 
     Ok(json!({
         "skills": skills_list,

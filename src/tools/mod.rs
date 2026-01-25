@@ -291,8 +291,12 @@ pub fn get_string_or_array(args: &Value, key: &str) -> Option<Vec<String>> {
         if let Some(s) = v.as_str() {
             // Single string - wrap in vec
             Some(vec![s.to_string()])
-        } else { v.as_array().map(|arr| arr.iter()
+        } else {
+            v.as_array().map(|arr| {
+                arr.iter()
                     .filter_map(|item| item.as_str().map(String::from))
-                    .collect()) }
+                    .collect()
+            })
+        }
     })
 }

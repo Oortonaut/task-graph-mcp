@@ -198,8 +198,7 @@ impl AttachmentsConfig {
 }
 
 /// Server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub server: ServerConfig,
@@ -219,7 +218,6 @@ pub struct Config {
     #[serde(default)]
     pub attachments: AttachmentsConfig,
 }
-
 
 /// Paths configured for the server, returned by connect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,7 +329,6 @@ pub enum PathStyle {
     /// Project-prefixed paths (e.g., ${project}/src/main.rs)
     ProjectPrefixed,
 }
-
 
 /// Task state configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -757,9 +754,10 @@ impl Config {
     pub fn load_or_default() -> Self {
         // Try TASK_GRAPH_CONFIG_PATH environment variable first
         if let Ok(config_path) = std::env::var("TASK_GRAPH_CONFIG_PATH")
-            && let Ok(config) = Self::load(&config_path) {
-                return config;
-            }
+            && let Ok(config) = Self::load(&config_path)
+        {
+            return config;
+        }
 
         // Try .task-graph/config.yaml
         if let Ok(config) = Self::load(".task-graph/config.yaml") {

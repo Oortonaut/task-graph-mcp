@@ -206,17 +206,16 @@ pub fn task_history(
     // Add current duration to the current state if applicable
     if let Some(current_dur) = current_duration
         && let Some(last_event) = filtered_history.last()
-            && last_event.end_timestamp.is_none() {
-                // Include in state filter check
-                if state_filter.is_none()
-                    || state_filter.as_ref().unwrap().contains(&last_event.event)
-                {
-                    *time_per_status.entry(last_event.event.clone()).or_insert(0) += current_dur;
-                    if let Some(ref agent) = last_event.worker_id {
-                        *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
-                    }
-                }
+        && last_event.end_timestamp.is_none()
+    {
+        // Include in state filter check
+        if state_filter.is_none() || state_filter.as_ref().unwrap().contains(&last_event.event) {
+            *time_per_status.entry(last_event.event.clone()).or_insert(0) += current_dur;
+            if let Some(ref agent) = last_event.worker_id {
+                *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
             }
+        }
+    }
 
     match format {
         OutputFormat::Markdown => {

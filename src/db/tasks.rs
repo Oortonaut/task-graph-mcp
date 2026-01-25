@@ -417,15 +417,16 @@ impl Database {
 
             // Validate state transition if status changed
             if task.status != new_status
-                && !states_config.is_valid_transition(&task.status, &new_status) {
-                    let exits = states_config.get_exits(&task.status);
-                    return Err(anyhow!(
-                        "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
-                        task.status,
-                        new_status,
-                        exits
-                    ));
-                }
+                && !states_config.is_valid_transition(&task.status, &new_status)
+            {
+                let exits = states_config.get_exits(&task.status);
+                return Err(anyhow!(
+                    "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
+                    task.status,
+                    new_status,
+                    exits
+                ));
+            }
 
             // Handle status transitions for timestamps
             // Set started_at when first entering a timed state

@@ -255,12 +255,13 @@ pub fn attach(
     for task_id in &task_ids {
         // Replace mode: delete existing attachment with same name before adding new one
         if mode == "replace"
-            && let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name) {
-                // Clean up old media file if it was in media dir
-                if is_in_media_dir(&old_file_path, media_dir) {
-                    let _ = std::fs::remove_file(&old_file_path);
-                }
+            && let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name)
+        {
+            // Clean up old media file if it was in media dir
+            if is_in_media_dir(&old_file_path, media_dir) {
+                let _ = std::fs::remove_file(&old_file_path);
             }
+        }
 
         // Determine final content and file path for this task
         let (final_content, final_file_path): (String, Option<String>) =
@@ -375,13 +376,15 @@ pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let mut file_deleted = false;
     if delete_file
         && let Some(fp) = &file_path
-            && is_in_media_dir(fp, media_dir) {
-                let path = Path::new(fp);
-                if path.exists()
-                    && let Ok(()) = std::fs::remove_file(path) {
-                        file_deleted = true;
-                    }
-            }
+        && is_in_media_dir(fp, media_dir)
+    {
+        let path = Path::new(fp);
+        if path.exists()
+            && let Ok(()) = std::fs::remove_file(path)
+        {
+            file_deleted = true;
+        }
+    }
 
     Ok(json!({
         "success": deleted,

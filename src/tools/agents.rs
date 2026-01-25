@@ -123,31 +123,34 @@ pub fn connect(db: &Database, server_paths: &ServerPaths, args: Value) -> Result
     let mut path_notes: Vec<String> = Vec::new();
 
     if let Some(requested_db) = get_string(&args, "db_path")
-        && server_paths.db_path.to_string_lossy() != requested_db {
-            path_notes.push(format!(
+        && server_paths.db_path.to_string_lossy() != requested_db
+    {
+        path_notes.push(format!(
                 "db_path: requested '{}' but server is using '{}' (set TASK_GRAPH_DB_PATH before starting server)",
                 requested_db,
                 server_paths.db_path.display()
             ));
-        }
+    }
 
     if let Some(requested_media) = get_string(&args, "media_dir")
-        && server_paths.media_dir.to_string_lossy() != requested_media {
-            path_notes.push(format!(
+        && server_paths.media_dir.to_string_lossy() != requested_media
+    {
+        path_notes.push(format!(
                 "media_dir: requested '{}' but server is using '{}' (set TASK_GRAPH_MEDIA_DIR before starting server)",
                 requested_media,
                 server_paths.media_dir.display()
             ));
-        }
+    }
 
     if let Some(requested_log) = get_string(&args, "log_dir")
-        && server_paths.log_dir.to_string_lossy() != requested_log {
-            path_notes.push(format!(
+        && server_paths.log_dir.to_string_lossy() != requested_log
+    {
+        path_notes.push(format!(
                 "log_dir: requested '{}' but server is using '{}' (set TASK_GRAPH_LOG_DIR before starting server)",
                 requested_log,
                 server_paths.log_dir.display()
             ));
-        }
+    }
 
     if let Some(requested_config) = get_string(&args, "config_path") {
         let current_config = server_paths
@@ -256,15 +259,16 @@ pub fn list_agents(
         OutputFormat::Markdown => {
             let mut output = String::new();
             if let Some(ref summary) = cleanup_summary
-                && summary.workers_evicted > 0 {
-                    output.push_str(&format!(
-                        "**Evicted {} stale worker(s)**: {} (released {} task(s), {} file(s))\n\n",
-                        summary.workers_evicted,
-                        summary.evicted_worker_ids.join(", "),
-                        summary.tasks_released,
-                        summary.files_released
-                    ));
-                }
+                && summary.workers_evicted > 0
+            {
+                output.push_str(&format!(
+                    "**Evicted {} stale worker(s)**: {} (released {} task(s), {} file(s))\n\n",
+                    summary.workers_evicted,
+                    summary.evicted_worker_ids.join(", "),
+                    summary.tasks_released,
+                    summary.files_released
+                ));
+            }
             output.push_str(&format_workers_markdown(&workers));
             Ok(ToolResult::Raw(output))
         }
@@ -283,14 +287,15 @@ pub fn list_agents(
             });
 
             if let Some(summary) = cleanup_summary
-                && summary.workers_evicted > 0 {
-                    result["cleanup"] = json!({
-                        "workers_evicted": summary.workers_evicted,
-                        "evicted_worker_ids": summary.evicted_worker_ids,
-                        "tasks_released": summary.tasks_released,
-                        "files_released": summary.files_released
-                    });
-                }
+                && summary.workers_evicted > 0
+            {
+                result["cleanup"] = json!({
+                    "workers_evicted": summary.workers_evicted,
+                    "evicted_worker_ids": summary.evicted_worker_ids,
+                    "tasks_released": summary.tasks_released,
+                    "files_released": summary.files_released
+                });
+            }
 
             Ok(ToolResult::Json(result))
         }

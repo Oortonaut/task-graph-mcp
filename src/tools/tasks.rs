@@ -528,9 +528,13 @@ pub fn list_tasks(
         let status_vec: Option<Vec<String>> = if let Some(status_val) = args.get("status") {
             if let Some(s) = status_val.as_str() {
                 Some(vec![s.to_string()])
-            } else { status_val.as_array().map(|arr| arr.iter()
+            } else {
+                status_val.as_array().map(|arr| {
+                    arr.iter()
                         .filter_map(|v| v.as_str().map(String::from))
-                        .collect()) }
+                        .collect()
+                })
+            }
         } else {
             None
         };

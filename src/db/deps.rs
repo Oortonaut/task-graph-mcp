@@ -123,13 +123,14 @@ impl Database {
         let def = deps_config.get_definition(dep_type).unwrap();
         if def.display == DependencyDisplay::Vertical
             && let Some(existing_parent) = self.get_parent(to_task_id)?
-                && existing_parent != from_task_id {
-                    return Err(anyhow!(
-                        "Task {} already has parent {}",
-                        to_task_id,
-                        existing_parent
-                    ));
-                }
+            && existing_parent != from_task_id
+        {
+            return Err(anyhow!(
+                "Task {} already has parent {}",
+                to_task_id,
+                existing_parent
+            ));
+        }
 
         // Check for cycle in the appropriate graph
         if self.would_create_cycle(from_task_id, to_task_id, dep_type, deps_config)? {

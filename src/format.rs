@@ -88,39 +88,43 @@ pub fn format_tasks_markdown(
     for state in &states_config.blocking_states {
         if state != &states_config.initial
             && let Some(state_tasks) = by_status.get(state)
-                && !state_tasks.is_empty() {
-                    md.push_str(&format!("## {}\n\n", format_state_name(state)));
-                    for (task, blocked_by) in state_tasks {
-                        md.push_str(&format_task_short(task, blocked_by));
-                    }
-                    md.push('\n');
-                }
-    }
-
-    // Then initial state
-    if let Some(state_tasks) = by_status.get(&states_config.initial)
-        && !state_tasks.is_empty() {
-            md.push_str(&format!(
-                "## {}\n\n",
-                format_state_name(&states_config.initial)
-            ));
+            && !state_tasks.is_empty()
+        {
+            md.push_str(&format!("## {}\n\n", format_state_name(state)));
             for (task, blocked_by) in state_tasks {
                 md.push_str(&format_task_short(task, blocked_by));
             }
             md.push('\n');
         }
+    }
+
+    // Then initial state
+    if let Some(state_tasks) = by_status.get(&states_config.initial)
+        && !state_tasks.is_empty()
+    {
+        md.push_str(&format!(
+            "## {}\n\n",
+            format_state_name(&states_config.initial)
+        ));
+        for (task, blocked_by) in state_tasks {
+            md.push_str(&format_task_short(task, blocked_by));
+        }
+        md.push('\n');
+    }
 
     // Then non-blocking states (terminal states like completed, failed, cancelled)
     for state in states_config.state_names() {
-        if !states_config.is_blocking_state(state) && state != states_config.initial
+        if !states_config.is_blocking_state(state)
+            && state != states_config.initial
             && let Some(state_tasks) = by_status.get(state)
-                && !state_tasks.is_empty() {
-                    md.push_str(&format!("## {}\n\n", format_state_name(state)));
-                    for (task, blocked_by) in state_tasks {
-                        md.push_str(&format_task_short(task, blocked_by));
-                    }
-                    md.push('\n');
-                }
+            && !state_tasks.is_empty()
+        {
+            md.push_str(&format!("## {}\n\n", format_state_name(state)));
+            for (task, blocked_by) in state_tasks {
+                md.push_str(&format_task_short(task, blocked_by));
+            }
+            md.push('\n');
+        }
     }
 
     md
