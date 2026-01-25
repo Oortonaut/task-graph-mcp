@@ -1,16 +1,63 @@
 # Task Graph MCP Server
 
-A Rust MCP (Model Context Protocol) server providing atomic, token-efficient task management for multi-agent coordination.
+**Multi-agent AI coordination that actually works.**
+
+When you have multiple AI agents working on the same codebase, things go wrong fast. Agents overwrite each other's changes. They duplicate work. They break dependencies. Task Graph solves this with proper coordination primitives: DAG-based task dependencies, advisory file locks, and atomic claiming—all through the Model Context Protocol.
+
+## Why Task Graph?
+
+**The problem**: You've got a complex task that needs multiple AI agents working in parallel. Maybe a coordinator breaking down work, specialists handling different domains, validators checking results. Without coordination, it's chaos.
+
+**What you get**:
+
+- **No stepping on toes** — Advisory file locks let agents see who's editing what and why. No more blind overwrites or merge conflicts.
+- **Dependency-aware execution** — Tasks form a DAG with cycle detection. Agents only claim work when dependencies are satisfied.
+- **Token-efficient** — Designed for LLM context limits. Compact queries, minimal round-trips, structured outputs.
+- **Built-in accounting** — Track tokens, cost, and time per task. Know exactly what your agents are spending.
+- **Zero infrastructure** — SQLite with WAL mode. No database server to run. Just point at a file.
+- **Configurable workflows** — Define your own states, transitions, and dependency types. Match your process, not ours.
 
 ## Features
 
-- **Task Hierarchy**: Unlimited nesting with parent/child relationships
-- **Dependencies**: DAG-based dependencies with cycle detection
-- **Task Claiming**: Strict locking with configurable limits and tag-based affinity
-- **File Coordination**: Advisory locks with claim tracking for coordinating file edits
-- **Cost Tracking**: Token usage and cost accounting per task
-- **Time Tracking**: Automatic time accumulation based on state transitions, plus manual logging
-- **Live Status**: Real-time "current thought" for claimed tasks
+| Feature | Description |
+|---------|-------------|
+| **Task Hierarchy** | Unlimited nesting with parent/child relationships |
+| **DAG Dependencies** | Typed edges (blocks, follows, contains) with cycle detection |
+| **Atomic Claiming** | Strict locking with limits and tag-based routing |
+| **File Coordination** | Advisory locks with reasons and change polling |
+| **Cost Tracking** | Token usage and USD cost per task |
+| **Time Tracking** | Automatic accumulation from state transitions |
+| **Live Status** | Real-time "current thought" visible to other agents |
+| **Full-text Search** | FTS5-powered search across tasks and attachments |
+| **Attachments** | Inline content, file references, or media storage |
+
+## Quick Start
+
+```bash
+# Build
+cargo build --release
+
+# Add to your MCP client (Claude Code, etc.)
+```
+
+```json
+{
+  "mcpServers": {
+    "task-graph": {
+      "command": "task-graph-mcp"
+    }
+  }
+}
+```
+
+```
+# Agent workflow
+connect(name="worker-1", tags=["rust", "backend"])  → agent_id
+list_tasks(ready=true, agent="...")                 → claimable work
+claim(agent, task)                                  → you own it
+thinking(agent, "Implementing auth middleware")     → visible to others
+complete(agent, task)                               → done, deps unblock
+```
 
 ## Installation
 
@@ -342,10 +389,45 @@ Agent B: claim_file("agent-b", "src/main.rs", "adding tests")
 
 ## Architecture
 
-- **Transport**: Stdio (each agent spawns own server process)
-- **Database**: SQLite with WAL mode for concurrent access
-- **Concurrency**: All processes share `.task-graph/tasks.db`
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Agent A    │     │  Agent B    │     │  Agent C    │
+│  (Claude)   │     │  (GPT-4)    │     │  (Worker)   │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │ stdio             │ stdio             │ stdio
+       ▼                   ▼                   ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ task-graph  │     │ task-graph  │     │ task-graph  │
+│    MCP      │     │    MCP      │     │    MCP      │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       └───────────────────┼───────────────────┘
+                           ▼
+                  ┌─────────────────┐
+                  │   SQLite + WAL  │
+                  │  .task-graph/   │
+                  │    tasks.db     │
+                  └─────────────────┘
+```
+
+- **Transport**: Stdio — each agent spawns its own server process
+- **Database**: SQLite with WAL mode for concurrent access across processes
+- **Deployment**: Single binary, no external dependencies, works offline
+
+## Compared to Alternatives
+
+| | Task Graph | Linear task lists | Custom databases |
+|---|---|---|---|
+| Multi-agent safe | ✓ Atomic claims, file locks | ✗ Race conditions | Maybe, DIY |
+| Dependency tracking | ✓ DAG with cycle detection | ✗ Manual ordering | DIY |
+| MCP native | ✓ First-class | ✗ Wrapper needed | ✗ Wrapper needed |
+| Token accounting | ✓ Built-in | ✗ | DIY |
+| Setup required | None | None | Database server |
 
 ## License
 
 Apache 2.0
+
+---
+
+Built for the era of AI agents that actually need to work together.
