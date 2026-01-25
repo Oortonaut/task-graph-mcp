@@ -739,6 +739,190 @@ mod task_claiming_tests {
         let updated = db.get_task(&task.id).unwrap().unwrap();
         assert!(updated.owner_agent.is_none());
     }
+
+    // Tests for unified update with claim/release behavior
+    #[test]
+    fn update_to_timed_state_claims_task() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, vec![], false).unwrap();
+        let task = db
+            .create_task("Update Claim".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Update to in_progress (timed state) should claim the task
+        let updated = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("in_progress".to_string()),
+                None, None, None,
+                false,
+                &states_config,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "in_progress");
+        assert_eq!(updated.owner_agent, Some(agent.id.clone()));
+        assert!(updated.claimed_at.is_some());
+    }
+
+    #[test]
+    fn update_from_timed_to_non_timed_releases_task() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, vec![], false).unwrap();
+        let task = db
+            .create_task("Update Release".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // First claim via update
+        db.update_task_unified(
+            &task.id,
+            &agent.id,
+            None, None,
+            Some("in_progress".to_string()),
+            None, None, None,
+            false,
+            &states_config,
+        )
+        .unwrap();
+
+        // Update back to pending (non-timed) should release
+        let updated = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("pending".to_string()),
+                None, None, None,
+                false,
+                &states_config,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "pending");
+        assert!(updated.owner_agent.is_none());
+        assert!(updated.claimed_at.is_none());
+    }
+
+    #[test]
+    fn update_with_force_claims_from_another_agent() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent1 = db.register_agent(None, vec![], false).unwrap();
+        let agent2 = db.register_agent(None, vec![], false).unwrap();
+        let task = db
+            .create_task("Force Update".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Agent1 claims the task
+        db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
+
+        // Agent2 force claims via update
+        let updated = db
+            .update_task_unified(
+                &task.id,
+                &agent2.id,
+                None, None,
+                Some("in_progress".to_string()),
+                None, None, None,
+                true, // force
+                &states_config,
+            )
+            .unwrap();
+
+        assert_eq!(updated.owner_agent, Some(agent2.id.clone()));
+    }
+
+    #[test]
+    fn update_without_force_fails_if_claimed_by_another() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent1 = db.register_agent(None, vec![], false).unwrap();
+        let agent2 = db.register_agent(None, vec![], false).unwrap();
+        let task = db
+            .create_task("No Force".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Agent1 claims the task
+        db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
+
+        // Agent2 tries to claim without force - should fail
+        let result = db.update_task_unified(
+            &task.id,
+            &agent2.id,
+            None, None,
+            Some("in_progress".to_string()),
+            None, None, None,
+            false, // no force
+            &states_config,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_validates_tag_affinity_on_claim() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db
+            .register_agent(None, vec!["python".to_string()], false)
+            .unwrap();
+        let task = db
+            .create_task(
+                "Needs Rust".to_string(),
+                None, None, None, None, None,
+                Some(vec!["rust".to_string()]), // needed_tags
+                None, None, None,
+                &states_config,
+            )
+            .unwrap();
+
+        // Update to claim should fail due to missing tag
+        let result = db.update_task_unified(
+            &task.id,
+            &agent.id,
+            None, None,
+            Some("in_progress".to_string()),
+            None, None, None,
+            false,
+            &states_config,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_to_completed_clears_ownership() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db.register_agent(None, vec![], false).unwrap();
+        let task = db
+            .create_task("Complete Me".to_string(), None, None, None, None, None, None, None, None, None, &states_config)
+            .unwrap();
+
+        // Claim the task
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+
+        // Complete via update
+        let updated = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, None,
+                Some("completed".to_string()),
+                None, None, None,
+                false,
+                &states_config,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "completed");
+        assert!(updated.owner_agent.is_none());
+        assert!(updated.completed_at.is_some());
+    }
 }
 
 mod dependency_tests {

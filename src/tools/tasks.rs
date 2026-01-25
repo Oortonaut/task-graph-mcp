@@ -4,7 +4,7 @@ use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_
 use crate::config::{DependenciesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::{format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
+use crate::format::{format_task_markdown, format_task_tree_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
 use crate::types::{Priority, TaskTreeInput};
 use anyhow::Result;
 use rmcp::model::Tool;
@@ -175,7 +175,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "update",
-            "Update a task's properties.",
+            "Update a task's properties. State changes handle ownership automatically: transitioning to a timed state (e.g., in_progress) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it.",
             json!({
                 "agent": {
                     "type": "string",
@@ -211,9 +211,13 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "New categorization/discovery tags"
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "Force ownership changes even if owned by another agent (default: false)"
                 }
             }),
-            vec!["agent", "task", "state"],
+            vec!["agent", "task"],
             prompts,
         ),
         make_tool_with_prompts(
@@ -298,7 +302,10 @@ pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<V
     if include_children {
         let tree = db.get_task_tree(&task_id)?
             .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
-        Ok(serde_json::to_value(tree)?)
+        match format {
+            OutputFormat::Markdown => Ok(markdown_to_json(format_task_tree_markdown(&tree))),
+            OutputFormat::Json => Ok(serde_json::to_value(tree)?),
+        }
     } else {
         let task = db.get_task(&task_id)?
             .ok_or_else(|| ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found"))?;
@@ -440,6 +447,8 @@ pub fn list_tasks(
 }
 
 pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
+    let agent_id = get_string(&args, "agent")
+        .ok_or_else(|| ToolError::missing_field("agent"))?;
     let task_id = get_string(&args, "task")
         .ok_or_else(|| ToolError::missing_field("task"))?;
     let title = get_string(&args, "title");
@@ -460,8 +469,20 @@ pub fn update(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
     } else {
         None
     };
+    let force = get_bool(&args, "force").unwrap_or(false);
 
-    let task = db.update_task(&task_id, title, description, status, priority, points, tags, states_config)?;
+    let task = db.update_task_unified(
+        &task_id,
+        &agent_id,
+        title,
+        description,
+        status,
+        priority,
+        points,
+        tags,
+        force,
+        states_config,
+    )?;
 
     Ok(serde_json::to_value(task)?)
 }

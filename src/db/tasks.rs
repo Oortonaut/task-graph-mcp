@@ -434,6 +434,243 @@ impl Database {
         })
     }
 
+
+    /// Update a task with unified claim/release logic.
+    /// - Transition to timed state = CLAIM (set owner, validate tags, check limit)
+    /// - Transition from timed to non-timed = RELEASE (clear owner)
+    /// - Transition to terminal = COMPLETE (check children, release file locks)
+    pub fn update_task_unified(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        title: Option<String>,
+        description: Option<Option<String>>,
+        status: Option<String>,
+        priority: Option<Priority>,
+        points: Option<Option<i32>>,
+        tags: Option<Vec<String>>,
+        force: bool,
+        states_config: &StatesConfig,
+    ) -> Result<Task> {
+        let now = now_ms();
+
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
+            let task =
+                get_task_internal(&tx, task_id)?.ok_or_else(|| anyhow!("Task not found"))?;
+
+            let new_title = title.unwrap_or(task.title.clone());
+            let new_description = description.unwrap_or(task.description.clone());
+            let new_status = status.unwrap_or(task.status.clone());
+            let new_priority = priority.unwrap_or(task.priority);
+            let new_points = points.unwrap_or(task.points);
+            let new_tags = tags.unwrap_or(task.tags.clone());
+
+            // Validate the new status exists
+            if !states_config.is_valid_state(&new_status) {
+                return Err(anyhow!(
+                    "Invalid state '{}'. Valid states: {:?}",
+                    new_status,
+                    states_config.state_names()
+                ));
+            }
+
+            // Validate state transition if status changed
+            if task.status != new_status {
+                if !states_config.is_valid_transition(&task.status, &new_status) {
+                    let exits = states_config.get_exits(&task.status);
+                    return Err(anyhow!(
+                        "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
+                        task.status,
+                        new_status,
+                        exits
+                    ));
+                }
+            }
+
+            // Determine ownership changes based on state transition
+            let new_is_timed = states_config.is_timed_state(&new_status);
+            let new_is_terminal = states_config.is_terminal_state(&new_status);
+            let current_owner = task.owner_agent.as_deref();
+            let is_owned_by_agent = current_owner == Some(agent_id);
+            let is_owned_by_other = current_owner.is_some() && !is_owned_by_agent;
+
+            let mut new_owner: Option<String> = task.owner_agent.clone();
+            let mut new_claimed_at: Option<i64> = task.claimed_at;
+
+            // CLAIM: Transitioning to a timed state and need to take ownership
+            // This handles: non-timed -> timed, OR timed (other owner) -> timed (force claim)
+            if new_is_timed && !is_owned_by_agent {
+                // Already claimed by someone else?
+                if is_owned_by_other && !force {
+                    return Err(anyhow!(
+                        "Task is already claimed by agent '{}'",
+                        current_owner.unwrap()
+                    ));
+                }
+
+                // Get the agent
+                let agent = get_agent_internal(&tx, agent_id)?
+                    .ok_or_else(|| anyhow!("Agent not found"))?;
+
+                // Check claim limit (skip if force)
+                let current_claims = get_claim_count_internal(&tx, agent_id)?;
+                if !force && current_claims >= agent.max_claims {
+                    return Err(anyhow!("Agent has reached claim limit"));
+                }
+
+                // Check tag affinity - needed_tags (AND - must have ALL)
+                if !task.needed_tags.is_empty() {
+                    for needed in &task.needed_tags {
+                        if !agent.tags.contains(needed) {
+                            return Err(anyhow!("Agent missing required tag: {}", needed));
+                        }
+                    }
+                }
+
+                // Check tag affinity - wanted_tags (OR - must have AT LEAST ONE)
+                if !task.wanted_tags.is_empty() {
+                    let has_any = task
+                        .wanted_tags
+                        .iter()
+                        .any(|wanted| agent.tags.contains(wanted));
+                    if !has_any {
+                        return Err(anyhow!("Agent has none of the wanted tags"));
+                    }
+                }
+
+                // Set ownership
+                new_owner = Some(agent_id.to_string());
+                new_claimed_at = Some(now);
+
+                // Refresh agent heartbeat
+                tx.execute(
+                    "UPDATE agents SET last_heartbeat = ?1 WHERE id = ?2",
+                    params![now, agent_id],
+                )?;
+            }
+
+            // RELEASE: Transitioning to non-timed state (but not terminal)
+            if !new_is_timed && !new_is_terminal && task.owner_agent.is_some() {
+                // Verify ownership (unless force)
+                if is_owned_by_other && !force {
+                    return Err(anyhow!("Task is not owned by this agent"));
+                }
+
+                // Clear ownership
+                new_owner = None;
+                new_claimed_at = None;
+            }
+
+            // COMPLETE: Transition to terminal state
+            if new_is_terminal {
+                // Verify ownership if task was claimed (unless force)
+                if let Some(ref current_owner) = task.owner_agent {
+                    if current_owner != agent_id && !force {
+                        return Err(anyhow!("Task is not owned by this agent"));
+                    }
+                }
+
+                // Check for incomplete children (via 'contains' dependencies)
+                let incomplete_children: i32 = tx.query_row(
+                    "SELECT COUNT(*) FROM dependencies d
+                     INNER JOIN tasks child ON d.to_task_id = child.id
+                     WHERE d.from_task_id = ?1 AND d.dep_type = 'contains'
+                     AND child.status IN (SELECT value FROM json_each(?2))",
+                    params![
+                        task_id,
+                        serde_json::to_string(&states_config.blocking_states)?
+                    ],
+                    |row| row.get(0),
+                )?;
+
+                if incomplete_children > 0 {
+                    return Err(anyhow!(
+                        "Cannot complete task: {} child task(s) are not complete",
+                        incomplete_children
+                    ));
+                }
+
+                // Clear ownership
+                new_owner = None;
+                new_claimed_at = None;
+
+                // Release all file locks held by this agent
+                tx.execute(
+                    "DELETE FROM file_locks WHERE agent_id = ?1",
+                    params![agent_id],
+                )?;
+            }
+
+            // Handle timestamps
+            let started_at =
+                if task.started_at.is_none() && new_is_timed {
+                    Some(now)
+                } else {
+                    task.started_at
+                };
+
+            let completed_at = if new_is_terminal {
+                Some(now)
+            } else {
+                task.completed_at
+            };
+
+            // Record state transition if status changed
+            if task.status != new_status {
+                record_state_transition(
+                    &tx,
+                    task_id,
+                    &new_status,
+                    new_owner.as_deref(),
+                    None,
+                    states_config,
+                )?;
+            }
+
+            tx.execute(
+                "UPDATE tasks SET
+                    title = ?1, description = ?2, status = ?3, priority = ?4,
+                    points = ?5, started_at = ?6, completed_at = ?7, updated_at = ?8,
+                    tags = ?9, owner_agent = ?10, claimed_at = ?11
+                WHERE id = ?12",
+                params![
+                    new_title,
+                    new_description,
+                    new_status,
+                    new_priority.as_str(),
+                    new_points,
+                    started_at,
+                    completed_at,
+                    now,
+                    serde_json::to_string(&new_tags)?,
+                    new_owner,
+                    new_claimed_at,
+                    task_id,
+                ],
+            )?;
+
+            tx.commit()?;
+
+            Ok(Task {
+                id: task_id.to_string(),
+                title: new_title,
+                description: new_description,
+                status: new_status,
+                priority: new_priority,
+                points: new_points,
+                tags: new_tags,
+                started_at,
+                completed_at,
+                updated_at: now,
+                owner_agent: new_owner,
+                claimed_at: new_claimed_at,
+                ..task
+            })
+        })
+    }
+
     /// Delete a task.
     pub fn delete_task(&self, task_id: &str, cascade: bool) -> Result<()> {
         self.with_conn_mut(|conn| {

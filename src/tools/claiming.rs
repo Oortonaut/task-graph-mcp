@@ -1,4 +1,8 @@
-//! Task claiming and release tools.
+//! Task claiming tools.
+//!
+//! The `claim` tool is a convenience wrapper around `update` that transitions
+//! a task to the first timed state. For releasing tasks, use `update` with
+//! a non-timed state (ownership clears automatically).
 
 use super::{get_bool, get_string, make_tool_with_prompts};
 use crate::config::{Prompts, StatesConfig};
@@ -8,21 +12,7 @@ use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 
-pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
-    // Generate state enum from config
-    let state_names: Vec<&str> = states_config.state_names();
-
-    // For release, find states that can be exited from timed states (typically in_progress)
-    let release_states: Vec<Value> = state_names
-        .iter()
-        .filter(|s| {
-            // Include initial state and all non-blocking states
-            *s == &states_config.initial.as_str()
-                || !states_config.is_blocking_state(s)
-        })
-        .map(|s| json!(s))
-        .collect();
-
+pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> {
     vec![
         make_tool_with_prompts(
             "claim",
@@ -44,43 +34,6 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
             vec!["agent", "task"],
             prompts,
         ),
-        make_tool_with_prompts(
-            "release",
-            "Release a claimed task. Use initial state for handoff to another agent, or a terminal state to end the task.",
-            json!({
-                "agent": {
-                    "type": "string",
-                    "description": "Agent ID releasing the task"
-                },
-                "task": {
-                    "type": "string",
-                    "description": "Task ID to release"
-                },
-                "state": {
-                    "type": "string",
-                    "enum": release_states,
-                    "description": format!("State to set after release (default: {})", states_config.initial)
-                }
-            }),
-            vec!["agent", "task"],
-            prompts,
-        ),
-        make_tool_with_prompts(
-            "complete",
-            "Mark a task as completed. Shorthand for release with state=completed.",
-            json!({
-                "agent": {
-                    "type": "string",
-                    "description": "Agent ID completing the task"
-                },
-                "task": {
-                    "type": "string",
-                    "description": "Task ID to complete"
-                }
-            }),
-            vec!["agent", "task"],
-            prompts,
-        ),
     ]
 }
 
@@ -91,11 +44,27 @@ pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result
         .ok_or_else(|| ToolError::missing_field("task"))?;
     let force = get_bool(&args, "force").unwrap_or(false);
 
-    let task = if force {
-        db.force_claim_task(&task_id, &agent_id, states_config)?
-    } else {
-        db.claim_task(&task_id, &agent_id, states_config)?
-    };
+    // Find the first timed state to use for claiming
+    let claim_status = states_config
+        .definitions
+        .iter()
+        .find(|(_, def)| def.timed)
+        .map(|(name, _)| name.clone())
+        .unwrap_or_else(|| "in_progress".to_string());
+
+    // Use unified update which handles claiming when transitioning to timed state
+    let task = db.update_task_unified(
+        &task_id,
+        &agent_id,
+        None,             // title
+        None,             // description
+        Some(claim_status), // status - first timed state
+        None,             // priority
+        None,             // points
+        None,             // tags
+        force,
+        states_config,
+    )?;
 
     Ok(json!({
         "success": true,
@@ -105,39 +74,6 @@ pub fn claim(db: &Database, states_config: &StatesConfig, args: Value) -> Result
             "status": task.status,
             "owner_agent": task.owner_agent,
             "claimed_at": task.claimed_at
-        }
-    }))
-}
-
-pub fn release(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
-    let state = get_string(&args, "state").unwrap_or_else(|| states_config.initial.clone());
-
-    db.release_task_with_state(&task_id, &agent_id, &state, states_config)?;
-
-    Ok(json!({
-        "success": true
-    }))
-}
-
-pub fn complete(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
-    let agent_id = get_string(&args, "agent")
-        .ok_or_else(|| ToolError::missing_field("agent"))?;
-    let task_id = get_string(&args, "task")
-        .ok_or_else(|| ToolError::missing_field("task"))?;
-
-    let task = db.complete_task(&task_id, &agent_id, states_config)?;
-
-    Ok(json!({
-        "success": true,
-        "task": {
-            "id": &task.id,
-            "title": task.title,
-            "status": task.status,
-            "completed_at": task.completed_at
         }
     }))
 }

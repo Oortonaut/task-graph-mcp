@@ -113,8 +113,6 @@ impl ToolHandler {
 
             // Claiming tools
             "claim" => claiming::claim(&self.db, &self.states_config, arguments),
-            "release" => claiming::release(&self.db, &self.states_config, arguments),
-            "complete" => claiming::complete(&self.db, &self.states_config, arguments),
 
             // File coordination tools
             "claim_file" => files::claim_file(&self.db, arguments),
