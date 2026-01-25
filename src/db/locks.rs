@@ -12,9 +12,10 @@ impl Database {
     pub fn lock_file(&self, file_path: String, worker_id: &str, reason: Option<String>, task_id: Option<String>) -> Result<Option<String>> {
         let now = now_ms();
 
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
             // Check if already locked
-            let existing: Option<String> = conn
+            let existing: Option<String> = tx
                 .query_row(
                     "SELECT worker_id FROM file_locks WHERE file_path = ?1",
                     params![&file_path],
@@ -22,31 +23,35 @@ impl Database {
                 )
                 .ok();
 
-            if let Some(existing_worker) = existing {
+            let result = if let Some(existing_worker) = existing {
                 if existing_worker != worker_id {
                     // Locked by another worker - return warning
-                    return Ok(Some(existing_worker));
+                    Some(existing_worker)
+                } else {
+                    // Already locked by this worker - just update timestamp, reason, and task_id
+                    tx.execute(
+                        "UPDATE file_locks SET locked_at = ?1, reason = ?2, task_id = ?3 WHERE file_path = ?4",
+                        params![now, &reason, &task_id, &file_path],
+                    )?;
+                    None
                 }
-                // Already locked by this worker - just update timestamp, reason, and task_id
-                conn.execute(
-                    "UPDATE file_locks SET locked_at = ?1, reason = ?2, task_id = ?3 WHERE file_path = ?4",
-                    params![now, &reason, &task_id, &file_path],
-                )?;
             } else {
                 // Not locked - create new lock
-                conn.execute(
+                tx.execute(
                     "INSERT INTO file_locks (file_path, worker_id, reason, locked_at, task_id) VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![&file_path, worker_id, &reason, now, &task_id],
                 )?;
 
                 // Record claim event for tracking
-                conn.execute(
+                tx.execute(
                     "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp) VALUES (?1, ?2, 'claimed', ?3, ?4)",
                     params![&file_path, worker_id, &reason, now],
                 )?;
-            }
+                None
+            };
 
-            Ok(None)
+            tx.commit()?;
+            Ok(result)
         })
     }
 
@@ -54,15 +59,17 @@ impl Database {
     pub fn unlock_file(&self, file_path: &str, worker_id: &str, reason: Option<String>) -> Result<bool> {
         let now = now_ms();
 
-        self.with_conn(|conn| {
-            let deleted = conn.execute(
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
+            let deleted = tx.execute(
                 "DELETE FROM file_locks WHERE file_path = ?1 AND worker_id = ?2",
                 params![file_path, worker_id],
             )?;
 
             if deleted > 0 {
                 // Find the claim_id for this file+worker (most recent claim)
-                let claim_id: Option<i64> = conn.query_row(
+                let claim_id: Option<i64> = tx.query_row(
                     "SELECT MAX(id) FROM claim_sequence
                      WHERE file_path = ?1 AND worker_id = ?2 AND event = 'claimed'",
                     params![file_path, worker_id],
@@ -70,20 +77,21 @@ impl Database {
                 ).ok().flatten();
 
                 // Close any open claim for this file+worker
-                conn.execute(
+                tx.execute(
                     "UPDATE claim_sequence SET end_timestamp = ?1
                      WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
                     params![now, file_path, worker_id],
                 )?;
 
                 // Record release event with claim_id reference
-                conn.execute(
+                tx.execute(
                     "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp, claim_id)
                      VALUES (?1, ?2, 'released', ?3, ?4, ?5)",
                     params![file_path, worker_id, &reason, now, claim_id],
                 )?;
             }
 
+            tx.commit()?;
             Ok(deleted > 0)
         })
     }
@@ -99,16 +107,18 @@ impl Database {
         let now = now_ms();
         let mut released = Vec::new();
 
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
             for file_path in file_paths {
-                let deleted = conn.execute(
+                let deleted = tx.execute(
                     "DELETE FROM file_locks WHERE file_path = ?1 AND worker_id = ?2",
                     params![&file_path, worker_id],
                 )?;
 
                 if deleted > 0 {
                     // Find the claim_id for this file+worker (most recent claim)
-                    let claim_id: Option<i64> = conn.query_row(
+                    let claim_id: Option<i64> = tx.query_row(
                         "SELECT MAX(id) FROM claim_sequence
                          WHERE file_path = ?1 AND worker_id = ?2 AND event = 'claimed'",
                         params![&file_path, worker_id],
@@ -116,14 +126,14 @@ impl Database {
                     ).ok().flatten();
 
                     // Close any open claim for this file+worker
-                    conn.execute(
+                    tx.execute(
                         "UPDATE claim_sequence SET end_timestamp = ?1
                          WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
                         params![now, &file_path, worker_id],
                     )?;
 
                     // Record release event with claim_id reference
-                    conn.execute(
+                    tx.execute(
                         "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp, claim_id)
                          VALUES (?1, ?2, 'released', ?3, ?4, ?5)",
                         params![&file_path, worker_id, &reason, now, claim_id],
@@ -133,6 +143,7 @@ impl Database {
                 }
             }
 
+            tx.commit()?;
             Ok(released)
         })
     }
@@ -142,10 +153,12 @@ impl Database {
     pub fn release_worker_locks_verbose(&self, worker_id: &str, reason: Option<String>) -> Result<Vec<(String, String)>> {
         let now = now_ms();
 
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
             // Get files locked by this worker before deleting
             let files_to_release: Vec<String> = {
-                let mut stmt = conn.prepare(
+                let mut stmt = tx.prepare(
                     "SELECT file_path FROM file_locks WHERE worker_id = ?1"
                 )?;
                 stmt.query_map(params![worker_id], |row| row.get::<_, String>(0))?
@@ -154,11 +167,12 @@ impl Database {
             };
 
             if files_to_release.is_empty() {
+                tx.commit()?;
                 return Ok(Vec::new());
             }
 
             // Close any open claims for this worker
-            conn.execute(
+            tx.execute(
                 "UPDATE claim_sequence SET end_timestamp = ?1
                  WHERE worker_id = ?2 AND end_timestamp IS NULL",
                 params![now, worker_id],
@@ -166,7 +180,7 @@ impl Database {
 
             // Record release events for each file
             for file_path in &files_to_release {
-                conn.execute(
+                tx.execute(
                     "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp)
                      VALUES (?1, ?2, 'released', ?3, ?4)",
                     params![file_path, worker_id, &reason, now],
@@ -174,10 +188,12 @@ impl Database {
             }
 
             // Delete the locks
-            conn.execute(
+            tx.execute(
                 "DELETE FROM file_locks WHERE worker_id = ?1",
                 params![worker_id],
             )?;
+
+            tx.commit()?;
 
             let released: Vec<(String, String)> = files_to_release
                 .into_iter()
@@ -193,10 +209,12 @@ impl Database {
     pub fn release_task_locks_verbose(&self, task_id: &str, reason: Option<String>) -> Result<Vec<(String, String)>> {
         let now = now_ms();
 
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
             // Get files locked by this task before deleting
             let files_to_release: Vec<(String, String)> = {
-                let mut stmt = conn.prepare(
+                let mut stmt = tx.prepare(
                     "SELECT file_path, worker_id FROM file_locks WHERE task_id = ?1"
                 )?;
                 stmt.query_map(params![task_id], |row| {
@@ -207,12 +225,13 @@ impl Database {
             };
 
             if files_to_release.is_empty() {
+                tx.commit()?;
                 return Ok(Vec::new());
             }
 
             // Close any open claims for these files
             for (file_path, worker_id) in &files_to_release {
-                conn.execute(
+                tx.execute(
                     "UPDATE claim_sequence SET end_timestamp = ?1
                      WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
                     params![now, file_path, worker_id],
@@ -220,7 +239,7 @@ impl Database {
 
                 // Record release event
                 let reason_str = reason.as_deref().unwrap_or("task release");
-                conn.execute(
+                tx.execute(
                     "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp)
                      VALUES (?1, ?2, 'released', ?3, ?4)",
                     params![file_path, worker_id, reason_str, now],
@@ -228,11 +247,12 @@ impl Database {
             }
 
             // Delete the locks
-            conn.execute(
+            tx.execute(
                 "DELETE FROM file_locks WHERE task_id = ?1",
                 params![task_id],
             )?;
 
+            tx.commit()?;
             Ok(files_to_release)
         })
     }

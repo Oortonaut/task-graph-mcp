@@ -20,9 +20,11 @@ impl Database {
         let now = now_ms();
         let mime_type = mime_type.unwrap_or_else(|| "text/plain".to_string());
 
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
             // Verify task exists
-            let exists: bool = conn
+            let exists: bool = tx
                 .query_row(
                     "SELECT 1 FROM tasks WHERE id = ?1",
                     params![task_id],
@@ -35,14 +37,14 @@ impl Database {
             }
 
             // Get next order_index for this task
-            let max_order: Option<i32> = conn.query_row(
+            let max_order: Option<i32> = tx.query_row(
                 "SELECT MAX(order_index) FROM attachments WHERE task_id = ?1",
                 params![task_id],
                 |row| row.get(0),
             )?;
             let order_index = max_order.unwrap_or(-1) + 1;
 
-            conn.execute(
+            tx.execute(
                 "INSERT INTO attachments (task_id, order_index, name, mime_type, content, file_path, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
@@ -56,6 +58,7 @@ impl Database {
                 ],
             )?;
 
+            tx.commit()?;
             Ok(order_index)
         })
     }
