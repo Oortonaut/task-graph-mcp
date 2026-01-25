@@ -40,10 +40,10 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                     "type": "string",
                     "description": "The worker's ID"
                 },
-                "final_state": {
+                "final_status": {
                     "type": "string",
                     "enum": ["pending", "completed", "cancelled", "failed"],
-                    "description": "State to set released tasks to (default: config disconnect_state, typically 'pending'). Must be an untimed state."
+                    "description": "Status to set released tasks to (default: config disconnect_status, typically 'pending'). Must be an untimed status."
                 }
             }),
             vec!["worker_id"],

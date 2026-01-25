@@ -1,8 +1,9 @@
 //! Task CRUD tools.
 
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
-use crate::config::{AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig};
+use crate::config::{AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig, UnknownKeyBehavior};
 use crate::db::Database;
+use std::path::Path;
 use crate::error::ToolError;
 use crate::format::{format_scan_result_markdown, format_task_markdown, format_tasks_markdown, markdown_to_json, OutputFormat};
 use crate::types::{parse_priority, ScanResult, TaskTreeInput};
@@ -174,7 +175,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "string",
                     "description": "Agent ID to assign the task to (push coordination). Sets owner_agent to assignee and transitions to 'assigned' state. The assignee can then claim (transition to in_progress) when ready."
                 },
-                "state": {
+                "status": {
                     "type": "string",
                     "enum": state_enum,
                     "description": "New status"
@@ -221,6 +222,37 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "force": {
                     "type": "boolean",
                     "description": "Force ownership changes even if owned by another worker (default: false)"
+                },
+                "attachments": {
+                    "type": "array",
+                    "description": "List of attachments to add to the task (e.g., changelists, notes, final summaries)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Attachment name/key (e.g., 'changelist', 'notes', 'summary')"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Attachment content (text or base64). Required unless 'file' is provided."
+                            },
+                            "mime": {
+                                "type": "string",
+                                "description": "MIME type (default: text/plain)"
+                            },
+                            "file": {
+                                "type": "string",
+                                "description": "Path to existing file to reference (alternative to content)"
+                            },
+                            "mode": {
+                                "type": "string",
+                                "enum": ["append", "replace"],
+                                "description": "How to handle existing attachment with same name: 'append' (default) keeps both, 'replace' deletes old"
+                            }
+                        },
+                        "required": ["name"]
+                    }
                 }
             }),
             vec!["worker_id", "task"],
@@ -535,6 +567,8 @@ pub fn list_tasks(
 
 pub fn update(
     db: &Database,
+    media_dir: &Path,
+    attachments_config: &AttachmentsConfig,
     states_config: &StatesConfig,
     deps_config: &DependenciesConfig,
     auto_advance: &AutoAdvanceConfig,
@@ -551,7 +585,7 @@ pub fn update(
     } else {
         None
     };
-    let status = get_string(&args, "state");
+    let status = get_string(&args, "status");
     // Support both integer and string priority
     let priority = get_i32(&args, "priority")
         .or_else(|| get_string(&args, "priority").map(|s| parse_priority(&s)));
@@ -579,6 +613,119 @@ pub fn update(
     let reason = get_string(&args, "reason");
     let force = get_bool(&args, "force").unwrap_or(false);
 
+    // Process attachments first (before the update)
+    let mut attachment_results: Vec<Value> = Vec::new();
+    let mut attachment_warnings: Vec<String> = Vec::new();
+
+    if let Some(attachments_arr) = args.get("attachments").and_then(|v| v.as_array()) {
+        for att_value in attachments_arr {
+            let name = att_value.get("name").and_then(|v| v.as_str());
+            let content = att_value.get("content").and_then(|v| v.as_str());
+            let file_path = att_value.get("file").and_then(|v| v.as_str());
+            let mime_override = att_value.get("mime").and_then(|v| v.as_str());
+            let mode_override = att_value.get("mode").and_then(|v| v.as_str());
+
+            let name = match name {
+                Some(n) => n,
+                None => {
+                    attachment_warnings.push("Skipped attachment: missing 'name' field".to_string());
+                    continue;
+                }
+            };
+
+            // Validate content or file is provided
+            if content.is_none() && file_path.is_none() {
+                attachment_warnings.push(format!(
+                    "Skipped attachment '{}': either 'content' or 'file' must be provided",
+                    name
+                ));
+                continue;
+            }
+
+            // Check unknown key behavior
+            let is_known = attachments_config.is_known_key(name);
+            if !is_known {
+                match attachments_config.unknown_key {
+                    UnknownKeyBehavior::Reject => {
+                        attachment_warnings.push(format!(
+                            "Rejected attachment '{}': unknown key (configure in attachments.definitions or set unknown_key to 'allow')",
+                            name
+                        ));
+                        continue;
+                    }
+                    UnknownKeyBehavior::Warn => {
+                        attachment_warnings.push(format!("Unknown attachment key '{}'", name));
+                    }
+                    UnknownKeyBehavior::Allow => {}
+                }
+            }
+
+            // Use config defaults for mime/mode, but allow explicit overrides
+            let mime_type = mime_override
+                .map(String::from)
+                .unwrap_or_else(|| attachments_config.get_mime_default(name).to_string());
+            let mode = mode_override.unwrap_or_else(|| attachments_config.get_mode_default(name));
+
+            // Validate mode
+            if mode != "append" && mode != "replace" {
+                attachment_warnings.push(format!(
+                    "Skipped attachment '{}': mode must be 'append' or 'replace'",
+                    name
+                ));
+                continue;
+            }
+
+            // Handle replace mode - delete existing attachment with same name
+            if mode == "replace" {
+                if let Ok(Some(old_file_path)) = db.delete_attachment_by_name(&task_id, name) {
+                    // Clean up old media file if it was in media dir
+                    if is_in_media_dir(&old_file_path, media_dir) {
+                        let _ = std::fs::remove_file(&old_file_path);
+                    }
+                }
+            }
+
+            // Determine final content and file path
+            let (final_content, final_file_path): (String, Option<String>) = if let Some(fp) = file_path {
+                // File reference mode: verify file exists
+                let path = Path::new(fp);
+                if !path.exists() {
+                    attachment_warnings.push(format!(
+                        "Skipped attachment '{}': file not found: {}",
+                        name, fp
+                    ));
+                    continue;
+                }
+                (String::new(), Some(fp.to_string()))
+            } else {
+                // Inline content mode
+                (content.unwrap().to_string(), None)
+            };
+
+            // Add the attachment
+            match db.add_attachment(&task_id, name.to_string(), final_content, Some(mime_type.clone()), final_file_path.clone()) {
+                Ok(order_index) => {
+                    let mut result = json!({
+                        "name": name,
+                        "order_index": order_index,
+                        "mime_type": mime_type
+                    });
+                    if let Some(fp) = final_file_path {
+                        result["file_path"] = json!(fp);
+                    }
+                    attachment_results.push(result);
+                }
+                Err(e) => {
+                    attachment_warnings.push(format!(
+                        "Failed to add attachment '{}': {}",
+                        name, e
+                    ));
+                }
+            }
+        }
+    }
+
+    // Perform the task update
     let (task, unblocked, auto_advanced) = db.update_task_unified(
         &task_id,
         &worker_id,
@@ -610,9 +757,30 @@ pub fn update(
         if !auto_advanced.is_empty() {
             map.insert("auto_advanced".to_string(), json!(auto_advanced));
         }
+        // Include attachment results if any were added
+        if !attachment_results.is_empty() {
+            map.insert("attachments_added".to_string(), json!(attachment_results));
+        }
+        // Include warnings if any
+        if !attachment_warnings.is_empty() {
+            map.insert("attachment_warnings".to_string(), json!(attachment_warnings));
+        }
     }
 
     Ok(response)
+}
+
+/// Check if a file path is within the media directory.
+fn is_in_media_dir(file_path: &str, media_dir: &Path) -> bool {
+    let file_path = Path::new(file_path);
+
+    // Try to canonicalize both paths for comparison
+    if let (Ok(file_abs), Ok(media_abs)) = (file_path.canonicalize(), media_dir.canonicalize()) {
+        file_abs.starts_with(media_abs)
+    } else {
+        // Fall back to string prefix check
+        file_path.starts_with(media_dir)
+    }
 }
 
 pub fn delete(db: &Database, args: Value) -> Result<Value> {

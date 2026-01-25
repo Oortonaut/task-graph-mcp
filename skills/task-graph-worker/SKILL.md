@@ -56,11 +56,56 @@ As a **Worker**, you:
 
 ---
 
+## Work Models: Pull vs Push
+
+Workers can receive work in two ways:
+
+### Pull Model (Self-Selection)
+
+You find and claim tasks from the ready pool:
+
+```
+list_tasks(ready=true, worker_id=worker_id)
+claim(worker_id=worker_id, task=task_id)
+```
+
+### Push Model (Assignment)
+
+A coordinator assigns tasks directly to you. The task appears with:
+- `status: "assigned"` - ready for you to start
+- `owner_agent: your_id` - you're the assignee
+
+```
+# Check for assigned tasks
+list_tasks(owner=worker_id, status="assigned")
+
+# Start work (transitions to in_progress)
+claim(worker_id=worker_id, task=task_id)
+```
+
+### Check Both Sources
+
+For maximum work discovery, check both assigned and ready tasks:
+
+```
+# 1. Check for assigned tasks (push)
+list_tasks(owner=worker_id, status="assigned")
+
+# 2. Check ready pool (pull)
+list_tasks(ready=true, worker_id=worker_id)
+```
+
+---
+
 ## Work Loop
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │ 1. FIND WORK                                        │
+│    # Check for assigned tasks first (push)          │
+│    list_tasks(owner=worker_id, status="assigned")   │
+│                                                     │
+│    # Then check ready pool (pull)                   │
 │    list_tasks(ready=true, worker_id=worker_id)      │
 │    • Returns unclaimed tasks you can claim          │
 │    • Filters by your tags automatically             │
@@ -145,7 +190,43 @@ thinking(worker_id=worker_id, thought="All tests passing, preparing to complete"
 
 ### Why Lock Files?
 
-Multiple workers may edit the same codebase. Advisory locks prevent conflicts.
+Multiple workers may edit the same codebase. Advisory locks prevent conflicts and enable coordination.
+
+### Coordination Model
+
+Claims include a **reason** describing what you're doing:
+
+```
+claim_file(worker_id=id, file="src/types.rs",
+           reason="Renaming state to status throughout")
+```
+
+When you claim a file, you see what others are doing:
+
+1. **On claim**: If locked, you get a warning with their ID and reason
+2. **Via polling**: `claim_updates` shows claims/releases with reasons
+
+Example scenarios:
+```
+# Scenario 1: Refactoring
+Worker A claims types.rs: "Renaming state to status"
+Worker B tries to claim types.rs → sees A's reason
+Worker B decides to wait, OR uses 'status' not 'state'
+
+# Scenario 2: Test failure
+Test fails in auth.rs
+Worker A claims auth.rs: "Fixing null check in validate()"
+Worker B sees the claim → knows it's being handled
+Worker B moves on to other work instead of duplicating effort
+```
+
+This lets you:
+- **Understand** the nature of others' changes
+- **Know** if a problem is already being addressed
+- **Work around** changes intelligently
+- **Avoid** duplicating effort or reverting work
+
+The key insight: reasons communicate intent, enabling smart coordination.
 
 ### Workflow
 
@@ -334,7 +415,8 @@ attach(task=task_id, name="screenshot",
 
 Before starting work:
 - [ ] Connected with appropriate tags
-- [ ] Found task via `list_tasks(ready=true)`
+- [ ] Checked for assigned tasks: `list_tasks(owner=worker_id, status="assigned")`
+- [ ] Checked ready pool: `list_tasks(ready=true)`
 - [ ] Claimed the task
 - [ ] Read task description and attachments
 - [ ] Checked file locks

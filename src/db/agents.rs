@@ -119,18 +119,20 @@ impl Database {
                 .query_row("SELECT 1 FROM workers WHERE id = ?1", params![&id], |_| Ok(true))
                 .unwrap_or(false);
 
-            // Get current max claim sequence to initialize poll position
-            // This ensures first poll returns empty (no events since registration)
+            // Get current max claim sequence + 1 to initialize poll position.
+            // This ensures first poll returns empty (no events since registration).
+            // The +1 is needed because we now query with `id >= last_seq`.
             let current_max_sequence: i64 = conn
                 .query_row("SELECT COALESCE(MAX(id), 0) FROM claim_sequence", [], |row| row.get(0))
                 .unwrap_or(0);
+            let initial_sequence = current_max_sequence + 1;
 
             if exists {
                 if force {
                     // Force reconnection: update existing worker and reset poll position
                     conn.execute(
                         "UPDATE workers SET tags = ?1, max_claims = ?2, last_heartbeat = ?3, last_claim_sequence = ?4 WHERE id = ?5",
-                        params![tags_json, max_claims, now, current_max_sequence, &id],
+                        params![tags_json, max_claims, now, initial_sequence, &id],
                     )?;
                 } else {
                     return Err(anyhow!("Worker ID '{}' already registered. Use force=true to reconnect.", id));
@@ -139,7 +141,7 @@ impl Database {
                 conn.execute(
                     "INSERT INTO workers (id, tags, max_claims, registered_at, last_heartbeat, last_claim_sequence)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![&id, tags_json, max_claims, now, now, current_max_sequence],
+                    params![&id, tags_json, max_claims, now, now, initial_sequence],
                 )?;
             }
 

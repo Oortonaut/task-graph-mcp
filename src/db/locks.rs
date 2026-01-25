@@ -250,11 +250,12 @@ impl Database {
                 )
                 .unwrap_or(0);
 
-            // Get all new events since last sequence
+            // Get all new events since last sequence.
+            // We use >= because last_seq now represents "next event to fetch" (set to max+1 after each poll).
             let mut stmt = conn.prepare(
                 "SELECT id, file_path, worker_id, event, reason, timestamp, end_timestamp, claim_id
                  FROM claim_sequence
-                 WHERE id > ?1
+                 WHERE id >= ?1
                  ORDER BY id"
             )?;
             let events: Vec<ClaimEvent> = stmt.query_map(params![last_seq], |row| {
@@ -272,8 +273,13 @@ impl Database {
             .filter_map(|r| r.ok())
             .collect();
 
-            // Find max sequence from events
-            let new_seq = events.iter().map(|e| e.id).max().unwrap_or(last_seq);
+            // Find max sequence from events. After polling, we set last_seq = max + 1
+            // so that claims we just saw have claim_id < last_seq (for release filtering).
+            let max_seen = events.iter().map(|e| e.id).max();
+            let new_seq = match max_seen {
+                Some(max) => max + 1,  // +1 so claims just polled satisfy claim_id < new_seq
+                None => last_seq,       // No events, keep current sequence
+            };
 
             // Update worker's last sequence
             if new_seq > last_seq {
@@ -289,10 +295,9 @@ impl Database {
                 .cloned()
                 .collect();
 
-            // For releases, only include if agent actually polled and received the original claim.
-            // Use claim_id: include if claim_id < last_seq (was in a previous poll) OR claim_id is in current batch.
-            // Note: strictly less than, because last_seq is set to current max on registration,
-            // so claims at exactly last_seq were never actually polled by the agent.
+            // For releases, only include if agent has polled and received the original claim.
+            // Include if claim_id < last_seq (strictly less - was in a previous poll, and
+            // last_seq is max+1 after each poll) OR claim_id is in current batch.
             let new_claim_ids: HashSet<i64> = new_claims.iter()
                 .map(|c| c.id)
                 .collect();

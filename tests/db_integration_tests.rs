@@ -1471,6 +1471,104 @@ mod file_lock_tests {
         assert_eq!(updates.new_claims.len(), 1);
         assert_eq!(updates.new_claims[0].file_path, "test.rs");
     }
+
+    #[test]
+    fn claim_updates_shows_release_for_claim_before_registration() {
+        // When an agent registers after a claim, they should still see the release.
+        // This allows agents to track when files become available, even for
+        // claims that happened before they registered.
+        let db = setup_db();
+        let agent1 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 claims a file
+        db.lock_file("edge.rs".to_string(), &agent1.id, None, None).unwrap();
+
+        // Agent2 registers AFTER the claim
+        let agent2 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 releases the file
+        db.unlock_file("edge.rs", &agent1.id, None).unwrap();
+
+        // Agent2 polls - should see the release (file is now available)
+        let updates = db.claim_updates(&agent2.id).unwrap();
+
+        // Agent2 should NOT see the claim (it was before their registration)
+        assert!(updates.new_claims.is_empty(), "Agent2 should not see the claim");
+
+        // Agent2 SHOULD see the release - the file became available
+        assert_eq!(updates.dropped_claims.len(), 1,
+            "Agent2 should see release so they know file is available");
+        assert_eq!(updates.dropped_claims[0].file_path, "edge.rs");
+    }
+
+    #[test]
+    fn claim_updates_includes_release_for_previously_polled_claim() {
+        // Verify that after an agent polls and sees a claim, they DO see the release
+        let db = setup_db();
+        let agent1 = db.register_worker(None, vec![], false).unwrap();
+        let agent2 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 claims a file
+        db.lock_file("polled.rs".to_string(), &agent1.id, None, None).unwrap();
+
+        // Agent2 polls and sees the claim
+        let updates1 = db.claim_updates(&agent2.id).unwrap();
+        assert_eq!(updates1.new_claims.len(), 1);
+        assert_eq!(updates1.new_claims[0].file_path, "polled.rs");
+
+        // Agent1 releases the file
+        db.unlock_file("polled.rs", &agent1.id, None).unwrap();
+
+        // Agent2 polls again - should see the release because they polled and saw the claim
+        let updates2 = db.claim_updates(&agent2.id).unwrap();
+        assert!(updates2.new_claims.is_empty());
+        assert_eq!(updates2.dropped_claims.len(), 1, "Should see release for previously polled claim");
+        assert_eq!(updates2.dropped_claims[0].file_path, "polled.rs");
+    }
+
+    #[test]
+    fn claim_updates_includes_release_when_claim_in_same_batch() {
+        // When claim and release both happen before a poll, both should be visible
+        let db = setup_db();
+        let agent1 = db.register_worker(None, vec![], false).unwrap();
+        let agent2 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 claims and releases a file before agent2 polls
+        db.lock_file("batch.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.unlock_file("batch.rs", &agent1.id, None).unwrap();
+
+        // Agent2 polls - should see both claim and release in same batch
+        let updates = db.claim_updates(&agent2.id).unwrap();
+
+        assert_eq!(updates.new_claims.len(), 1, "Should see the claim");
+        assert_eq!(updates.new_claims[0].file_path, "batch.rs");
+        assert_eq!(updates.dropped_claims.len(), 1, "Should see the release (claim in same batch)");
+        assert_eq!(updates.dropped_claims[0].file_path, "batch.rs");
+    }
+
+    #[test]
+    fn claim_updates_new_agent_only_sees_future_events() {
+        // New agents should only see events that happen after they register
+        let db = setup_db();
+        let agent1 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 claims and releases a file
+        db.lock_file("old.rs".to_string(), &agent1.id, None, None).unwrap();
+        db.unlock_file("old.rs", &agent1.id, None).unwrap();
+
+        // Agent2 registers AFTER the claim+release cycle
+        let agent2 = db.register_worker(None, vec![], false).unwrap();
+
+        // Agent1 claims a new file AFTER agent2 registered
+        db.lock_file("new.rs".to_string(), &agent1.id, None, None).unwrap();
+
+        // Agent2 polls - should only see new.rs
+        let updates = db.claim_updates(&agent2.id).unwrap();
+
+        assert_eq!(updates.new_claims.len(), 1, "Should only see new.rs");
+        assert_eq!(updates.new_claims[0].file_path, "new.rs");
+        assert!(updates.dropped_claims.is_empty(), "Should not see old.rs release");
+    }
 }
 
 mod tracking_tests {

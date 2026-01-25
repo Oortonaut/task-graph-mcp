@@ -119,7 +119,7 @@ impl ToolHandler {
             "list_tasks" => {
                 json(tasks::list_tasks(&self.db, &self.states_config, &self.deps_config, self.default_format, arguments))
             }
-            "update" => json(tasks::update(&self.db, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),
+            "update" => json(tasks::update(&self.db, &self.media_dir, &self.attachments_config, &self.states_config, &self.deps_config, &self.auto_advance, arguments)),
             "delete" => json(tasks::delete(&self.db, arguments)),
             "scan" => json(tasks::scan(&self.db, self.default_format, arguments)),
 
