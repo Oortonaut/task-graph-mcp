@@ -1,7 +1,7 @@
 //! Output formatting utilities for markdown and JSON.
 
 use crate::config::StatesConfig;
-use crate::types::{AgentInfo, Priority, Task};
+use crate::types::{AgentInfo, Priority, Task, TaskTree};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -211,4 +211,199 @@ pub fn markdown_to_json(md: String) -> Value {
         "format": "markdown",
         "content": md
     })
+}
+
+/// Format a task tree as markdown with visual tree structure.
+pub fn format_task_tree_markdown(tree: &TaskTree) -> String {
+    let mut md = String::new();
+
+    // Format root task as heading
+    md.push_str(&format!("# {}\n", tree.task.title));
+
+    // Add root task metadata
+    let mut meta_parts = Vec::new();
+    meta_parts.push(tree.task.status.to_uppercase());
+    if tree.task.priority != Priority::Medium {
+        meta_parts.push(tree.task.priority.as_str().to_uppercase());
+    }
+    if let Some(points) = tree.task.points {
+        meta_parts.push(format!("{} pts", points));
+    }
+    if let Some(ref owner) = tree.task.owner_agent {
+        meta_parts.push(format!("@{}", owner));
+    }
+
+    if !meta_parts.is_empty() {
+        md.push_str(&format!("_{}_\n", meta_parts.join(", ")));
+    }
+
+    if let Some(ref desc) = tree.task.description {
+        md.push_str(&format!("\n{}\n", desc));
+    }
+
+    // Format children with tree characters
+    if !tree.children.is_empty() {
+        md.push('\n');
+        format_tree_children(&tree.children, "", &mut md);
+    }
+
+    md
+}
+
+/// Recursively format children with tree structure characters.
+fn format_tree_children(children: &[TaskTree], prefix: &str, md: &mut String) {
+    let count = children.len();
+
+    for (i, child) in children.iter().enumerate() {
+        let is_last = i == count - 1;
+        let connector = if is_last { "└── " } else { "├── " };
+        let child_prefix = if is_last { "    " } else { "│   " };
+
+        // Build the task line with metadata
+        let mut meta_parts = Vec::new();
+        meta_parts.push(child.task.status.clone());
+        if child.task.priority != Priority::Medium {
+            meta_parts.push(child.task.priority.as_str().to_uppercase().to_string());
+        }
+        if let Some(points) = child.task.points {
+            meta_parts.push(format!("{} pts", points));
+        }
+        if let Some(ref owner) = child.task.owner_agent {
+            meta_parts.push(format!("@{}", owner));
+        }
+
+        let meta_str = if !meta_parts.is_empty() {
+            format!(" [{}]", meta_parts.join(", "))
+        } else {
+            String::new()
+        };
+
+        md.push_str(&format!("{}{}{}{}\n", prefix, connector, child.task.title, meta_str));
+
+        // Recursively format grandchildren
+        if !child.children.is_empty() {
+            format_tree_children(&child.children, &format!("{}{}", prefix, child_prefix), md);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Task, TaskTree};
+
+    fn make_test_task(id: &str, title: &str, status: &str, priority: Priority, points: Option<i32>) -> Task {
+        Task {
+            id: id.to_string(),
+            title: title.to_string(),
+            description: None,
+            status: status.to_string(),
+            priority,
+            owner_agent: None,
+            claimed_at: None,
+            needed_tags: vec![],
+            wanted_tags: vec![],
+            tags: vec![],
+            points,
+            time_estimate_ms: None,
+            time_actual_ms: None,
+            started_at: None,
+            completed_at: None,
+            current_thought: None,
+            tokens_in: 0,
+            tokens_cached: 0,
+            tokens_out: 0,
+            tokens_thinking: 0,
+            tokens_image: 0,
+            tokens_audio: 0,
+            cost_usd: 0.0,
+            user_metrics: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_format_task_tree_markdown_root_only() {
+        let tree = TaskTree {
+            task: make_test_task("root-1", "Root Task", "pending", Priority::High, Some(5)),
+            children: vec![],
+        };
+
+        let result = format_task_tree_markdown(&tree);
+        assert!(result.contains("# Root Task"));
+        assert!(result.contains("PENDING"));
+        assert!(result.contains("HIGH"));
+        assert!(result.contains("5 pts"));
+    }
+
+    #[test]
+    fn test_format_task_tree_markdown_with_children() {
+        let tree = TaskTree {
+            task: make_test_task("root-1", "API Refactoring Sprint", "in_progress", Priority::High, Some(16)),
+            children: vec![
+                TaskTree {
+                    task: make_test_task("child-1", "Tier 1: Prerequisites", "pending", Priority::High, Some(9)),
+                    children: vec![
+                        TaskTree {
+                            task: make_test_task("grandchild-1", "Refactor connect", "completed", Priority::Medium, Some(3)),
+                            children: vec![],
+                        },
+                        TaskTree {
+                            task: make_test_task("grandchild-2", "Merge claim/release", "pending", Priority::Medium, Some(5)),
+                            children: vec![],
+                        },
+                    ],
+                },
+                TaskTree {
+                    task: make_test_task("child-2", "Tier 2: Navigation", "pending", Priority::Medium, Some(7)),
+                    children: vec![],
+                },
+            ],
+        };
+
+        let result = format_task_tree_markdown(&tree);
+
+        // Check root formatting
+        assert!(result.contains("# API Refactoring Sprint"));
+        assert!(result.contains("IN_PROGRESS"));
+
+        // Check tree structure characters
+        assert!(result.contains("├── Tier 1: Prerequisites"));
+        assert!(result.contains("└── Tier 2: Navigation"));
+
+        // Check grandchildren have proper indentation
+        assert!(result.contains("│   ├── Refactor connect"));
+        assert!(result.contains("│   └── Merge claim/release"));
+    }
+
+    #[test]
+    fn test_format_task_tree_markdown_deep_nesting() {
+        let tree = TaskTree {
+            task: make_test_task("root", "Root", "pending", Priority::Medium, None),
+            children: vec![
+                TaskTree {
+                    task: make_test_task("l1", "Level 1", "pending", Priority::Medium, None),
+                    children: vec![
+                        TaskTree {
+                            task: make_test_task("l2", "Level 2", "pending", Priority::Medium, None),
+                            children: vec![
+                                TaskTree {
+                                    task: make_test_task("l3", "Level 3", "pending", Priority::Medium, None),
+                                    children: vec![],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        let result = format_task_tree_markdown(&tree);
+
+        // Check deep nesting with proper prefix
+        assert!(result.contains("└── Level 1"));
+        assert!(result.contains("    └── Level 2"));
+        assert!(result.contains("        └── Level 3"));
+    }
 }
