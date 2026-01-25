@@ -3,7 +3,7 @@ name: task-graph-basics
 description: Foundation skill for task-graph-mcp - connection workflow, tool reference, and shared patterns for multi-agent coordination
 license: Apache-2.0
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   suite: task-graph-mcp
   role: foundation
 ---
@@ -29,7 +29,7 @@ list_tasks(ready=true, agent=agent_id)
 # Claim and work
 claim(agent=agent_id, task=task_id)
 thinking(agent=agent_id, thought="Working on X...")
-complete(agent=agent_id, task=task_id)
+update(agent=agent_id, task=task_id, state="completed")
 ```
 
 ---
@@ -42,15 +42,15 @@ Every agent MUST connect before using task-graph tools:
 ┌─────────────────────────────────────────────────────┐
 │ 1. CONNECT                                          │
 │    connect(                                         │
-│      name="my-agent",           # Display name      │
+│      agent="my-agent-id",     # Optional custom ID  │
 │      tags=["python", "testing"], # Capabilities     │
-│      max_claims=5               # Concurrent limit  │
+│      force=true               # Reconnect if exists │
 │    )                                                │
-│    → Returns: agent_id (UUID7)                      │
+│    → Returns: agent_id                              │
 │    → SAVE THIS ID for all subsequent calls          │
 ├─────────────────────────────────────────────────────┤
 │ 2. WORK (use agent_id in all calls)                 │
-│    list_tasks, claim, thinking, complete, etc.      │
+│    list_tasks, claim, thinking, update, etc.        │
 ├─────────────────────────────────────────────────────┤
 │ 3. DISCONNECT (when done)                           │
 │    disconnect(agent=agent_id)                       │
@@ -70,7 +70,7 @@ Every agent MUST connect before using task-graph tools:
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `connect` | Register as agent | `name`, `tags[]`, `max_claims` |
+| `connect` | Register as agent | `agent` (optional ID), `tags[]`, `force` |
 | `disconnect` | Unregister, release all | `agent` |
 | `list_agents` | See all agents | `format` |
 
@@ -82,16 +82,20 @@ Every agent MUST connect before using task-graph tools:
 | `create_tree` | Nested structure | `tree` (recursive), `parent` |
 | `get` | Fetch task | `task`, `children`, `format` |
 | `list_tasks` | Query tasks | `status`, `ready`, `blocked`, `owner`, `parent`, `agent`, `format` |
-| `update` | Modify task | `agent`, `task`, `state`, `title`, `description`, `priority` |
+| `update` | Modify task & state | `agent`, `task`, `state`, `title`, `description`, `priority`, `force` |
 | `delete` | Remove task | `task`, `cascade` |
 
-### Claiming & Completion
+### Claiming & Ownership
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `claim` | Take ownership | `agent`, `task`, `force` |
-| `release` | Give up task | `agent`, `task`, `state` |
-| `complete` | Mark done | `agent`, `task` |
+| `claim` | Take ownership (shortcut) | `agent`, `task`, `force` |
+
+**Ownership via `update`:**
+- `update(state="in_progress")` → Claims task (sets owner)
+- `update(state="pending")` → Releases task (clears owner)
+- `update(state="completed")` → Completes task (clears owner)
+- Use `force=true` to take from another agent
 
 ### Dependencies
 
@@ -152,7 +156,33 @@ pending ──→ in_progress ──→ completed
 | `failed` | No | `pending` |
 | `cancelled` | No | (terminal) |
 
-**Timed states** automatically track `time_actual_ms`.
+**Timed states** (like `in_progress`) automatically:
+- Set owner when entering
+- Track `time_actual_ms`
+- Clear owner when leaving
+
+---
+
+## Unified Update Behavior
+
+The `update` tool handles ownership based on state transitions:
+
+```
+┌────────────────────────────────────────────────────────┐
+│ Transition to TIMED state (e.g., in_progress)          │
+│ → CLAIMS task: validates tags, checks limit, sets owner│
+├────────────────────────────────────────────────────────┤
+│ Transition to NON-TIMED state (e.g., pending)          │
+│ → RELEASES task: clears owner                          │
+├────────────────────────────────────────────────────────┤
+│ Transition to TERMINAL state (e.g., completed)         │
+│ → COMPLETES task: checks children, releases file locks │
+└────────────────────────────────────────────────────────┘
+```
+
+**Force parameter:**
+- `update(force=true)` takes ownership from another agent
+- `claim(force=true)` same behavior (claim is shortcut for update)
 
 ---
 
@@ -226,7 +256,7 @@ get(task=task_id, children=true, format="markdown")
 ### Never Do
 - Claim tasks without checking dependencies
 - Edit files without advisory locks
-- Forget to `complete` or `release` tasks
+- Leave tasks in limbo (always update state)
 - Ignore tag requirements on tasks
 
 ---
@@ -237,7 +267,7 @@ get(task=task_id, children=true, format="markdown")
 |-------|-------|----------|
 | "Task already claimed" | Another agent owns it | Use `force=true` or pick another |
 | "Dependencies not satisfied" | Blockers incomplete | Wait or help complete blockers |
-| "Agent not found" | Invalid/expired agent_id | Reconnect |
+| "Agent not found" | Invalid/expired agent_id | Reconnect with `force=true` |
 | "Tag mismatch" | Agent lacks required tags | Check `needed_tags`/`wanted_tags` |
 
 ---

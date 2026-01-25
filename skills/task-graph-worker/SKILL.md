@@ -3,7 +3,7 @@ name: task-graph-worker
 description: Worker role for task-graph-mcp - claims tasks, reports progress via thinking(), coordinates file access, and completes work
 license: Apache-2.0
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   suite: task-graph-mcp
   role: worker
   requires: task-graph-basics
@@ -21,7 +21,7 @@ Worker role: find available tasks, claim work matching your capabilities, report
 
 ```
 # 1. Connect with your capabilities
-connect(name="rust-worker", tags=["rust", "backend"])
+connect(agent="rust-worker", tags=["rust", "backend"], force=true)
 → agent_id (SAVE THIS!)
 
 # 2. Find work matching your skills
@@ -34,7 +34,7 @@ claim(agent=agent_id, task=task_id)
 thinking(agent=agent_id, thought="Implementing auth module...")
 
 # 5. Complete when done
-complete(agent=agent_id, task=task_id)
+update(agent=agent_id, task=task_id, state="completed")
 ```
 
 ---
@@ -48,7 +48,7 @@ As a **Worker**, you:
 | Claim tasks matching your tags | Claim tasks you can't complete |
 | Report progress frequently | Go silent for long periods |
 | Lock files before editing | Edit files others are using |
-| Complete or release tasks | Leave tasks in limbo |
+| Update task state when done | Leave tasks in limbo |
 | Log your costs | Forget to track usage |
 
 ---
@@ -95,7 +95,8 @@ As a **Worker**, you:
 │                tokens_in=1000, cost_usd=0.05)       │
 │                                                     │
 │    d. Complete task:                                │
-│       complete(agent=agent_id, task=task_id)        │
+│       update(agent=agent_id, task=task_id,          │
+│              state="completed")                     │
 ├─────────────────────────────────────────────────────┤
 │ 5. REPEAT                                           │
 │    Go back to step 1                                │
@@ -205,7 +206,7 @@ claim(agent=agent_id, task=task_2)
 
 ```
 # If you can't complete the task:
-release(agent=agent_id, task=task_id, state="failed")
+update(agent=agent_id, task=task_id, state="failed")
 
 # Attach explanation
 attach(task=task_id, name="failure-reason",
@@ -216,7 +217,7 @@ attach(task=task_id, name="failure-reason",
 
 ```
 # Release back to pending for another worker
-release(agent=agent_id, task=task_id, state="pending")
+update(agent=agent_id, task=task_id, state="pending")
 
 # Attach progress notes
 attach(task=task_id, name="handoff-notes",
@@ -309,7 +310,7 @@ After completing:
 - [ ] Released file locks
 - [ ] Attached outputs/notes
 - [ ] Logged final costs
-- [ ] Marked task complete
+- [ ] Updated task to completed state
 
 ---
 
@@ -320,7 +321,7 @@ After completing:
 | Claiming without capacity | Blocks others | Only claim what you'll do |
 | Silent work | Looks stuck | Report progress |
 | Editing unlocked files | Conflicts | Always `claim_file` first |
-| Abandoning tasks | Blocks progress | `release` if can't finish |
+| Abandoning tasks | Blocks progress | Update state if can't finish |
 | Ignoring dependencies | Task will fail | Check `ready=true` |
 
 ---
