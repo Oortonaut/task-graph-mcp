@@ -159,7 +159,21 @@ attachments:
 | `definitions.<key>.mime` | MIME type string | Default MIME type for this key |
 | `definitions.<key>.mode` | `append`, `replace` | Default mode (append keeps existing, replace overwrites) |
 
-**Built-in defaults**: `commit` (text/git.hash), `checkin` (text/p4.changelist), `meta` (JSON, replace mode), `note` (text/plain).
+**Built-in defaults**:
+
+| Key | MIME Type | Mode | Use Case |
+|-----|-----------|------|----------|
+| `commit` | text/git.hash | append | Git commit hashes |
+| `checkin` | text/p4.changelist | append | Perforce changelists |
+| `meta` | application/json | replace | Structured metadata |
+| `note` | text/plain | append | General notes |
+| `log` | text/plain | append | Log output |
+| `error` | text/plain | append | Error messages |
+| `output` | text/plain | append | Command/tool output |
+| `diff` | text/x-diff | append | Patches and diffs |
+| `plan` | text/markdown | replace | Plans and specs |
+| `result` | application/json | replace | Structured results |
+| `context` | text/plain | replace | Current context/state |
 
 **Usage**:
 ```

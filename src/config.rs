@@ -103,6 +103,62 @@ impl AttachmentsConfig {
             },
         );
 
+        defs.insert(
+            "log".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "error".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "output".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "diff".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/x-diff".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "plan".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/markdown".to_string(),
+                mode: "replace".to_string(),
+            },
+        );
+
+        defs.insert(
+            "result".to_string(),
+            AttachmentKeyDefinition {
+                mime: "application/json".to_string(),
+                mode: "replace".to_string(),
+            },
+        );
+
+        defs.insert(
+            "context".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "replace".to_string(),
+            },
+        );
+
         defs
     }
 
