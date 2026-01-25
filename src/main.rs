@@ -87,29 +87,8 @@ impl TaskGraphServer {
 
 /// Default server instructions when no prompts.yaml is present.
 const DEFAULT_INSTRUCTIONS: &str = "\
-Task Graph MCP Server provides atomic, token-efficient task management for multi-agent coordination.
-
-WORKFLOW:
-1. connect - Start here. Get your agent_id (store it for all subsequent calls)
-2. list_tasks(ready=true) - Find unclaimed tasks with satisfied dependencies
-3. claim - Claim a task before working on it
-4. thinking - Update your current activity (visible to other agents)
-5. complete - Mark done when finished
-
-MULTI-AGENT COORDINATION:
-- claim_file before editing (advisory lock with reason)
-- claim_updates to poll for file claim changes
-- Dependencies: use blocked_by in create or block/unblock tools
-
-QUERY OPTIONS:
-- list_tasks: filter by status, ready, blocked, owner, parent
-- format='markdown' on queries for human-readable output
-- list_agents to see all connected agents
-
-TIPS:
-- Use list_tasks(ready=true, agent=...) to find work matching your tags
-- Use force=true on claim to steal a task from another agent
-- Use attachments for notes and file references";
+Task graph for multi-agent coordination. Start: connect() → list_tasks(ready=true) → claim() → work → update(state=\"completed\").
+Use get_skill(\"basics\") for full documentation.";
 
 impl ServerHandler for TaskGraphServer {
     fn get_info(&self) -> InitializeResult {
