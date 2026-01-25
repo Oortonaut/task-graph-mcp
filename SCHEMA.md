@@ -174,8 +174,9 @@ Append-only audit log of task state transitions, enabling automatic time trackin
 
 Task states are fully configurable via YAML. The configuration defines:
 
-- **initial** - Default state for new tasks
-- **blocking_states** - States that block dependent tasks (AND logic)
+- **initial** - Default state for new tasks (default: `pending`)
+- **disconnect_state** - State for tasks when their owner disconnects; must be untimed (default: `pending`)
+- **blocking_states** - States that block dependent tasks (default: `[pending, in_progress]`)
 - **definitions** - Per-state settings including allowed transitions and time tracking
 
 ### Default States
@@ -183,6 +184,7 @@ Task states are fully configurable via YAML. The configuration defines:
 ```yaml
 states:
   initial: pending
+  disconnect_state: pending
   blocking_states: [pending, in_progress]
   definitions:
     pending:

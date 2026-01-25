@@ -56,8 +56,10 @@ Create `.task-graph/config.yaml`:
 server:
   db_path: .task-graph/tasks.db
   media_dir: .task-graph/media  # Directory for file attachments
+  skills_dir: .task-graph/skills  # Custom skill overrides
   claim_limit: 5
   stale_timeout_seconds: 900
+  default_format: json  # or markdown
 
 paths:
   style: relative  # or project_prefixed
@@ -76,6 +78,7 @@ To add a `ready` state for auto-advance:
 ```yaml
 states:
   initial: pending
+  disconnect_state: pending  # State for tasks when owner disconnects (must be untimed)
   blocking_states: [pending, in_progress]
   definitions:
     pending:
