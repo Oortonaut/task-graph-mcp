@@ -2,7 +2,9 @@
 .claude/
 .serena/
 .task-graph/
+.ac/
 nul
 *.db
 *.db-shm
 *.db-wal
+*.log
