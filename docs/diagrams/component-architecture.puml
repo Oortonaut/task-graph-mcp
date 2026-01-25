@@ -1,0 +1,76 @@
+@startuml component-architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title Task Graph MCP - Component Architecture
+
+package "Entry Point" {
+    [main.rs] as main
+    [TaskGraphServer] as server
+}
+
+package "Tool Layer" {
+    [ToolHandler] as tools
+    
+    package "Tool Modules" {
+        [agents.rs] as t_agents
+        [tasks.rs] as t_tasks
+        [deps.rs] as t_deps
+        [claiming.rs] as t_claiming
+        [files.rs] as t_files
+        [attachments.rs] as t_attachments
+        [tracking.rs] as t_tracking
+        [search.rs] as t_search
+        [query.rs] as t_query
+        [schema.rs] as t_schema
+        [skills.rs] as t_skills
+    }
+}
+
+package "Resource Layer" {
+    [ResourceHandler] as resources
+    
+    package "Resource Modules" {
+        [tasks.rs] as r_tasks
+        [agents.rs] as r_agents
+        [files.rs] as r_files
+        [stats.rs] as r_stats
+        [skills.rs] as r_skills
+    }
+}
+
+package "Database Layer" {
+    [Database] as db
+    
+    package "DB Modules" {
+        [tasks.rs] as d_tasks
+        [agents.rs] as d_agents
+        [deps.rs] as d_deps
+        [locks.rs] as d_locks
+        [attachments.rs] as d_attachments
+        [state_transitions.rs] as d_state
+        [search.rs] as d_search
+        [stats.rs] as d_stats
+        [schema.rs] as d_schema
+    }
+}
+
+package "Support" {
+    [config.rs] as config
+    [types.rs] as types
+    [error.rs] as error
+    [format.rs] as format
+}
+
+main --> server
+server --> tools
+server --> resources
+tools --> db
+resources --> db
+tools ..> config
+tools ..> types
+tools ..> error
+tools ..> format
+db ..> types
+
+@enduml

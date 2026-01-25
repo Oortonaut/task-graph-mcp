@@ -272,7 +272,7 @@ search(query="auth", include_attachments=true, status_filter="pending")
 - Save your `worker_id` after connecting
 - Use `thinking()` frequently to show progress
 - Mark files before editing (`mark_file`)
-- Check `mark_updates` before editing shared files
+- Check `mark_updates` before editing shared files or when seeing edit conflicts.
 - Log costs with `log_cost` for tracking
 
 ### Never Do

@@ -1,0 +1,53 @@
+@startuml dependency-types
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title Dependency Types
+
+package "Blocking Dependencies" {
+    rectangle "Task A" as a1
+    rectangle "Task B" as b1
+    a1 -right-> b1 : **blocks**\n(start)
+    note bottom of b1
+      B cannot be claimed
+      until A completes
+    end note
+}
+
+package "Sequential Dependencies" {
+    rectangle "Step 1" as s1
+    rectangle "Step 2" as s2
+    rectangle "Step 3" as s3
+    s1 -right-> s2 : **follows**\n(start)
+    s2 -right-> s3 : **follows**\n(start)
+    note bottom of s3
+      Auto-created by
+      join_mode='then'
+    end note
+}
+
+package "Hierarchical Dependencies" {
+    rectangle "Parent" as p1
+    rectangle "Child 1" as c1
+    rectangle "Child 2" as c2
+    p1 -down-> c1 : **contains**\n(completion)
+    p1 -down-> c2 : **contains**\n(completion)
+    note right of p1
+      Parent cannot complete
+      until all children complete
+    end note
+}
+
+package "Informational Links" {
+    rectangle "Original" as o1
+    rectangle "Duplicate" as d1
+    rectangle "Related" as r1
+    o1 ..> d1 : **duplicate**
+    o1 ..> r1 : **see-also**
+    note bottom of d1
+      No blocking effect,
+      just metadata
+    end note
+}
+
+@enduml

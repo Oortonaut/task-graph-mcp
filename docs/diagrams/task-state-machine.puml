@@ -1,0 +1,47 @@
+@startuml task-state-machine
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title Task State Machine (Default Configuration)
+
+state "pending" as pending : Initial state
+state "assigned" as assigned : Push coordination
+state "in_progress" as in_progress : **Timed state**\nAccumulates time_actual_ms
+state "completed" as completed : Terminal (success)
+state "failed" as failed : Terminal (retriable)
+state "cancelled" as cancelled : Terminal (abandoned)
+
+[*] --> pending : create()
+
+pending --> assigned : update(assignee=X)
+pending --> in_progress : claim() / update(status)
+pending --> cancelled : update(status)
+
+assigned --> in_progress : claim() by assignee
+assigned --> pending : release
+assigned --> cancelled : update(status)
+
+in_progress --> completed : update(status)
+in_progress --> failed : update(status)
+in_progress --> pending : release / disconnect
+
+failed --> pending : retry
+
+completed --> [*]
+cancelled --> [*]
+
+note right of in_progress
+  Only timed states contribute
+  to time_actual_ms tracking.
+  
+  Worker heartbeat refreshed
+  via thinking() calls.
+end note
+
+note left of assigned
+  Push coordination:
+  Coordinator assigns task
+  to specific worker.
+end note
+
+@enduml

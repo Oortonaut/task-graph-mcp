@@ -1,0 +1,102 @@
+@startuml entity-relationship
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title Database Entity Relationships
+
+entity "workers" as workers {
+    * id : TEXT <<PK>>
+    --
+    tags : TEXT (JSON)
+    max_claims : INTEGER
+    registered_at : INTEGER
+    last_heartbeat : INTEGER
+    last_claim_sequence : INTEGER
+}
+
+entity "tasks" as tasks {
+    * id : TEXT <<PK>>
+    --
+    title : TEXT
+    description : TEXT
+    status : TEXT
+    priority : TEXT
+    worker_id : TEXT <<FK>>
+    claimed_at : INTEGER
+    needed_tags : TEXT (JSON)
+    wanted_tags : TEXT (JSON)
+    tags : TEXT (JSON)
+    points : INTEGER
+    time_estimate_ms : INTEGER
+    time_actual_ms : INTEGER
+    started_at : INTEGER
+    completed_at : INTEGER
+    current_thought : TEXT
+    cost_usd : REAL
+    metrics : TEXT (JSON)
+    created_at : INTEGER
+    updated_at : INTEGER
+}
+
+entity "dependencies" as deps {
+    * from_task_id : TEXT <<PK,FK>>
+    * to_task_id : TEXT <<PK,FK>>
+    * dep_type : TEXT <<PK>>
+    --
+}
+
+entity "attachments" as attachments {
+    * task_id : TEXT <<PK,FK>>
+    * order_index : INTEGER <<PK>>
+    --
+    name : TEXT
+    mime_type : TEXT
+    content : TEXT
+    file_path : TEXT
+    created_at : INTEGER
+}
+
+entity "file_locks" as locks {
+    * file_path : TEXT <<PK>>
+    --
+    worker_id : TEXT <<FK>>
+    task_id : TEXT <<FK>>
+    reason : TEXT
+    locked_at : INTEGER
+}
+
+entity "claim_sequence" as claims {
+    * id : INTEGER <<PK>>
+    --
+    file_path : TEXT
+    agent_id : TEXT
+    event : TEXT
+    reason : TEXT
+    timestamp : INTEGER
+    end_timestamp : INTEGER
+    claim_id : INTEGER
+}
+
+entity "task_state_sequence" as states {
+    * id : INTEGER <<PK>>
+    --
+    task_id : TEXT <<FK>>
+    agent_id : TEXT
+    event : TEXT
+    reason : TEXT
+    timestamp : INTEGER
+    end_timestamp : INTEGER
+}
+
+workers ||--o{ tasks : "claims"
+workers ||--o{ locks : "holds"
+workers ||--o{ claims : "creates"
+workers ||--o{ states : "triggers"
+
+tasks ||--o{ attachments : "has"
+tasks ||--o{ deps : "from"
+tasks ||--o{ deps : "to"
+tasks ||--o{ states : "tracks"
+tasks ||--o{ locks : "associated"
+
+@enduml

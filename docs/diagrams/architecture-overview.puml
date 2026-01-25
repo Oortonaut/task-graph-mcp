@@ -1,0 +1,35 @@
+@startuml architecture-overview
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title Task Graph MCP - High-Level Architecture
+
+cloud "AI Agents" as agents {
+    actor "Agent A\n(Claude)" as a1
+    actor "Agent B\n(GPT-4)" as a2
+    actor "Agent C\n(Worker)" as a3
+}
+
+package "MCP Layer" as mcp {
+    component "task-graph\nMCP Server" as tg1
+    component "task-graph\nMCP Server" as tg2
+    component "task-graph\nMCP Server" as tg3
+}
+
+database "SQLite + WAL\n.task-graph/tasks.db" as db
+
+a1 -down-> tg1 : stdio
+a2 -down-> tg2 : stdio
+a3 -down-> tg3 : stdio
+
+tg1 -down-> db
+tg2 -down-> db
+tg3 -down-> db
+
+note right of db
+  WAL mode enables
+  concurrent access
+  across processes
+end note
+
+@enduml

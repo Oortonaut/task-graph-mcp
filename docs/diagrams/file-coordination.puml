@@ -1,0 +1,47 @@
+@startuml file-coordination
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title File Coordination Flow
+
+participant "Agent A" as a
+participant "Agent B" as b
+participant "Server" as s
+database "claim_sequence" as cs
+
+== Agent A marks file ==
+a -> s : mark_file("src/main.rs", "refactoring auth")
+s -> cs : INSERT claimed event
+s --> a : ok
+
+== Agent B checks before editing ==
+b -> s : mark_file("src/main.rs", "fixing bug")
+s -> cs : check existing marks
+s --> b : WARNING: Agent A has mark\n"refactoring auth"
+
+note over b
+  Agent B can now decide:
+  - Wait for A to finish
+  - Work around A's changes
+  - Choose different file
+end note
+
+== Agent B polls for updates ==
+b -> s : mark_updates()
+s -> cs : SELECT since last_sequence
+s --> b : no changes yet
+
+== Agent A releases ==
+a -> s : unmark_file("src/main.rs", "ready for review")
+s -> cs : INSERT released event
+s --> a : ok
+
+== Agent B sees release ==
+b -> s : mark_updates()
+s -> cs : SELECT since last_sequence
+s --> b : [{file: "src/main.rs", event: "released",\n  reason: "ready for review"}]
+
+b -> s : mark_file("src/main.rs", "fixing bug")
+s --> b : ok (no conflict)
+
+@enduml
