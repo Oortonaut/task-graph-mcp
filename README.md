@@ -102,6 +102,35 @@ auto_advance:
 
 See [SCHEMA.md](SCHEMA.md#states-configuration) for full documentation on state definitions.
 
+### Dependencies Configuration
+
+Dependency types define how tasks relate to each other. Default types: `blocks`, `follows`, `contains`, `duplicate`, `see-also`.
+
+```yaml
+dependencies:
+  definitions:
+    blocks:
+      display: horizontal  # Same-level relationship
+      blocks: start        # Blocks claiming the dependent task
+    follows:
+      display: horizontal
+      blocks: start
+    contains:
+      display: vertical    # Parent-child relationship
+      blocks: completion   # Blocks completing the parent
+    duplicate:
+      display: horizontal
+      blocks: none         # Informational only
+    see-also:
+      display: horizontal
+      blocks: none
+```
+
+| Property | Values | Description |
+|----------|--------|-------------|
+| `display` | `horizontal`, `vertical` | Visual relationship (same-level vs parent-child) |
+| `blocks` | `none`, `start`, `completion` | What the dependency blocks |
+
 Environment variables:
 - `TASK_GRAPH_DB_PATH`: Database file path
 - `TASK_GRAPH_MEDIA_DIR`: Media directory for file attachments

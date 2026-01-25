@@ -265,6 +265,10 @@ async fn main() -> Result<()> {
     config.ensure_db_dir()?;
     config.ensure_media_dir()?;
 
+    // Validate configuration
+    config.states.validate()?;
+    config.dependencies.validate()?;
+
     // Load prompts
     let prompts = Arc::new(Prompts::load_or_default());
 
