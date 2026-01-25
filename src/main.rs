@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use task_graph_mcp::config::{AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, Prompts, StatesConfig};
+use task_graph_mcp::config::{AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, Prompts, ServerPaths, StatesConfig};
 use task_graph_mcp::format::OutputFormat;
 use task_graph_mcp::error::ToolError;
 use task_graph_mcp::db::Database;
@@ -40,6 +40,14 @@ struct Args {
     #[arg(short, long)]
     database: Option<String>,
 
+    /// Path to media directory (overrides config)
+    #[arg(short, long)]
+    media_dir: Option<String>,
+
+    /// Path to log directory (overrides config)
+    #[arg(long)]
+    log_dir: Option<String>,
+
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
@@ -62,6 +70,7 @@ impl TaskGraphServer {
         db: Arc<Database>,
         media_dir: std::path::PathBuf,
         skills_dir: std::path::PathBuf,
+        server_paths: Arc<ServerPaths>,
         prompts: Arc<Prompts>,
         states_config: Arc<StatesConfig>,
         deps_config: Arc<DependenciesConfig>,
@@ -74,6 +83,7 @@ impl TaskGraphServer {
                 Arc::clone(&db),
                 media_dir,
                 skills_dir.clone(),
+                server_paths,
                 Arc::clone(&prompts),
                 Arc::clone(&states_config),
                 Arc::clone(&deps_config),
@@ -251,21 +261,29 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Load configuration
+    // Load configuration and track config path
+    let config_path_used = args.config.clone();
     let mut config = if let Some(config_path) = &args.config {
         Config::load(config_path)?
     } else {
         Config::load_or_default()
     };
 
-    // Override database path if specified
+    // Override paths from CLI arguments
     if let Some(db_path) = &args.database {
         config.server.db_path = db_path.into();
     }
+    if let Some(media_dir) = &args.media_dir {
+        config.server.media_dir = media_dir.into();
+    }
+    if let Some(log_dir) = &args.log_dir {
+        config.server.log_dir = log_dir.into();
+    }
 
-    // Ensure database and media directories exist
+    // Ensure directories exist
     config.ensure_db_dir()?;
     config.ensure_media_dir()?;
+    config.ensure_log_dir()?;
 
     // Validate configuration
     config.states.validate()?;
@@ -277,12 +295,21 @@ async fn main() -> Result<()> {
     info!("Starting Task Graph MCP Server v{}", env!("CARGO_PKG_VERSION"));
     info!("Database: {:?}", config.server.db_path);
     info!("Media dir: {:?}", config.server.media_dir);
+    info!("Log dir: {:?}", config.server.log_dir);
 
     // Open database
     let db = Database::open(&config.server.db_path)?;
     let db = Arc::new(db);
 
     info!("Database initialized successfully");
+
+    // Create server paths for connect response
+    let server_paths = Arc::new(ServerPaths {
+        db_path: config.server.db_path.clone(),
+        media_dir: config.server.media_dir.clone(),
+        log_dir: config.server.log_dir.clone(),
+        config_path: config_path_used.map(std::path::PathBuf::from),
+    });
 
     // Create server handler
     let states_config = Arc::new(config.states.clone());
@@ -293,6 +320,7 @@ async fn main() -> Result<()> {
         db,
         config.server.media_dir.clone(),
         config.server.skills_dir.clone(),
+        server_paths,
         prompts,
         states_config,
         deps_config,

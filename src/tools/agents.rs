@@ -1,7 +1,7 @@
 //! Worker connection and management tools.
 
 use super::{get_bool, get_i32, get_string, get_string_array, make_tool_with_prompts};
-use crate::config::{Prompts, StatesConfig};
+use crate::config::{Prompts, ServerPaths, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{format_workers_markdown, OutputFormat, ToolResult};
@@ -27,6 +27,22 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "force": {
                     "type": "boolean",
                     "description": "Force reconnection if worker ID already exists (default: false). Use for stuck worker recovery."
+                },
+                "db_path": {
+                    "type": "string",
+                    "description": "Override database file path (same as TASK_GRAPH_DB_PATH env var). Note: Can only be set before server starts."
+                },
+                "media_dir": {
+                    "type": "string",
+                    "description": "Override media directory path (same as TASK_GRAPH_MEDIA_DIR env var). Note: Can only be set before server starts."
+                },
+                "log_dir": {
+                    "type": "string",
+                    "description": "Override log directory path (same as TASK_GRAPH_LOG_DIR env var). Note: Can only be set before server starts."
+                },
+                "config_path": {
+                    "type": "string",
+                    "description": "Override config file path (same as TASK_GRAPH_CONFIG_PATH env var). Note: Can only be set before server starts."
                 }
             }),
             vec![],
@@ -98,19 +114,75 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     ]
 }
 
-pub fn connect(db: &Database, args: Value) -> Result<Value> {
+pub fn connect(db: &Database, server_paths: &ServerPaths, args: Value) -> Result<Value> {
     let worker_id = get_string(&args, "worker_id");
     let tags = get_string_array(&args, "tags").unwrap_or_default();
     let force = get_bool(&args, "force").unwrap_or(false);
 
+    // Check for path override requests (informational - paths are set at server startup)
+    let mut path_notes: Vec<String> = Vec::new();
+
+    if let Some(requested_db) = get_string(&args, "db_path") {
+        if server_paths.db_path.to_string_lossy() != requested_db {
+            path_notes.push(format!(
+                "db_path: requested '{}' but server is using '{}' (set TASK_GRAPH_DB_PATH before starting server)",
+                requested_db,
+                server_paths.db_path.display()
+            ));
+        }
+    }
+
+    if let Some(requested_media) = get_string(&args, "media_dir") {
+        if server_paths.media_dir.to_string_lossy() != requested_media {
+            path_notes.push(format!(
+                "media_dir: requested '{}' but server is using '{}' (set TASK_GRAPH_MEDIA_DIR before starting server)",
+                requested_media,
+                server_paths.media_dir.display()
+            ));
+        }
+    }
+
+    if let Some(requested_log) = get_string(&args, "log_dir") {
+        if server_paths.log_dir.to_string_lossy() != requested_log {
+            path_notes.push(format!(
+                "log_dir: requested '{}' but server is using '{}' (set TASK_GRAPH_LOG_DIR before starting server)",
+                requested_log,
+                server_paths.log_dir.display()
+            ));
+        }
+    }
+
+    if let Some(requested_config) = get_string(&args, "config_path") {
+        let current_config = server_paths.config_path.as_ref().map(|p| p.to_string_lossy().to_string());
+        if current_config.as_deref() != Some(&requested_config) {
+            path_notes.push(format!(
+                "config_path: requested '{}' but server is using '{}' (set TASK_GRAPH_CONFIG_PATH before starting server)",
+                requested_config,
+                current_config.unwrap_or_else(|| "default locations".to_string())
+            ));
+        }
+    }
+
     let worker = db.register_worker(worker_id, tags, force)?;
 
-    Ok(json!({
+    let mut response = json!({
         "worker_id": &worker.id,
         "tags": worker.tags,
         "max_claims": worker.max_claims,
-        "registered_at": worker.registered_at
-    }))
+        "registered_at": worker.registered_at,
+        "paths": {
+            "db_path": server_paths.db_path.to_string_lossy(),
+            "media_dir": server_paths.media_dir.to_string_lossy(),
+            "log_dir": server_paths.log_dir.to_string_lossy(),
+            "config_path": server_paths.config_path.as_ref().map(|p| p.to_string_lossy().to_string())
+        }
+    });
+
+    if !path_notes.is_empty() {
+        response["path_warnings"] = json!(path_notes);
+    }
+
+    Ok(response)
 }
 
 pub fn disconnect(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {

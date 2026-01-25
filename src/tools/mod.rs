@@ -12,7 +12,7 @@ pub mod skills;
 pub mod tasks;
 pub mod tracking;
 
-use crate::config::{AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig};
+use crate::config::{AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, ServerPaths, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{OutputFormat, ToolResult};
@@ -27,6 +27,7 @@ pub struct ToolHandler {
     pub db: Arc<Database>,
     pub media_dir: PathBuf,
     pub skills_dir: PathBuf,
+    pub server_paths: Arc<ServerPaths>,
     pub prompts: Arc<Prompts>,
     pub states_config: Arc<StatesConfig>,
     pub deps_config: Arc<DependenciesConfig>,
@@ -40,6 +41,7 @@ impl ToolHandler {
         db: Arc<Database>,
         media_dir: PathBuf,
         skills_dir: PathBuf,
+        server_paths: Arc<ServerPaths>,
         prompts: Arc<Prompts>,
         states_config: Arc<StatesConfig>,
         deps_config: Arc<DependenciesConfig>,
@@ -51,6 +53,7 @@ impl ToolHandler {
             db,
             media_dir,
             skills_dir,
+            server_paths,
             prompts,
             states_config,
             deps_config,
@@ -108,7 +111,7 @@ impl ToolHandler {
 
         match name {
             // Worker tools
-            "connect" => json(agents::connect(&self.db, arguments)),
+            "connect" => json(agents::connect(&self.db, &self.server_paths, arguments)),
             "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
             "list_agents" => agents::list_agents(&self.db, &self.states_config, self.default_format, arguments),
             "cleanup_stale" => json(agents::cleanup_stale(&self.db, &self.states_config, arguments)),

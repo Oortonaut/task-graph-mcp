@@ -232,6 +232,19 @@ impl Default for Config {
     }
 }
 
+/// Paths configured for the server, returned by connect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerPaths {
+    /// Path to the SQLite database file.
+    pub db_path: PathBuf,
+    /// Path to the media directory for file attachments.
+    pub media_dir: PathBuf,
+    /// Path to the log directory.
+    pub log_dir: PathBuf,
+    /// Path to the configuration file (if one was loaded).
+    pub config_path: Option<PathBuf>,
+}
+
 /// Server-specific configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -258,6 +271,10 @@ pub struct ServerConfig {
     /// Path to the skills directory for skill overrides.
     #[serde(default = "default_skills_dir")]
     pub skills_dir: PathBuf,
+
+    /// Path to the log directory.
+    #[serde(default = "default_log_dir")]
+    pub log_dir: PathBuf,
 }
 
 impl Default for ServerConfig {
@@ -269,6 +286,7 @@ impl Default for ServerConfig {
             stale_timeout_seconds: default_stale_timeout(),
             default_format: OutputFormat::default(),
             skills_dir: default_skills_dir(),
+            log_dir: default_log_dir(),
         }
     }
 }
@@ -283,6 +301,11 @@ fn default_media_dir() -> PathBuf {
 
 fn default_skills_dir() -> PathBuf {
     PathBuf::from(".task-graph/skills")
+}
+
+
+fn default_log_dir() -> PathBuf {
+    PathBuf::from(".task-graph/logs")
 }
 
 fn default_claim_limit() -> i32 {
@@ -756,6 +779,10 @@ impl Config {
             config.server.media_dir = PathBuf::from(media_dir);
         }
 
+        if let Ok(log_dir) = std::env::var("TASK_GRAPH_LOG_DIR") {
+            config.server.log_dir = PathBuf::from(log_dir);
+        }
+
         config
     }
 
@@ -773,9 +800,20 @@ impl Config {
         Ok(())
     }
 
+    /// Ensure the log directory exists.
+    pub fn ensure_log_dir(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.server.log_dir)?;
+        Ok(())
+    }
+
     /// Get the media directory path.
     pub fn media_dir(&self) -> &Path {
         &self.server.media_dir
+    }
+
+    /// Get the log directory path.
+    pub fn log_dir(&self) -> &Path {
+        &self.server.log_dir
     }
 }
 
