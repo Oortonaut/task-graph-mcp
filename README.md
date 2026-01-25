@@ -215,6 +215,8 @@ Environment variables:
 | `update` | `agent`, `task`, `state`, `title?`, `description?`, `priority?`, `points?` | Update task properties. |
 | `delete` | `task`, `cascade?` | Delete a task. Use `cascade=true` to delete children. |
 
+**Priority**: Integer 0-10 (default 5). Higher values = more important. Tasks are sorted by priority descending when querying `ready` tasks, so priority 10 tasks appear first. Priority is advisory only—any agent can claim any task.
+
 ### Task Claiming
 
 | Tool | Arguments | Description |
