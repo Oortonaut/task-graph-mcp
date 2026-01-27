@@ -663,6 +663,7 @@ pub fn update(
     phases_config: &PhasesConfig,
     deps_config: &DependenciesConfig,
     auto_advance: &AutoAdvanceConfig,
+    transition_prompts: &crate::prompts::PromptsConfig,
     args: Value,
 ) -> Result<Value> {
     let worker_id =
@@ -823,6 +824,29 @@ pub fn update(
         auto_advance,
     )?;
 
+    // Get transition prompts if status or phase may have changed
+    // We update the worker's last seen state and get any matching prompts
+    let transition_prompt_list: Vec<String> = {
+        // Update worker state and get old state for prompt calculation
+        match db.update_worker_state(
+            &worker_id,
+            Some(&task.status),
+            task.phase.as_deref(),
+        ) {
+            Ok((old_status, old_phase)) => {
+                // Get prompts for this transition
+                crate::prompts::get_transition_prompts(
+                    old_status.as_deref().unwrap_or(""),
+                    old_phase.as_deref(),
+                    &task.status,
+                    task.phase.as_deref(),
+                    transition_prompts,
+                )
+            }
+            Err(_) => vec![], // Worker not found or other error - skip prompts
+        }
+    };
+
     // Build response with task and unblocked/auto_advanced lists
     let mut response = serde_json::to_value(&task)?;
     if let Value::Object(ref mut map) = response {
@@ -848,6 +872,10 @@ pub fn update(
         // Include phase warning if any
         if let Some(ref warning) = phase_warning {
             map.insert("phase_warning".to_string(), json!(warning));
+        }
+        // Include transition prompts if any
+        if !transition_prompt_list.is_empty() {
+            map.insert("prompts".to_string(), json!(transition_prompt_list));
         }
     }
 

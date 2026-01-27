@@ -164,7 +164,7 @@ fn get_task_internal(conn: &Connection, task_id: &str) -> Result<Option<Task>> {
 /// Internal helper to get a worker using an existing connection (avoids deadlock).
 fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Worker>> {
     let mut stmt = conn.prepare(
-        "SELECT id, tags, max_claims, registered_at, last_heartbeat
+        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase
          FROM workers WHERE id = ?1",
     )?;
 
@@ -174,12 +174,14 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
         let max_claims: i32 = row.get(2)?;
         let registered_at: i64 = row.get(3)?;
         let last_heartbeat: i64 = row.get(4)?;
+        let last_status: Option<String> = row.get(5)?;
+        let last_phase: Option<String> = row.get(6)?;
 
-        Ok((id, tags_json, max_claims, registered_at, last_heartbeat))
+        Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase))
     });
 
     match result {
-        Ok((id, tags_json, max_claims, registered_at, last_heartbeat)) => {
+        Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase)) => {
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
             Ok(Some(Worker {
                 id,
@@ -187,6 +189,8 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
                 max_claims,
                 registered_at,
                 last_heartbeat,
+                last_status,
+                last_phase,
             }))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

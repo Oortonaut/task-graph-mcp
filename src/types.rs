@@ -11,6 +11,12 @@ pub struct Worker {
     pub max_claims: i32,
     pub registered_at: i64,
     pub last_heartbeat: i64,
+    /// Last status the worker transitioned to (for prompts/dashboard)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_status: Option<String>,
+    /// Last phase the worker transitioned to (for prompts/dashboard)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_phase: Option<String>,
 }
 
 /// Worker info with additional runtime details for list_workers.
@@ -23,6 +29,12 @@ pub struct WorkerInfo {
     pub current_thought: Option<String>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
+    /// Last status the worker transitioned to (for prompts/dashboard)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_status: Option<String>,
+    /// Last phase the worker transitioned to (for prompts/dashboard)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_phase: Option<String>,
 }
 
 /// Task priority as an integer (higher = more important).

@@ -51,3 +51,7 @@ CREATE INDEX idx_tasks_phase_status ON tasks(phase, status);
 -- Rename 'in_progress' status to 'working'
 UPDATE tasks SET status = 'working' WHERE status = 'in_progress';
 UPDATE task_sequence SET status = 'working' WHERE status = 'in_progress';
+
+-- Add last_status and last_phase to workers for transition tracking and dashboard
+ALTER TABLE workers ADD COLUMN last_status TEXT;
+ALTER TABLE workers ADD COLUMN last_phase TEXT;

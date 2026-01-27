@@ -53,6 +53,7 @@ impl TaskGraphServer {
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
+        transition_prompts: task_graph_mcp::prompts::PromptsConfig,
         default_format: OutputFormat,
     ) -> Self {
         Self {
@@ -67,6 +68,7 @@ impl TaskGraphServer {
                 Arc::clone(&deps_config),
                 Arc::clone(&auto_advance),
                 Arc::clone(&attachments_config),
+                transition_prompts,
                 default_format,
             )),
             resource_handler: Arc::new(
@@ -347,6 +349,7 @@ async fn run_server(config: Config, config_path_used: Option<String>) -> Result<
     let deps_config = Arc::new(config.dependencies.clone());
     let auto_advance = Arc::new(config.auto_advance.clone());
     let attachments_config = Arc::new(config.attachments.clone());
+    let transition_prompts = task_graph_mcp::prompts::PromptsConfig::default();
     let server = TaskGraphServer::new(
         Arc::clone(&db),
         config.server.media_dir.clone(),
@@ -358,6 +361,7 @@ async fn run_server(config: Config, config_path_used: Option<String>) -> Result<
         deps_config,
         auto_advance,
         attachments_config,
+        transition_prompts,
         config.server.default_format,
     );
 

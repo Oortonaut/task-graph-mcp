@@ -37,6 +37,7 @@ pub struct ToolHandler {
     pub deps_config: Arc<DependenciesConfig>,
     pub auto_advance: Arc<AutoAdvanceConfig>,
     pub attachments_config: Arc<AttachmentsConfig>,
+    pub transition_prompts: crate::prompts::PromptsConfig,
     pub default_format: OutputFormat,
 }
 
@@ -53,6 +54,7 @@ impl ToolHandler {
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
+        transition_prompts: crate::prompts::PromptsConfig,
         default_format: OutputFormat,
     ) -> Self {
         Self {
@@ -66,6 +68,7 @@ impl ToolHandler {
             deps_config,
             auto_advance,
             attachments_config,
+            transition_prompts,
             default_format,
         }
     }
@@ -160,6 +163,7 @@ impl ToolHandler {
                 &self.phases_config,
                 &self.deps_config,
                 &self.auto_advance,
+                &self.transition_prompts,
                 arguments,
             )),
             "delete" => json(tasks::delete(&self.db, arguments)),
@@ -192,6 +196,7 @@ impl ToolHandler {
                 &self.states_config,
                 &self.deps_config,
                 &self.auto_advance,
+                &self.transition_prompts,
                 arguments,
             )),
 

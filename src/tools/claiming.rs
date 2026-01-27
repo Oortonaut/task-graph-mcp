@@ -40,6 +40,7 @@ pub fn claim(
     states_config: &StatesConfig,
     deps_config: &DependenciesConfig,
     auto_advance: &AutoAdvanceConfig,
+    transition_prompts: &crate::prompts::PromptsConfig,
     args: Value,
 ) -> Result<Value> {
     let worker_id =
@@ -78,7 +79,27 @@ pub fn claim(
         auto_advance,
     )?;
 
-    Ok(json!({
+    // Get transition prompts for claiming
+    let transition_prompt_list: Vec<String> = {
+        match db.update_worker_state(
+            &worker_id,
+            Some(&task.status),
+            task.phase.as_deref(),
+        ) {
+            Ok((old_status, old_phase)) => {
+                crate::prompts::get_transition_prompts(
+                    old_status.as_deref().unwrap_or(""),
+                    old_phase.as_deref(),
+                    &task.status,
+                    task.phase.as_deref(),
+                    transition_prompts,
+                )
+            }
+            Err(_) => vec![],
+        }
+    };
+
+    let mut response = json!({
         "success": true,
         "task": {
             "id": &task.id,
@@ -87,5 +108,14 @@ pub fn claim(
             "worker_id": task.worker_id,
             "claimed_at": task.claimed_at
         }
-    }))
+    });
+
+    // Add prompts if any
+    if !transition_prompt_list.is_empty() {
+        if let Value::Object(ref mut map) = response {
+            map.insert("prompts".to_string(), json!(transition_prompt_list));
+        }
+    }
+
+    Ok(response)
 }
