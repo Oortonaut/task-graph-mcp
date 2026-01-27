@@ -2,7 +2,7 @@
 
 use super::state_transitions::record_state_transition;
 use super::{Database, now_ms};
-use crate::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
+use crate::config::{AutoAdvanceConfig, DependenciesConfig, PhasesConfig, StatesConfig};
 use crate::types::{
     PRIORITY_DEFAULT, Priority, Task, TaskTree, TaskTreeInput, Worker, clamp_priority,
     parse_priority,
@@ -85,6 +85,7 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
     let title: String = row.get("title")?;
     let description: Option<String> = row.get("description")?;
     let status: String = row.get("status")?;
+    let phase: Option<String> = row.get("phase")?;
     let priority: String = row.get("priority")?;
     let worker_id: Option<String> = row.get("worker_id")?;
     let claimed_at: Option<i64> = row.get("claimed_at")?;
@@ -119,6 +120,7 @@ pub fn parse_task_row(row: &Row) -> rusqlite::Result<Task> {
         title,
         description,
         status,
+        phase,
         priority: parse_priority(&priority),
         worker_id,
         claimed_at,
@@ -202,6 +204,7 @@ impl Database {
         id: Option<String>,
         description: String,
         parent_id: Option<String>,
+        phase: Option<String>,
         priority: Option<Priority>,
         points: Option<i32>,
         time_estimate_ms: Option<i64>,
@@ -227,14 +230,15 @@ impl Database {
 
             tx.execute(
                 "INSERT INTO tasks (
-                    id, title, description, status, priority,
+                    id, title, description, status, phase, priority,
                     needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     &task_id,
                     &description, // Use description as title
                     &description, // Also store as description
                     initial_status,
+                    &phase,
                     priority.to_string(),
                     needed_tags_json,
                     wanted_tags_json,
@@ -266,6 +270,7 @@ impl Database {
                 title: description.clone(),
                 description: Some(description),
                 status: initial_status.clone(),
+                phase,
                 priority,
                 worker_id: None,
                 claimed_at: None,
@@ -296,8 +301,10 @@ impl Database {
         child_type: Option<String>,
         sibling_type: Option<String>,
         states_config: &StatesConfig,
-    ) -> Result<(String, Vec<String>)> {
+        phases_config: &PhasesConfig,
+    ) -> Result<(String, Vec<String>, Vec<String>)> {
         let mut all_ids = Vec::new();
+        let mut phase_warnings = Vec::new();
         // Default child_type to "contains" if not specified
         let child_type = child_type.or_else(|| Some("contains".to_string()));
 
@@ -311,10 +318,12 @@ impl Database {
                 child_type.as_deref(),
                 sibling_type.as_deref(),
                 &mut all_ids,
+                &mut phase_warnings,
                 states_config,
+                phases_config,
             )?;
             tx.commit()?;
-            Ok((root_id, all_ids))
+            Ok((root_id, all_ids, phase_warnings))
         })
     }
 
@@ -437,8 +446,8 @@ impl Database {
                     task.started_at
                 };
 
-            // Set completed_at when entering a terminal state
-            let completed_at = if states_config.is_terminal_state(&new_status) {
+            // Set completed_at when entering a completed state (terminal or with reopen capability)
+            let completed_at = if new_status == "completed" {
                 Some(now)
             } else {
                 task.completed_at
@@ -512,6 +521,7 @@ impl Database {
         title: Option<String>,
         description: Option<Option<String>>,
         status: Option<String>,
+        phase: Option<String>,
         priority: Option<Priority>,
         points: Option<Option<i32>>,
         tags: Option<Vec<String>>,
@@ -555,6 +565,7 @@ impl Database {
             let new_needed_tags = needed_tags.unwrap_or(task.needed_tags.clone());
             let new_wanted_tags = wanted_tags.unwrap_or(task.wanted_tags.clone());
             let new_time_estimate_ms = time_estimate_ms.or(task.time_estimate_ms);
+            let new_phase = phase.or(task.phase.clone());
 
             // Validate the new status exists
             if !states_config.is_valid_state(&new_status) {
@@ -755,7 +766,8 @@ impl Database {
                     task.started_at
                 };
 
-            let completed_at = if new_is_terminal {
+            // Set completed_at when entering completed status (even if it has reopen exits)
+            let completed_at = if new_status == "completed" {
                 Some(now)
             } else {
                 task.completed_at
@@ -774,17 +786,30 @@ impl Database {
                 )?;
             }
 
+            // Record phase transition if phase changed
+            let phase_changed = task.phase != new_phase;
+            if phase_changed {
+                super::state_transitions::record_phase_transition(
+                    &tx,
+                    task_id,
+                    new_phase.as_deref().unwrap_or(""),
+                    Some(agent_id),
+                    reason.as_deref(),
+                )?;
+            }
+
             tx.execute(
                 "UPDATE tasks SET
-                    title = ?1, description = ?2, status = ?3, priority = ?4,
-                    points = ?5, started_at = ?6, completed_at = ?7, updated_at = ?8,
-                    tags = ?9, worker_id = ?10, claimed_at = ?11,
-                    needed_tags = ?12, wanted_tags = ?13, time_estimate_ms = ?14
-                WHERE id = ?15",
+                    title = ?1, description = ?2, status = ?3, phase = ?4, priority = ?5,
+                    points = ?6, started_at = ?7, completed_at = ?8, updated_at = ?9,
+                    tags = ?10, worker_id = ?11, claimed_at = ?12,
+                    needed_tags = ?13, wanted_tags = ?14, time_estimate_ms = ?15
+                WHERE id = ?16",
                 params![
                     new_title,
                     new_description,
                     new_status,
+                    new_phase,
                     new_priority.to_string(),
                     new_points,
                     started_at,
@@ -839,6 +864,7 @@ impl Database {
                 title: new_title,
                 description: new_description,
                 status: new_status,
+                phase: new_phase,
                 priority: new_priority,
                 points: new_points,
                 tags: new_tags,
@@ -964,6 +990,7 @@ impl Database {
     pub fn list_tasks(
         &self,
         status: Option<&str>,
+        phase: Option<&str>,
         owner: Option<&str>,
         parent_id: Option<Option<&str>>,
         limit: Option<i32>,
@@ -979,6 +1006,11 @@ impl Database {
             if let Some(s) = status {
                 sql.push_str(" AND t.status = ?");
                 params_vec.push(Box::new(s.to_string()));
+            }
+
+            if let Some(p) = phase {
+                sql.push_str(" AND t.phase = ?");
+                params_vec.push(Box::new(p.to_string()));
             }
 
             if let Some(o) = owner {
@@ -1413,8 +1445,8 @@ impl Database {
                 ));
             }
 
-            // Set completed_at for terminal states
-            let completed_at = if states_config.is_terminal_state(state) {
+            // Set completed_at when entering completed status (even if it has reopen exits)
+            let completed_at = if state == "completed" {
                 Some(now)
             } else {
                 None
@@ -1629,7 +1661,9 @@ fn create_tree_recursive(
     child_type: Option<&str>,
     sibling_type: Option<&str>,
     all_ids: &mut Vec<String>,
+    phase_warnings: &mut Vec<String>,
     states_config: &StatesConfig,
+    phases_config: &PhasesConfig,
 ) -> Result<String> {
     // Check if this node references an existing task
     let task_id = if let Some(ref ref_id) = input.ref_id {
@@ -1651,6 +1685,13 @@ fn create_tree_recursive(
         let priority = clamp_priority(input.priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
 
+        // Check phase validity
+        if let Some(ref phase) = input.phase {
+            if let Some(warning) = phases_config.check_phase(phase)? {
+                phase_warnings.push(format!("Task '{}': {}", task_id, warning));
+            }
+        }
+
         let needed_tags = input.needed_tags.clone().unwrap_or_default();
         let wanted_tags = input.wanted_tags.clone().unwrap_or_default();
         let tags = input.tags.clone().unwrap_or_default();
@@ -1660,14 +1701,15 @@ fn create_tree_recursive(
 
         conn.execute(
             "INSERT INTO tasks (
-                id, title, description, status, priority,
+                id, title, description, status, phase, priority,
                 needed_tags, wanted_tags, tags, points, time_estimate_ms, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 &task_id,
                 &input.title,
                 &input.description,
                 initial_status,
+                &input.phase,
                 priority.to_string(),
                 needed_tags_json,
                 wanted_tags_json,
@@ -1713,7 +1755,9 @@ fn create_tree_recursive(
             child_type,
             sibling_type,
             all_ids,
+            phase_warnings,
             states_config,
+            phases_config,
         )?;
         prev_child_id = Some(child_id);
     }

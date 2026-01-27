@@ -13,7 +13,8 @@ pub mod tasks;
 pub mod tracking;
 
 use crate::config::{
-    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, ServerPaths, StatesConfig,
+    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, ServerPaths,
+    StatesConfig,
 };
 use crate::db::Database;
 use crate::error::ToolError;
@@ -32,6 +33,7 @@ pub struct ToolHandler {
     pub server_paths: Arc<ServerPaths>,
     pub prompts: Arc<Prompts>,
     pub states_config: Arc<StatesConfig>,
+    pub phases_config: Arc<PhasesConfig>,
     pub deps_config: Arc<DependenciesConfig>,
     pub auto_advance: Arc<AutoAdvanceConfig>,
     pub attachments_config: Arc<AttachmentsConfig>,
@@ -47,6 +49,7 @@ impl ToolHandler {
         server_paths: Arc<ServerPaths>,
         prompts: Arc<Prompts>,
         states_config: Arc<StatesConfig>,
+        phases_config: Arc<PhasesConfig>,
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
@@ -59,6 +62,7 @@ impl ToolHandler {
             server_paths,
             prompts,
             states_config,
+            phases_config,
             deps_config,
             auto_advance,
             attachments_config,
@@ -129,8 +133,18 @@ impl ToolHandler {
             )),
 
             // Task tools
-            "create" => json(tasks::create(&self.db, &self.states_config, arguments)),
-            "create_tree" => json(tasks::create_tree(&self.db, &self.states_config, arguments)),
+            "create" => json(tasks::create(
+                &self.db,
+                &self.states_config,
+                &self.phases_config,
+                arguments,
+            )),
+            "create_tree" => json(tasks::create_tree(
+                &self.db,
+                &self.states_config,
+                &self.phases_config,
+                arguments,
+            )),
             "get" => json(tasks::get(&self.db, self.default_format, arguments)),
             "list_tasks" => json(tasks::list_tasks(
                 &self.db,
@@ -143,6 +157,7 @@ impl ToolHandler {
                 &self.db,
                 &self.attachments_config,
                 &self.states_config,
+                &self.phases_config,
                 &self.deps_config,
                 &self.auto_advance,
                 arguments,

@@ -183,7 +183,7 @@ pub fn task_history(
     let filtered_history: Vec<_> = if let Some(ref states) = state_filter {
         history
             .into_iter()
-            .filter(|e| states.contains(&e.event))
+            .filter(|e| e.status.as_ref().is_some_and(|s| states.contains(s)))
             .collect()
     } else {
         history
@@ -196,7 +196,9 @@ pub fn task_history(
     for event in &filtered_history {
         if let Some(end_ts) = event.end_timestamp {
             let duration = end_ts - event.timestamp;
-            *time_per_status.entry(event.event.clone()).or_insert(0) += duration;
+            if let Some(ref status) = event.status {
+                *time_per_status.entry(status.clone()).or_insert(0) += duration;
+            }
             if let Some(ref agent) = event.worker_id {
                 *time_per_agent.entry(agent.clone()).or_insert(0) += duration;
             }
@@ -209,10 +211,12 @@ pub fn task_history(
         && last_event.end_timestamp.is_none()
     {
         // Include in state filter check
-        if state_filter.is_none() || state_filter.as_ref().unwrap().contains(&last_event.event) {
-            *time_per_status.entry(last_event.event.clone()).or_insert(0) += current_dur;
-            if let Some(ref agent) = last_event.worker_id {
-                *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
+        if let Some(ref status) = last_event.status {
+            if state_filter.is_none() || state_filter.as_ref().unwrap().contains(status) {
+                *time_per_status.entry(status.clone()).or_insert(0) += current_dur;
+                if let Some(ref agent) = last_event.worker_id {
+                    *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
+                }
             }
         }
     }
@@ -237,10 +241,11 @@ pub fn task_history(
                         "ongoing".to_string()
                     };
                     let agent = event.worker_id.as_deref().unwrap_or("-");
+                    let status = event.status.as_deref().unwrap_or("-");
                     md.push_str(&format!(
                         "| {} | {} | {} | {} | {} |\n",
                         i + 1,
-                        event.event,
+                        status,
                         agent,
                         format_timestamp(event.timestamp),
                         duration
@@ -397,11 +402,12 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
                     } else {
                         event.task_id.clone()
                     };
+                    let status = event.status.as_deref().unwrap_or("-");
                     md.push_str(&format!(
                         "| {} | {} | {} | {} | {} | {} |\n",
                         i + 1,
                         short_task,
-                        event.event,
+                        status,
                         agent,
                         format_timestamp(event.timestamp),
                         duration

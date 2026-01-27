@@ -2,7 +2,9 @@
 //!
 //! This module exports the core components for testing and integration.
 
+pub mod cli;
 pub mod config;
+pub mod dashboard;
 pub mod db;
 pub mod error;
 pub mod format;

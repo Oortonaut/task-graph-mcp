@@ -3,7 +3,7 @@
 //! These tests verify the core database operations using an in-memory SQLite database.
 //! Tests are organized by module and functionality.
 
-use task_graph_mcp::config::{AutoAdvanceConfig, DependenciesConfig, StatesConfig};
+use task_graph_mcp::config::{AutoAdvanceConfig, DependenciesConfig, PhasesConfig, StatesConfig};
 use task_graph_mcp::db::Database;
 use task_graph_mcp::types::PRIORITY_DEFAULT;
 
@@ -25,6 +25,11 @@ fn default_deps_config() -> DependenciesConfig {
 /// Helper to create a default AutoAdvanceConfig for testing (disabled).
 fn default_auto_advance() -> AutoAdvanceConfig {
     AutoAdvanceConfig::default()
+}
+
+/// Helper to create a default PhasesConfig for testing.
+fn default_phases_config() -> PhasesConfig {
+    PhasesConfig::default()
 }
 
 mod agent_tests {
@@ -273,6 +278,7 @@ mod task_tests {
                 None,                    // id
                 "Test Task".to_string(), // description
                 None,                    // parent_id
+                None, // phase
                 None,                    // priority
                 None,                    // points
                 None,                    // time_estimate
@@ -300,6 +306,7 @@ mod task_tests {
                 None,                                  // id
                 "Full Task - Description".to_string(), // description
                 None,                                  // parent_id
+                None, // phase
                 Some(8),
                 Some(5),
                 Some(3600000),
@@ -331,6 +338,7 @@ mod task_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -346,6 +354,7 @@ mod task_tests {
                 None,
                 "Child 1".to_string(),
                 Some(parent.id.clone()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -360,6 +369,7 @@ mod task_tests {
                 None,
                 "Child 2".to_string(),
                 Some(parent.id.clone()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -386,6 +396,7 @@ mod task_tests {
                 None,
                 "Find Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -421,6 +432,7 @@ mod task_tests {
                 None,
                 "Original".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -459,6 +471,7 @@ mod task_tests {
                 None,
                 "Complete Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -507,6 +520,7 @@ mod task_tests {
                 None,
                 "Delete Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -534,6 +548,7 @@ mod task_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -547,6 +562,7 @@ mod task_tests {
             None,
             "Child".to_string(),
             Some(parent.id.clone()),
+            None, // phase
             None,
             None,
             None,
@@ -572,6 +588,7 @@ mod task_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -586,6 +603,7 @@ mod task_tests {
                 None,
                 "Child".to_string(),
                 Some(parent.id.clone()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -613,6 +631,7 @@ mod task_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -626,6 +645,7 @@ mod task_tests {
             None,
             "Child 1".to_string(),
             Some(parent.id.clone()),
+            None, // phase
             None,
             None,
             None,
@@ -639,6 +659,7 @@ mod task_tests {
             None,
             "Child 2".to_string(),
             Some(parent.id.clone()),
+            None, // phase
             None,
             None,
             None,
@@ -664,6 +685,7 @@ mod task_tests {
             None,
             "Pending".to_string(),
             None,
+            None, // phase
             None,
             None,
             None,
@@ -678,6 +700,7 @@ mod task_tests {
                 None,
                 "Completed".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -712,10 +735,10 @@ mod task_tests {
         .unwrap();
 
         let pending = db
-            .list_tasks(Some("pending"), None, None, None, None, None)
+            .list_tasks(Some("pending"), None, None, None, None, None, None)
             .unwrap();
         let completed = db
-            .list_tasks(Some("completed"), None, None, None, None, None)
+            .list_tasks(Some("completed"), None, None, None, None, None, None)
             .unwrap();
 
         assert_eq!(pending.len(), 1);
@@ -733,6 +756,7 @@ mod task_tests {
 
         let db = setup_db();
         let states_config = default_states_config();
+        let phases_config = default_phases_config();
 
         // Call the tool-level create function with needed_tags and wanted_tags
         let args = json!({
@@ -741,7 +765,7 @@ mod task_tests {
             "wanted_tags": ["testing", "senior"]
         });
 
-        let result = create(&db, &states_config, args).expect("create should succeed");
+        let result = create(&db, &states_config, &phases_config, args).expect("create should succeed");
 
         // Extract the task ID from the result
         let task_id = result
@@ -770,6 +794,7 @@ mod task_claiming_tests {
                 None,
                 "Claim Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -799,6 +824,7 @@ mod task_claiming_tests {
                 None,
                 "Claimed".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -827,6 +853,7 @@ mod task_claiming_tests {
                 None,
                 "Rust Task".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -854,6 +881,7 @@ mod task_claiming_tests {
                 None,
                 "Rust Task".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -881,6 +909,7 @@ mod task_claiming_tests {
                 None,
                 "Flexible Task".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -906,6 +935,7 @@ mod task_claiming_tests {
                 None,
                 "Release Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -936,6 +966,7 @@ mod task_claiming_tests {
                 None,
                 "Owned".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -962,6 +993,7 @@ mod task_claiming_tests {
                 None,
                 "Force".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -992,6 +1024,7 @@ mod task_claiming_tests {
                 None,
                 "Update Claim".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1011,6 +1044,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("in_progress".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1043,6 +1077,7 @@ mod task_claiming_tests {
                 None,
                 "Update Release".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1061,6 +1096,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("in_progress".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1084,6 +1120,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("pending".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1116,6 +1153,7 @@ mod task_claiming_tests {
                 None,
                 "Force Update".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1138,6 +1176,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("in_progress".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1168,6 +1207,7 @@ mod task_claiming_tests {
                 None,
                 "No Force".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1189,6 +1229,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("in_progress".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1219,6 +1260,7 @@ mod task_claiming_tests {
                 None,
                 "Needs Rust".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1237,6 +1279,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("in_progress".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1265,6 +1308,7 @@ mod task_claiming_tests {
                 None,
                 "Complete Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1287,6 +1331,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("completed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1386,6 +1431,7 @@ mod task_claiming_tests {
                 None,
                 "Timed to Timed".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1405,6 +1451,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("in_progress".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1431,6 +1478,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("reviewing".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1458,7 +1506,7 @@ mod task_claiming_tests {
             history.len()
         );
 
-        let states: Vec<&str> = history.iter().map(|e| e.event.as_str()).collect();
+        let states: Vec<&str> = history.iter().map(|e| e.status.as_deref().unwrap_or("")).collect();
         assert!(
             states.contains(&"pending"),
             "History should contain 'pending'"
@@ -1485,6 +1533,7 @@ mod task_claiming_tests {
                 None,
                 "Same State".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1510,6 +1559,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("in_progress".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1530,7 +1580,7 @@ mod task_claiming_tests {
         // Verify no additional history was recorded (status didn't change)
         let history = db.get_task_state_history(&task.id).unwrap();
         // Should have: pending (initial), in_progress (from claim) - but NOT another in_progress
-        let in_progress_count = history.iter().filter(|e| e.event == "in_progress").count();
+        let in_progress_count = history.iter().filter(|e| e.status.as_deref() == Some("in_progress")).count();
         assert_eq!(
             in_progress_count, 1,
             "Should only have one in_progress entry, not duplicates"
@@ -1549,6 +1599,7 @@ mod task_claiming_tests {
                 None,
                 "Untimed to Untimed".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1569,6 +1620,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("failed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1595,6 +1647,7 @@ mod task_claiming_tests {
                 None,
                 None,
                 Some("pending".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -1622,7 +1675,7 @@ mod task_claiming_tests {
             history.len()
         );
 
-        let states: Vec<&str> = history.iter().map(|e| e.event.as_str()).collect();
+        let states: Vec<&str> = history.iter().map(|e| e.status.as_deref().unwrap_or("")).collect();
         assert!(
             states.contains(&"failed"),
             "History should contain 'failed'"
@@ -1650,6 +1703,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1664,6 +1718,7 @@ mod task_claiming_tests {
                 None,
                 "Task B".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1685,6 +1740,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("in_progress".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1725,6 +1781,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1739,6 +1796,7 @@ mod task_claiming_tests {
                 None,
                 "Task B".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1753,6 +1811,7 @@ mod task_claiming_tests {
                 None,
                 "Task C".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1776,6 +1835,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("in_progress".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1816,6 +1876,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1830,6 +1891,7 @@ mod task_claiming_tests {
                 None,
                 "Task B".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1853,6 +1915,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("completed".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1875,6 +1938,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("in_progress".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1912,6 +1976,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1926,6 +1991,7 @@ mod task_claiming_tests {
                 None,
                 "Task B".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1947,6 +2013,7 @@ mod task_claiming_tests {
             None,
             None,
             Some("in_progress".to_string()),
+            None, // phase
             None,
             None,
             None,
@@ -1982,6 +2049,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -1996,6 +2064,7 @@ mod dependency_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2024,6 +2093,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2038,6 +2108,7 @@ mod dependency_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2066,6 +2137,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2080,6 +2152,7 @@ mod dependency_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2094,6 +2167,7 @@ mod dependency_tests {
                 None,
                 "Task 3".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2124,6 +2198,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2138,6 +2213,7 @@ mod dependency_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2167,6 +2243,7 @@ mod dependency_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2181,6 +2258,7 @@ mod dependency_tests {
                 None,
                 "Blocked".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2212,6 +2290,7 @@ mod dependency_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2226,6 +2305,7 @@ mod dependency_tests {
                 None,
                 "Blocked".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2637,6 +2717,7 @@ mod tracking_tests {
                 None,
                 "Think".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2664,6 +2745,7 @@ mod tracking_tests {
                 None,
                 "Time Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2690,6 +2772,7 @@ mod tracking_tests {
                 None,
                 "Cost Me".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2733,6 +2816,7 @@ mod stats_tests {
             None,
             "Task 1".to_string(),
             None,
+            None, // phase
             None,
             Some(3),
             None,
@@ -2747,6 +2831,7 @@ mod stats_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None, // phase
                 None,
                 Some(5),
                 None,
@@ -2799,6 +2884,7 @@ mod stats_tests {
                 None,
                 "Agent Task".to_string(),
                 None,
+                None, // phase
                 None,
                 Some(3),
                 None,
@@ -2813,6 +2899,7 @@ mod stats_tests {
             None,
             "Other Task".to_string(),
             None,
+            None, // phase
             None,
             Some(5),
             None,
@@ -2838,6 +2925,7 @@ mod stats_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None, // phase
                 None,
                 Some(2),
                 None,
@@ -2851,6 +2939,7 @@ mod stats_tests {
             None,
             "Child".to_string(),
             Some(parent.id.clone()),
+            None, // phase
             None,
             Some(3),
             None,
@@ -2864,6 +2953,7 @@ mod stats_tests {
             None,
             "Other".to_string(),
             None,
+            None, // phase
             None,
             Some(10),
             None,
@@ -2897,6 +2987,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2910,7 +3001,7 @@ mod state_transition_tests {
         let history = db.get_task_state_history(&task.id).unwrap();
 
         assert_eq!(history.len(), 1);
-        assert_eq!(history[0].event, "pending");
+        assert_eq!(history[0].status.as_deref().unwrap(), "pending");
         assert!(history[0].end_timestamp.is_none()); // Still open
     }
 
@@ -2924,6 +3015,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2938,9 +3030,9 @@ mod state_transition_tests {
 
         let history = db.get_task_state_history(&task.id).unwrap();
         assert_eq!(history.len(), 2);
-        assert_eq!(history[0].event, "pending");
+        assert_eq!(history[0].status.as_deref().unwrap(), "pending");
         assert!(history[0].end_timestamp.is_some()); // Closed by claim
-        assert_eq!(history[1].event, "in_progress");
+        assert_eq!(history[1].status.as_deref().unwrap(), "in_progress");
         assert!(history[1].worker_id.is_some());
     }
 
@@ -2954,6 +3046,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -2974,7 +3067,7 @@ mod state_transition_tests {
 
         let history = db.get_task_state_history(&task.id).unwrap();
         assert_eq!(history.len(), 3);
-        assert_eq!(history[2].event, "completed");
+        assert_eq!(history[2].status.as_deref().unwrap(), "completed");
     }
 
     #[test]
@@ -2987,6 +3080,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3029,6 +3123,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3058,6 +3153,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3094,6 +3190,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3118,8 +3215,88 @@ mod state_transition_tests {
 
         let history = db.get_task_state_history(&task.id).unwrap();
         assert_eq!(history.len(), 2);
-        assert_eq!(history[0].event, "pending");
-        assert_eq!(history[1].event, "cancelled");
+        assert_eq!(history[0].status.as_deref().unwrap(), "pending");
+        assert_eq!(history[1].status.as_deref().unwrap(), "cancelled");
+    }
+
+    #[test]
+    fn reopen_completed_task_to_pending() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let agent = db.register_worker(None, vec![], false).unwrap();
+
+        // Create and complete a task
+        let task = db
+            .create_task(
+                None,
+                "Test reopen".to_string(),
+                None,
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+            )
+            .unwrap();
+
+        db.claim_task(&task.id, &agent.id, &states_config).unwrap();
+        db.complete_task(&task.id, &agent.id, &states_config)
+            .unwrap();
+
+        // Verify it's completed
+        let completed_task = db.get_task(&task.id).unwrap().unwrap();
+        assert_eq!(completed_task.status, "completed");
+
+        // Now reopen it to pending
+        let (updated, _, _) = db
+            .update_task_unified(
+                &task.id,
+                &agent.id,
+                None, // assignee
+                None,
+                None,
+                Some("pending".to_string()),
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("Task needs rework".to_string()), // reason
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        assert_eq!(updated.status, "pending");
+        assert!(updated.worker_id.is_none()); // Released when going to pending
+
+        // Verify state history includes the reopen transition
+        let history = db.get_task_state_history(&task.id).unwrap();
+        let states: Vec<&str> = history.iter().map(|e| e.status.as_deref().unwrap_or("")).collect();
+        assert!(
+            states.contains(&"pending")
+                && states.contains(&"in_progress")
+                && states.contains(&"completed"),
+            "Expected pending, in_progress, and completed in history, got {:?}",
+            states
+        );
+
+        // The last transition should be back to pending
+        let last_event = history.last().unwrap();
+        assert_eq!(last_event.status.as_deref().unwrap(), "pending");
+        assert_eq!(
+            last_event.reason.as_deref(),
+            Some("Task needs rework")
+        );
     }
 }
 
@@ -3148,6 +3325,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3162,6 +3340,7 @@ mod auto_advance_tests {
                 None,
                 "Blocked".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3185,6 +3364,7 @@ mod auto_advance_tests {
                 None,
                 None,
                 Some("completed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -3245,6 +3425,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3259,6 +3440,7 @@ mod auto_advance_tests {
                 None,
                 "Blocked".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3282,6 +3464,7 @@ mod auto_advance_tests {
                 None,
                 None,
                 Some("completed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -3322,6 +3505,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker 1".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3336,6 +3520,7 @@ mod auto_advance_tests {
                 None,
                 "Blocked".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3350,6 +3535,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker 2".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3375,6 +3561,7 @@ mod auto_advance_tests {
                 None,
                 None,
                 Some("completed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -3403,6 +3590,7 @@ mod auto_advance_tests {
                 None,
                 None,
                 Some("completed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -3437,6 +3625,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3451,6 +3640,7 @@ mod auto_advance_tests {
                 None,
                 "Blocked".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3477,6 +3667,7 @@ mod auto_advance_tests {
                 None,
                 None,
                 Some("completed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -3511,6 +3702,7 @@ mod auto_advance_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3525,6 +3717,7 @@ mod auto_advance_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3539,6 +3732,7 @@ mod auto_advance_tests {
                 None,
                 "Task 3".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -3564,6 +3758,7 @@ mod auto_advance_tests {
                 None,
                 None,
                 Some("completed".to_string()),
+                None, // phase
                 None,
                 None,
                 None,
@@ -3610,6 +3805,7 @@ mod attachment_tests {
             None,
             "Attachment Test".to_string(),
             None,
+            None, // phase
             None,
             None,
             None,

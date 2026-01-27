@@ -44,6 +44,7 @@ fn query_select_all_tasks() {
         None,
         "Task 1".to_string(),
         None,
+        None, // phase
         None,
         None,
         None,
@@ -58,6 +59,7 @@ fn query_select_all_tasks() {
         None,
         "Task 2".to_string(),
         None,
+        None, // phase
         None,
         None,
         None,
@@ -101,6 +103,7 @@ fn query_with_parameters() {
             None,
             "Find Me".to_string(),
             None,
+            None, // phase
             None,
             None,
             None,
@@ -115,6 +118,7 @@ fn query_with_parameters() {
         None,
         "Other Task".to_string(),
         None,
+        None, // phase
         None,
         None,
         None,
@@ -154,6 +158,7 @@ fn query_enforces_row_limit() {
             None,
             format!("Task {}", i),
             None,
+            None, // phase
             None,
             None,
             None,
@@ -193,6 +198,7 @@ fn query_csv_format() {
         None,
         "CSV Task".to_string(),
         None,
+        None, // phase
         None,
         None,
         None,
@@ -229,6 +235,7 @@ fn query_markdown_format() {
         None,
         "Markdown Task".to_string(),
         None,
+        None, // phase
         None,
         None,
         None,
@@ -360,6 +367,7 @@ fn query_with_cte() {
         None,
         "CTE Task".to_string(),
         None,
+        None, // phase
         None,
         None,
         None,

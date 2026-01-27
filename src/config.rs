@@ -3,8 +3,47 @@
 use crate::format::OutputFormat;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+/// Default port for the web dashboard.
+pub const DEFAULT_UI_PORT: u16 = 31994;
+
+/// UI mode for the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiMode {
+    /// No UI, MCP server only (default)
+    #[default]
+    None,
+    /// Enable web dashboard UI
+    Web,
+}
+
+/// UI configuration for the web dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    /// UI mode: none (MCP only) or web (enable dashboard).
+    #[serde(default)]
+    pub mode: UiMode,
+
+    /// Port for the web dashboard (default: 31994).
+    #[serde(default = "default_ui_port")]
+    pub port: u16,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            mode: UiMode::default(),
+            port: default_ui_port(),
+        }
+    }
+}
+
+fn default_ui_port() -> u16 {
+    DEFAULT_UI_PORT
+}
 
 /// Auto-advance configuration for automatically transitioning tasks when dependencies are satisfied.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -217,6 +256,9 @@ pub struct Config {
 
     #[serde(default)]
     pub attachments: AttachmentsConfig,
+
+    #[serde(default)]
+    pub phases: PhasesConfig,
 }
 
 /// Paths configured for the server, returned by connect.
@@ -262,6 +304,10 @@ pub struct ServerConfig {
     /// Path to the log directory.
     #[serde(default = "default_log_dir")]
     pub log_dir: PathBuf,
+
+    /// UI configuration for the web dashboard.
+    #[serde(default)]
+    pub ui: UiConfig,
 }
 
 impl Default for ServerConfig {
@@ -274,6 +320,7 @@ impl Default for ServerConfig {
             default_format: OutputFormat::default(),
             skills_dir: default_skills_dir(),
             log_dir: default_log_dir(),
+            ui: UiConfig::default(),
         }
     }
 }
@@ -419,7 +466,7 @@ fn default_state_definitions() -> HashMap<String, StateDefinition> {
     defs.insert(
         "completed".to_string(),
         StateDefinition {
-            exits: vec![],
+            exits: vec!["pending".to_string()],
             timed: false,
         },
     );
@@ -739,6 +786,86 @@ impl StatesConfig {
         }
 
         Ok(())
+    }
+}
+
+
+/// Phase configuration for categorizing type of work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhasesConfig {
+    /// Behavior for unknown phase values (allow, warn, reject).
+    #[serde(default)]
+    pub unknown_phase: UnknownKeyBehavior,
+
+    /// Known phase definitions.
+    #[serde(default = "default_phases")]
+    pub definitions: HashSet<String>,
+}
+
+impl Default for PhasesConfig {
+    fn default() -> Self {
+        Self {
+            unknown_phase: UnknownKeyBehavior::Warn,
+            definitions: default_phases(),
+        }
+    }
+}
+
+fn default_phases() -> HashSet<String> {
+    [
+        "deliver",    // Top-level deliverable
+        "explore",    // Research and discovery
+        "diagnose",   // Debugging and troubleshooting
+        "design",     // Architecture and design
+        "plan",       // Planning and specification
+        "implement",  // Implementation/coding
+        "test",       // Testing and validation
+        "review",     // Code review
+        "security",   // Security review/audit
+        "doc",        // Documentation
+        "integrate",  // Integration work
+        "deploy",     // Release to staging/production
+        "monitor",    // Observability and metrics
+        "optimize",   // Performance tuning
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+impl PhasesConfig {
+    /// Check if a phase is a known/defined phase.
+    pub fn is_known_phase(&self, phase: &str) -> bool {
+        self.definitions.contains(phase)
+    }
+
+    /// Get all defined phase names.
+    pub fn phase_names(&self) -> Vec<&str> {
+        self.definitions.iter().map(|s| s.as_str()).collect()
+    }
+
+    /// Check a phase and return a warning message if unknown (based on unknown_phase behavior).
+    /// Returns None if the phase is known or if behavior is Allow.
+    /// Returns Some(warning) if behavior is Warn.
+    /// Returns Err if behavior is Reject.
+    pub fn check_phase(&self, phase: &str) -> Result<Option<String>> {
+        if self.is_known_phase(phase) {
+            return Ok(None);
+        }
+
+        match self.unknown_phase {
+            UnknownKeyBehavior::Allow => Ok(None),
+            UnknownKeyBehavior::Warn => Ok(Some(format!(
+                "Unknown phase '{}'. Known phases: {:?}",
+                phase,
+                self.phase_names()
+            ))),
+            UnknownKeyBehavior::Reject => Err(anyhow!(
+                "Unknown phase '{}'. Known phases: {:?}. Configure in phases.definitions or set unknown_phase to 'allow' or 'warn'.",
+                phase,
+                self.phase_names()
+            )),
+        }
     }
 }
 

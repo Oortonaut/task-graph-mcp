@@ -217,6 +217,7 @@ mod tests {
                 None,
                 "Test FTS indexing with keywords".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -243,6 +244,7 @@ mod tests {
                 None,
                 "Original title original".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -290,6 +292,7 @@ mod tests {
                 None,
                 "Deletable task content".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,
@@ -322,6 +325,7 @@ mod tests {
             None,
             "Bug fix for minor bug".to_string(),
             None,
+            None, // phase
             None,
             None,
             None,
@@ -335,6 +339,7 @@ mod tests {
             None,
             "Bug bug bug multiple bugs".to_string(),
             None,
+            None, // phase
             None,
             None,
             None,
@@ -348,6 +353,7 @@ mod tests {
             None,
             "Feature implementation".to_string(),
             None,
+            None, // phase
             None,
             None,
             None,
@@ -375,6 +381,7 @@ mod tests {
                 None,
                 "Task with attachment".to_string(),
                 None,
+                None, // phase
                 None,
                 None,
                 None,

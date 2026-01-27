@@ -1,0 +1,2493 @@
+//! Import functionality for the task-graph database.
+//!
+//! Provides methods to import data from a JSON snapshot into the database.
+//! Supports multiple import modes:
+//! - Fresh: Import into an empty database (fails if data exists)
+//! - Replace: Clear existing project data and import (default with --force)
+//! - Merge: Add missing items, skip or overwrite existing (future)
+//!
+//! Handles foreign key constraints by:
+//! - Deleting tables in reverse order (children first) when clearing
+//! - Inserting tables in forward order (parents first) when importing
+//!
+//! Rebuilds FTS indexes after import.
+
+use crate::export::{Snapshot, CURRENT_SCHEMA_VERSION};
+use anyhow::{anyhow, Context, Result};
+use rusqlite::params;
+use serde_json::Value;
+
+use super::Database;
+
+/// Import mode determining how to handle existing data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImportMode {
+    /// Import into an empty database. Fails if any project data exists.
+    #[default]
+    Fresh,
+    /// Clear all existing project data before importing.
+    /// Preserves runtime tables (workers, file_locks).
+    Replace,
+    /// Merge: Add missing items, skip existing.
+    /// - Tasks: skip if ID exists, insert if new
+    /// - Dependencies: skip if exact match exists
+    /// - Attachments: append (keeps both) or replace by name
+    /// - Tags: union existing and imported
+    /// - State sequence: skip (preserves existing history)
+    Merge,
+}
+
+/// Result of a dry-run import preview.
+/// Shows what would happen without making any changes.
+#[derive(Debug, Clone)]
+pub struct DryRunResult {
+    /// Import mode that would be used.
+    pub mode: ImportMode,
+    /// Whether the database is empty (relevant for Fresh mode).
+    pub database_is_empty: bool,
+    /// Number of existing rows per table (before import).
+    pub existing_rows: std::collections::BTreeMap<String, usize>,
+    /// Number of rows that would be deleted per table (Replace mode).
+    pub would_delete: std::collections::BTreeMap<String, usize>,
+    /// Number of rows that would be inserted per table.
+    pub would_insert: std::collections::BTreeMap<String, usize>,
+    /// Number of rows that would be skipped per table (Merge mode).
+    pub would_skip: std::collections::BTreeMap<String, usize>,
+    /// Whether the import would succeed with the given mode.
+    pub would_succeed: bool,
+    /// Reason for failure if would_succeed is false.
+    pub failure_reason: Option<String>,
+    /// Any warnings that would be generated.
+    pub warnings: Vec<String>,
+}
+
+impl DryRunResult {
+    /// Create a new empty dry-run result.
+    fn new(mode: ImportMode) -> Self {
+        Self {
+            mode,
+            database_is_empty: true,
+            existing_rows: std::collections::BTreeMap::new(),
+            would_delete: std::collections::BTreeMap::new(),
+            would_insert: std::collections::BTreeMap::new(),
+            would_skip: std::collections::BTreeMap::new(),
+            would_succeed: true,
+            failure_reason: None,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Total number of rows that would be deleted.
+    pub fn total_would_delete(&self) -> usize {
+        self.would_delete.values().sum()
+    }
+
+    /// Total number of rows that would be inserted.
+    pub fn total_would_insert(&self) -> usize {
+        self.would_insert.values().sum()
+    }
+
+    /// Total number of rows that would be skipped.
+    pub fn total_would_skip(&self) -> usize {
+        self.would_skip.values().sum()
+    }
+
+    /// Total existing rows in the database.
+    pub fn total_existing(&self) -> usize {
+        self.existing_rows.values().sum()
+    }
+}
+
+/// Result of an import operation.
+#[derive(Debug, Clone)]
+pub struct ImportResult {
+    /// Number of rows imported per table.
+    pub rows_imported: std::collections::BTreeMap<String, usize>,
+    /// Number of rows deleted per table (for replace mode).
+    pub rows_deleted: std::collections::BTreeMap<String, usize>,
+    /// Number of rows skipped per table (for merge mode).
+    pub rows_skipped: std::collections::BTreeMap<String, usize>,
+    /// Whether FTS indexes were rebuilt.
+    pub fts_rebuilt: bool,
+    /// Any warnings encountered during import.
+    pub warnings: Vec<String>,
+}
+
+impl ImportResult {
+    /// Create a new empty import result.
+    fn new() -> Self {
+        Self {
+            rows_imported: std::collections::BTreeMap::new(),
+            rows_deleted: std::collections::BTreeMap::new(),
+            rows_skipped: std::collections::BTreeMap::new(),
+            fts_rebuilt: false,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Total number of rows imported.
+    pub fn total_rows(&self) -> usize {
+        self.rows_imported.values().sum()
+    }
+
+    /// Total number of rows deleted.
+    pub fn total_deleted(&self) -> usize {
+        self.rows_deleted.values().sum()
+    }
+
+    /// Total number of rows skipped (merge mode).
+    pub fn total_skipped(&self) -> usize {
+        self.rows_skipped.values().sum()
+    }
+}
+
+/// Options for controlling import behavior.
+#[derive(Debug, Clone, Default)]
+pub struct ImportOptions {
+    /// Import mode (Fresh or Replace).
+    pub mode: ImportMode,
+}
+
+impl ImportOptions {
+    /// Create options for fresh import (empty database required).
+    pub fn fresh() -> Self {
+        Self {
+            mode: ImportMode::Fresh,
+        }
+    }
+
+    /// Create options for replace import (clear existing data).
+    pub fn replace() -> Self {
+        Self {
+            mode: ImportMode::Replace,
+        }
+    }
+
+    /// Create options for merge import (add missing items, skip existing).
+    pub fn merge() -> Self {
+        Self {
+            mode: ImportMode::Merge,
+        }
+    }
+}
+
+/// Tables in the order they should be imported (respecting foreign key constraints).
+/// Tasks must be imported first since other tables reference it.
+const IMPORT_ORDER: &[&str] = &[
+    "tasks",
+    "dependencies",
+    "attachments",
+    "task_tags",
+    "task_needed_tags",
+    "task_wanted_tags",
+    "task_sequence",
+];
+
+impl Database {
+    /// Import data from a snapshot into the database.
+    ///
+    /// This function:
+    /// 1. Validates schema version compatibility
+    /// 2. Based on mode:
+    ///    - Fresh: Validates the database is empty
+    ///    - Replace: Clears existing project data (preserves runtime tables)
+    ///    - Merge: Keeps existing data, adds only new items
+    /// 3. Inserts all rows in the correct order (respecting foreign keys)
+    /// 4. Rebuilds FTS indexes
+    ///
+    /// # Arguments
+    /// * `snapshot` - The snapshot to import
+    /// * `options` - Import options
+    ///
+    /// # Returns
+    /// * `Ok(ImportResult)` - Import statistics
+    /// * `Err` - If import fails
+    pub fn import_snapshot(&self, snapshot: &Snapshot, options: &ImportOptions) -> Result<ImportResult> {
+        // Validate schema version
+        if snapshot.schema_version != CURRENT_SCHEMA_VERSION {
+            return Err(anyhow!(
+                "Schema version mismatch: snapshot is v{}, database is v{}. Migration required.",
+                snapshot.schema_version,
+                CURRENT_SCHEMA_VERSION
+            ));
+        }
+
+        let mut result = ImportResult::new();
+
+        // Handle mode-specific pre-import actions
+        match options.mode {
+            ImportMode::Fresh => {
+                // Validate database is empty
+                self.validate_empty_database()?;
+            }
+            ImportMode::Replace => {
+                // Clear existing project data
+                result.rows_deleted = self.clear_project_data()?;
+            }
+            ImportMode::Merge => {
+                // No pre-import action needed for merge mode
+                // Existing data is kept, new data is added selectively
+            }
+        }
+
+        // Import tables in order
+        self.with_conn_mut(|conn| {
+            // Disable foreign key checks during import for performance
+            // (we're importing in the correct order anyway)
+            conn.execute("PRAGMA foreign_keys = OFF", [])?;
+
+            // Use a transaction for atomicity
+            let tx = conn.transaction()?;
+
+            for table_name in IMPORT_ORDER {
+                if let Some(rows) = snapshot.tables.get(*table_name) {
+                    let (imported, skipped) = if options.mode == ImportMode::Merge {
+                        merge_table(&tx, table_name, rows)?
+                    } else {
+                        let count = import_table(&tx, table_name, rows)?;
+                        (count, 0)
+                    };
+                    result.rows_imported.insert(table_name.to_string(), imported);
+                    if skipped > 0 {
+                        result.rows_skipped.insert(table_name.to_string(), skipped);
+                    }
+                }
+            }
+
+            tx.commit()?;
+
+            // Re-enable foreign keys
+            conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+            Ok(())
+        })?;
+
+        // Rebuild FTS indexes
+        self.rebuild_fts_indexes()?;
+        result.fts_rebuilt = true;
+
+        Ok(result)
+    }
+
+    /// Preview what an import would do without making any changes.
+    ///
+    /// This is the dry-run mode: it analyzes the snapshot against the current
+    /// database state and reports what would be inserted, deleted, or skipped.
+    ///
+    /// # Arguments
+    /// * `snapshot` - The snapshot to preview importing
+    /// * `options` - Import options (determines mode)
+    ///
+    /// # Returns
+    /// * `DryRunResult` - Preview of what would happen
+    pub fn preview_import(&self, snapshot: &Snapshot, options: &ImportOptions) -> DryRunResult {
+        let mut result = DryRunResult::new(options.mode);
+
+        // Check schema compatibility
+        if snapshot.schema_version != CURRENT_SCHEMA_VERSION {
+            result.would_succeed = false;
+            result.failure_reason = Some(format!(
+                "Schema version mismatch: snapshot is v{}, database is v{}. Migration required.",
+                snapshot.schema_version,
+                CURRENT_SCHEMA_VERSION
+            ));
+            return result;
+        }
+
+        // Get current row counts for all tables
+        let existing = self.get_table_row_counts();
+        if let Err(e) = existing {
+            result.would_succeed = false;
+            result.failure_reason = Some(format!("Failed to query database: {}", e));
+            return result;
+        }
+        let existing = existing.unwrap();
+        result.existing_rows = existing.clone();
+        result.database_is_empty = existing.values().all(|&count| count == 0);
+
+        // Check mode-specific conditions
+        match options.mode {
+            ImportMode::Fresh => {
+                if !result.database_is_empty {
+                    result.would_succeed = false;
+                    let non_empty: Vec<_> = existing
+                        .iter()
+                        .filter(|&(_, count)| *count > 0)
+                        .map(|(table, count)| format!("{}: {} rows", table, count))
+                        .collect();
+                    result.failure_reason = Some(format!(
+                        "Database is not empty. Use --force to overwrite or --merge to add. Non-empty tables: {}",
+                        non_empty.join(", ")
+                    ));
+                    return result;
+                }
+                // In fresh mode, all rows from snapshot would be inserted
+                for table_name in IMPORT_ORDER {
+                    let count = snapshot.tables.get(*table_name).map_or(0, |v| v.len());
+                    result.would_insert.insert(table_name.to_string(), count);
+                }
+            }
+            ImportMode::Replace => {
+                // All existing rows would be deleted
+                for (table, count) in &existing {
+                    if *count > 0 {
+                        result.would_delete.insert(table.clone(), *count);
+                    }
+                }
+                // All rows from snapshot would be inserted
+                for table_name in IMPORT_ORDER {
+                    let count = snapshot.tables.get(*table_name).map_or(0, |v| v.len());
+                    result.would_insert.insert(table_name.to_string(), count);
+                }
+            }
+            ImportMode::Merge => {
+                // Need to analyze each table to see what would be inserted vs skipped
+                if let Err(e) = self.preview_merge(snapshot, &mut result) {
+                    result.would_succeed = false;
+                    result.failure_reason = Some(format!("Failed to analyze merge: {}", e));
+                    return result;
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Preview what a merge import would do.
+    fn preview_merge(&self, snapshot: &Snapshot, result: &mut DryRunResult) -> Result<()> {
+        self.with_conn(|conn| {
+            for table_name in IMPORT_ORDER {
+                if let Some(rows) = snapshot.tables.get(*table_name) {
+                    let (would_insert, would_skip) = preview_merge_table(conn, table_name, rows)?;
+                    result.would_insert.insert(table_name.to_string(), would_insert);
+                    if would_skip > 0 {
+                        result.would_skip.insert(table_name.to_string(), would_skip);
+                    }
+                } else {
+                    result.would_insert.insert(table_name.to_string(), 0);
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Get the row count for each project data table.
+    fn get_table_row_counts(&self) -> Result<std::collections::BTreeMap<String, usize>> {
+        self.with_conn(|conn| {
+            let mut counts = std::collections::BTreeMap::new();
+            for table in IMPORT_ORDER {
+                let count: i64 = conn.query_row(
+                    &format!("SELECT COUNT(*) FROM {}", table),
+                    [],
+                    |row| row.get(0),
+                )?;
+                counts.insert(table.to_string(), count as usize);
+            }
+            Ok(counts)
+        })
+    }
+
+    /// Validate that the database is empty (no project data).
+    fn validate_empty_database(&self) -> Result<()> {
+        self.with_conn(|conn| {
+            for table in IMPORT_ORDER {
+                let count: i64 = conn.query_row(
+                    &format!("SELECT COUNT(*) FROM {}", table),
+                    [],
+                    |row| row.get(0),
+                )?;
+                if count > 0 {
+                    return Err(anyhow!(
+                        "Database is not empty: table '{}' contains {} rows. Use --force to overwrite.",
+                        table,
+                        count
+                    ));
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Clear all project data tables, preserving runtime tables.
+    ///
+    /// Tables are deleted in reverse order to respect foreign key constraints
+    /// (children deleted before parents).
+    ///
+    /// Runtime tables preserved:
+    /// - workers: Session-based worker registrations
+    /// - file_locks: Active file marks (advisory locks)
+    /// - claim_sequence: File lock audit log
+    ///
+    /// # Returns
+    /// A map of table names to number of rows deleted.
+    pub fn clear_project_data(&self) -> Result<std::collections::BTreeMap<String, usize>> {
+        let mut deleted = std::collections::BTreeMap::new();
+
+        self.with_conn_mut(|conn| {
+            // Disable foreign key checks during deletion for performance
+            conn.execute("PRAGMA foreign_keys = OFF", [])?;
+
+            // Use a transaction for atomicity
+            let tx = conn.transaction()?;
+
+            // Delete in reverse order to respect foreign key constraints
+            // (children first, then parents)
+            for table_name in IMPORT_ORDER.iter().rev() {
+                let count: i64 = tx.query_row(
+                    &format!("SELECT COUNT(*) FROM {}", table_name),
+                    [],
+                    |row| row.get(0),
+                )?;
+
+                if count > 0 {
+                    tx.execute(&format!("DELETE FROM {}", table_name), [])?;
+                    deleted.insert(table_name.to_string(), count as usize);
+                }
+            }
+
+            // Also clear FTS tables (they'll be rebuilt after import)
+            tx.execute("DELETE FROM tasks_fts", [])?;
+            tx.execute("DELETE FROM attachments_fts", [])?;
+
+            // Reset auto-increment counter for task_sequence
+            // This ensures imported IDs don't conflict with auto-generated ones
+            tx.execute(
+                "DELETE FROM sqlite_sequence WHERE name = 'task_sequence'",
+                [],
+            )?;
+
+            tx.commit()?;
+
+            // Re-enable foreign keys
+            conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+            Ok(())
+        })?;
+
+        Ok(deleted)
+    }
+
+    /// Rebuild FTS indexes from the base tables.
+    ///
+    /// This is called after import to populate the FTS virtual tables
+    /// since triggers don't fire during bulk import.
+    pub fn rebuild_fts_indexes(&self) -> Result<()> {
+        self.with_conn(|conn| {
+            // Rebuild tasks_fts
+            conn.execute("DELETE FROM tasks_fts", [])?;
+            conn.execute(
+                "INSERT INTO tasks_fts(task_id, title, description)
+                 SELECT id, title, COALESCE(description, '')
+                 FROM tasks",
+                [],
+            )?;
+
+            // Rebuild attachments_fts (only text content)
+            conn.execute("DELETE FROM attachments_fts", [])?;
+            conn.execute(
+                "INSERT INTO attachments_fts(task_id, order_index, name, content)
+                 SELECT task_id, order_index, name, content
+                 FROM attachments
+                 WHERE mime_type LIKE 'text/%'",
+                [],
+            )?;
+
+            Ok(())
+        })
+    }
+}
+
+/// Import rows into a specific table.
+fn import_table(
+    conn: &rusqlite::Connection,
+    table_name: &str,
+    rows: &[Value],
+) -> Result<usize> {
+    if rows.is_empty() {
+        return Ok(0);
+    }
+
+    match table_name {
+        "tasks" => import_tasks(conn, rows),
+        "dependencies" => import_dependencies(conn, rows),
+        "attachments" => import_attachments(conn, rows),
+        "task_tags" => import_task_tags(conn, rows),
+        "task_needed_tags" => import_task_needed_tags(conn, rows),
+        "task_wanted_tags" => import_task_wanted_tags(conn, rows),
+        "task_sequence" => import_task_sequence(conn, rows),
+        _ => Err(anyhow!("Unknown table: {}", table_name)),
+    }
+}
+
+/// Merge rows into a specific table (skip existing, insert new).
+/// Returns (imported_count, skipped_count).
+fn merge_table(
+    conn: &rusqlite::Connection,
+    table_name: &str,
+    rows: &[Value],
+) -> Result<(usize, usize)> {
+    if rows.is_empty() {
+        return Ok((0, 0));
+    }
+
+    match table_name {
+        "tasks" => merge_tasks(conn, rows),
+        "dependencies" => merge_dependencies(conn, rows),
+        "attachments" => merge_attachments(conn, rows),
+        "task_tags" => merge_task_tags(conn, rows),
+        "task_needed_tags" => merge_task_needed_tags(conn, rows),
+        "task_wanted_tags" => merge_task_wanted_tags(conn, rows),
+        "task_sequence" => merge_task_sequence(conn, rows),
+        _ => Err(anyhow!("Unknown table: {}", table_name)),
+    }
+}
+
+/// Preview what a merge would do for a specific table (no modifications).
+/// Returns (would_insert_count, would_skip_count).
+fn preview_merge_table(
+    conn: &rusqlite::Connection,
+    table_name: &str,
+    rows: &[Value],
+) -> Result<(usize, usize)> {
+    if rows.is_empty() {
+        return Ok((0, 0));
+    }
+
+    match table_name {
+        "tasks" => preview_merge_tasks(conn, rows),
+        "dependencies" => preview_merge_dependencies(conn, rows),
+        "attachments" => preview_merge_attachments(conn, rows),
+        "task_tags" => preview_merge_task_tags(conn, rows),
+        "task_needed_tags" => preview_merge_task_needed_tags(conn, rows),
+        "task_wanted_tags" => preview_merge_task_wanted_tags(conn, rows),
+        "task_sequence" => Ok((0, rows.len())), // Always skip in merge mode
+        _ => Err(anyhow!("Unknown table: {}", table_name)),
+    }
+}
+
+/// Preview merge for tasks - count how many would be inserted vs skipped.
+fn preview_merge_tasks(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut would_insert = 0;
+    let mut would_skip = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("Task row must be an object")?;
+        let task_id = get_string(obj, "id")?;
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM tasks WHERE id = ?1",
+                params![&task_id],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            would_skip += 1;
+        } else {
+            would_insert += 1;
+        }
+    }
+
+    Ok((would_insert, would_skip))
+}
+
+/// Preview merge for dependencies - count how many would be inserted vs skipped.
+fn preview_merge_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut would_insert = 0;
+    let mut would_skip = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("Dependency row must be an object")?;
+        let from_id = get_string(obj, "from_task_id")?;
+        let to_id = get_string(obj, "to_task_id")?;
+        let dep_type = get_string(obj, "dep_type")?;
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM dependencies WHERE from_task_id = ?1 AND to_task_id = ?2 AND dep_type = ?3",
+                params![&from_id, &to_id, &dep_type],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            would_skip += 1;
+        } else {
+            would_insert += 1;
+        }
+    }
+
+    Ok((would_insert, would_skip))
+}
+
+/// Preview merge for attachments - count how many would be inserted vs skipped.
+fn preview_merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut would_insert = 0;
+    let mut would_skip = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("Attachment row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let order_index = get_i32(obj, "order_index")?;
+        let name = get_string(obj, "name")?;
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM attachments WHERE task_id = ?1 AND name = ?2 AND order_index = ?3",
+                params![&task_id, &name, order_index],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            would_skip += 1;
+        } else {
+            would_insert += 1;
+        }
+    }
+
+    Ok((would_insert, would_skip))
+}
+
+/// Preview merge for task_tags - count how many would be inserted vs skipped.
+fn preview_merge_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut would_insert = 0;
+    let mut would_skip = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("TaskTag row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let tag = get_string(obj, "tag")?;
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM task_tags WHERE task_id = ?1 AND tag = ?2",
+                params![&task_id, &tag],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            would_skip += 1;
+        } else {
+            would_insert += 1;
+        }
+    }
+
+    Ok((would_insert, would_skip))
+}
+
+/// Preview merge for task_needed_tags - count how many would be inserted vs skipped.
+fn preview_merge_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut would_insert = 0;
+    let mut would_skip = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("TaskNeededTag row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let tag = get_string(obj, "tag")?;
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM task_needed_tags WHERE task_id = ?1 AND tag = ?2",
+                params![&task_id, &tag],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            would_skip += 1;
+        } else {
+            would_insert += 1;
+        }
+    }
+
+    Ok((would_insert, would_skip))
+}
+
+/// Preview merge for task_wanted_tags - count how many would be inserted vs skipped.
+fn preview_merge_task_wanted_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut would_insert = 0;
+    let mut would_skip = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("TaskWantedTag row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let tag = get_string(obj, "tag")?;
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM task_wanted_tags WHERE task_id = ?1 AND tag = ?2",
+                params![&task_id, &tag],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            would_skip += 1;
+        } else {
+            would_insert += 1;
+        }
+    }
+
+    Ok((would_insert, would_skip))
+}
+
+/// Merge tasks - skip if ID exists, insert if new.
+fn merge_tasks(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut insert_stmt = conn.prepare(
+        "INSERT INTO tasks (
+            id, title, description, status, priority, worker_id, claimed_at,
+            needed_tags, wanted_tags, tags,
+            points, time_estimate_ms, time_actual_ms, started_at, completed_at,
+            current_thought,
+            metric_0, metric_1, metric_2, metric_3, metric_4, metric_5, metric_6, metric_7,
+            cost_usd,
+            deleted_at, deleted_by, deleted_reason,
+            created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+            ?8, ?9, ?10,
+            ?11, ?12, ?13, ?14, ?15,
+            ?16,
+            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
+            ?25,
+            ?26, ?27, ?28,
+            ?29, ?30
+        )",
+    )?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("Task row must be an object")?;
+        let task_id = get_string(obj, "id")?;
+
+        // Check if task already exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM tasks WHERE id = ?1",
+                params![&task_id],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            skipped += 1;
+            continue;
+        }
+
+        insert_stmt.execute(params![
+            task_id,
+            get_string(obj, "title")?,
+            get_opt_string(obj, "description"),
+            get_string(obj, "status")?,
+            get_string(obj, "priority")?,
+            get_opt_string(obj, "worker_id"),
+            get_opt_i64(obj, "claimed_at"),
+            get_opt_string(obj, "needed_tags"),
+            get_opt_string(obj, "wanted_tags"),
+            get_opt_string(obj, "tags"),
+            get_opt_i32(obj, "points"),
+            get_opt_i64(obj, "time_estimate_ms"),
+            get_opt_i64(obj, "time_actual_ms"),
+            get_opt_i64(obj, "started_at"),
+            get_opt_i64(obj, "completed_at"),
+            get_opt_string(obj, "current_thought"),
+            get_i64_or_default(obj, "metric_0"),
+            get_i64_or_default(obj, "metric_1"),
+            get_i64_or_default(obj, "metric_2"),
+            get_i64_or_default(obj, "metric_3"),
+            get_i64_or_default(obj, "metric_4"),
+            get_i64_or_default(obj, "metric_5"),
+            get_i64_or_default(obj, "metric_6"),
+            get_i64_or_default(obj, "metric_7"),
+            get_f64_or_default(obj, "cost_usd"),
+            get_opt_i64(obj, "deleted_at"),
+            get_opt_string(obj, "deleted_by"),
+            get_opt_string(obj, "deleted_reason"),
+            get_i64(obj, "created_at")?,
+            get_i64(obj, "updated_at")?,
+        ])?;
+        imported += 1;
+    }
+
+    Ok((imported, skipped))
+}
+
+/// Merge dependencies - skip if exact match exists.
+fn merge_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut insert_stmt = conn.prepare(
+        "INSERT INTO dependencies (from_task_id, to_task_id, dep_type)
+         VALUES (?1, ?2, ?3)",
+    )?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("Dependency row must be an object")?;
+        let from_id = get_string(obj, "from_task_id")?;
+        let to_id = get_string(obj, "to_task_id")?;
+        let dep_type = get_string(obj, "dep_type")?;
+
+        // Check if exact dependency already exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM dependencies WHERE from_task_id = ?1 AND to_task_id = ?2 AND dep_type = ?3",
+                params![&from_id, &to_id, &dep_type],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            skipped += 1;
+            continue;
+        }
+
+        insert_stmt.execute(params![from_id, to_id, dep_type])?;
+        imported += 1;
+    }
+
+    Ok((imported, skipped))
+}
+
+/// Merge attachments - skip if exact match (task_id + name + order_index) exists.
+fn merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut insert_stmt = conn.prepare(
+        "INSERT INTO attachments (task_id, order_index, name, mime_type, content, file_path, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("Attachment row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let order_index = get_i32(obj, "order_index")?;
+        let name = get_string(obj, "name")?;
+
+        // Check if attachment already exists (by task_id + name + order_index)
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM attachments WHERE task_id = ?1 AND name = ?2 AND order_index = ?3",
+                params![&task_id, &name, order_index],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            skipped += 1;
+            continue;
+        }
+
+        insert_stmt.execute(params![
+            task_id,
+            order_index,
+            name,
+            get_string(obj, "mime_type")?,
+            get_string(obj, "content")?,
+            get_opt_string(obj, "file_path"),
+            get_i64(obj, "created_at")?,
+        ])?;
+        imported += 1;
+    }
+
+    Ok((imported, skipped))
+}
+
+/// Merge task_tags - skip if exact match exists.
+fn merge_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut insert_stmt = conn.prepare(
+        "INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)",
+    )?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("TaskTag row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let tag = get_string(obj, "tag")?;
+
+        // Check if tag already exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM task_tags WHERE task_id = ?1 AND tag = ?2",
+                params![&task_id, &tag],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            skipped += 1;
+            continue;
+        }
+
+        insert_stmt.execute(params![task_id, tag])?;
+        imported += 1;
+    }
+
+    Ok((imported, skipped))
+}
+
+/// Merge task_needed_tags - skip if exact match exists.
+fn merge_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut insert_stmt = conn.prepare(
+        "INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)",
+    )?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("TaskNeededTag row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let tag = get_string(obj, "tag")?;
+
+        // Check if tag already exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM task_needed_tags WHERE task_id = ?1 AND tag = ?2",
+                params![&task_id, &tag],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            skipped += 1;
+            continue;
+        }
+
+        insert_stmt.execute(params![task_id, tag])?;
+        imported += 1;
+    }
+
+    Ok((imported, skipped))
+}
+
+/// Merge task_wanted_tags - skip if exact match exists.
+fn merge_task_wanted_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    let mut insert_stmt = conn.prepare(
+        "INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)",
+    )?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+
+    for row in rows {
+        let obj = row.as_object().context("TaskWantedTag row must be an object")?;
+        let task_id = get_string(obj, "task_id")?;
+        let tag = get_string(obj, "tag")?;
+
+        // Check if tag already exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM task_wanted_tags WHERE task_id = ?1 AND tag = ?2",
+                params![&task_id, &tag],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            skipped += 1;
+            continue;
+        }
+
+        insert_stmt.execute(params![task_id, tag])?;
+        imported += 1;
+    }
+
+    Ok((imported, skipped))
+}
+
+/// Merge task_sequence - skip all in merge mode to preserve existing history.
+/// State history from the snapshot is not imported to avoid conflicts with existing history.
+fn merge_task_sequence(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+    // In merge mode, we skip all state sequence imports to preserve existing history.
+    // The rationale is that state history reflects what actually happened in this database,
+    // and importing history from another database could create inconsistencies.
+    let _ = conn; // silence unused variable warning
+    Ok((0, rows.len()))
+}
+
+/// Import tasks table.
+fn import_tasks(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO tasks (
+            id, title, description, status, priority, worker_id, claimed_at,
+            needed_tags, wanted_tags, tags,
+            points, time_estimate_ms, time_actual_ms, started_at, completed_at,
+            current_thought,
+            metric_0, metric_1, metric_2, metric_3, metric_4, metric_5, metric_6, metric_7,
+            cost_usd,
+            deleted_at, deleted_by, deleted_reason,
+            created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+            ?8, ?9, ?10,
+            ?11, ?12, ?13, ?14, ?15,
+            ?16,
+            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
+            ?25,
+            ?26, ?27, ?28,
+            ?29, ?30
+        )",
+    )?;
+
+    let mut count = 0;
+    for row in rows {
+        let obj = row.as_object().context("Task row must be an object")?;
+
+        stmt.execute(params![
+            get_string(obj, "id")?,
+            get_string(obj, "title")?,
+            get_opt_string(obj, "description"),
+            get_string(obj, "status")?,
+            get_string(obj, "priority")?,
+            get_opt_string(obj, "worker_id"),
+            get_opt_i64(obj, "claimed_at"),
+            get_opt_string(obj, "needed_tags"),
+            get_opt_string(obj, "wanted_tags"),
+            get_opt_string(obj, "tags"),
+            get_opt_i32(obj, "points"),
+            get_opt_i64(obj, "time_estimate_ms"),
+            get_opt_i64(obj, "time_actual_ms"),
+            get_opt_i64(obj, "started_at"),
+            get_opt_i64(obj, "completed_at"),
+            get_opt_string(obj, "current_thought"),
+            get_i64_or_default(obj, "metric_0"),
+            get_i64_or_default(obj, "metric_1"),
+            get_i64_or_default(obj, "metric_2"),
+            get_i64_or_default(obj, "metric_3"),
+            get_i64_or_default(obj, "metric_4"),
+            get_i64_or_default(obj, "metric_5"),
+            get_i64_or_default(obj, "metric_6"),
+            get_i64_or_default(obj, "metric_7"),
+            get_f64_or_default(obj, "cost_usd"),
+            get_opt_i64(obj, "deleted_at"),
+            get_opt_string(obj, "deleted_by"),
+            get_opt_string(obj, "deleted_reason"),
+            get_i64(obj, "created_at")?,
+            get_i64(obj, "updated_at")?,
+        ])?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// Import dependencies table.
+fn import_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO dependencies (from_task_id, to_task_id, dep_type)
+         VALUES (?1, ?2, ?3)",
+    )?;
+
+    let mut count = 0;
+    for row in rows {
+        let obj = row.as_object().context("Dependency row must be an object")?;
+
+        stmt.execute(params![
+            get_string(obj, "from_task_id")?,
+            get_string(obj, "to_task_id")?,
+            get_string(obj, "dep_type")?,
+        ])?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// Import attachments table.
+fn import_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO attachments (task_id, order_index, name, mime_type, content, file_path, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+
+    let mut count = 0;
+    for row in rows {
+        let obj = row.as_object().context("Attachment row must be an object")?;
+
+        stmt.execute(params![
+            get_string(obj, "task_id")?,
+            get_i32(obj, "order_index")?,
+            get_string(obj, "name")?,
+            get_string(obj, "mime_type")?,
+            get_string(obj, "content")?,
+            get_opt_string(obj, "file_path"),
+            get_i64(obj, "created_at")?,
+        ])?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// Import task_tags table.
+fn import_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)",
+    )?;
+
+    let mut count = 0;
+    for row in rows {
+        let obj = row.as_object().context("TaskTag row must be an object")?;
+
+        stmt.execute(params![
+            get_string(obj, "task_id")?,
+            get_string(obj, "tag")?,
+        ])?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// Import task_needed_tags table.
+fn import_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)",
+    )?;
+
+    let mut count = 0;
+    for row in rows {
+        let obj = row.as_object().context("TaskNeededTag row must be an object")?;
+
+        stmt.execute(params![
+            get_string(obj, "task_id")?,
+            get_string(obj, "tag")?,
+        ])?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// Import task_wanted_tags table.
+fn import_task_wanted_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)",
+    )?;
+
+    let mut count = 0;
+    for row in rows {
+        let obj = row.as_object().context("TaskWantedTag row must be an object")?;
+
+        stmt.execute(params![
+            get_string(obj, "task_id")?,
+            get_string(obj, "tag")?,
+        ])?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+/// Import task_sequence table.
+fn import_task_sequence(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO task_sequence (id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )?;
+
+    let mut count = 0;
+    for row in rows {
+        let obj = row.as_object().context("TaskSequenceEvent row must be an object")?;
+
+        stmt.execute(params![
+            get_i64(obj, "id")?,
+            get_string(obj, "task_id")?,
+            get_opt_string(obj, "worker_id"),
+            get_opt_string(obj, "status"),
+            get_opt_string(obj, "phase"),
+            get_opt_string(obj, "reason"),
+            get_i64(obj, "timestamp")?,
+            get_opt_i64(obj, "end_timestamp"),
+        ])?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+// ============================================================================
+// JSON value extraction helpers
+// ============================================================================
+
+/// Get a required string value from a JSON object.
+fn get_string(obj: &serde_json::Map<String, Value>, key: &str) -> Result<String> {
+    obj.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("Missing or invalid string field: {}", key))
+}
+
+/// Get an optional string value from a JSON object.
+fn get_opt_string(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    obj.get(key).and_then(|v| {
+        if v.is_null() {
+            None
+        } else {
+            v.as_str().map(|s| s.to_string())
+        }
+    })
+}
+
+/// Get a required i64 value from a JSON object.
+fn get_i64(obj: &serde_json::Map<String, Value>, key: &str) -> Result<i64> {
+    obj.get(key)
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow!("Missing or invalid i64 field: {}", key))
+}
+
+/// Get an optional i64 value from a JSON object.
+fn get_opt_i64(obj: &serde_json::Map<String, Value>, key: &str) -> Option<i64> {
+    obj.get(key).and_then(|v| {
+        if v.is_null() {
+            None
+        } else {
+            v.as_i64()
+        }
+    })
+}
+
+/// Get an i64 value with a default of 0.
+fn get_i64_or_default(obj: &serde_json::Map<String, Value>, key: &str) -> i64 {
+    get_opt_i64(obj, key).unwrap_or(0)
+}
+
+/// Get a required i32 value from a JSON object.
+fn get_i32(obj: &serde_json::Map<String, Value>, key: &str) -> Result<i32> {
+    obj.get(key)
+        .and_then(|v| v.as_i64())
+        .map(|i| i as i32)
+        .ok_or_else(|| anyhow!("Missing or invalid i32 field: {}", key))
+}
+
+/// Get an optional i32 value from a JSON object.
+#[allow(dead_code)]
+fn get_opt_i32(obj: &serde_json::Map<String, Value>, key: &str) -> Option<i32> {
+    obj.get(key).and_then(|v| {
+        if v.is_null() {
+            None
+        } else {
+            v.as_i64().map(|i| i as i32)
+        }
+    })
+}
+
+/// Get an f64 value with a default of 0.0.
+fn get_f64_or_default(obj: &serde_json::Map<String, Value>, key: &str) -> f64 {
+    obj.get(key)
+        .and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                v.as_f64()
+            }
+        })
+        .unwrap_or(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::export::Snapshot;
+    use serde_json::json;
+
+    #[test]
+    fn test_import_empty_snapshot() {
+        let db = Database::open_in_memory().unwrap();
+        let snapshot = Snapshot::new();
+        let options = ImportOptions::default();
+
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+        assert_eq!(result.total_rows(), 0);
+        assert!(result.fts_rebuilt);
+    }
+
+    #[test]
+    fn test_import_tasks() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "task-1",
+                "title": "Test Task",
+                "description": "A test task",
+                "status": "pending",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": null,
+                "current_thought": null,
+                "metric_0": 0,
+                "metric_1": 0,
+                "metric_2": 0,
+                "metric_3": 0,
+                "metric_4": 0,
+                "metric_5": 0,
+                "metric_6": 0,
+                "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null,
+                "deleted_by": null,
+                "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000000000_i64
+            })],
+        );
+
+        let options = ImportOptions::default();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        assert_eq!(result.rows_imported.get("tasks"), Some(&1));
+        assert!(result.fts_rebuilt);
+
+        // Verify FTS was populated
+        let results = db.search_tasks("Test", None, false, None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].task_id, "task-1");
+    }
+
+    #[test]
+    fn test_import_with_dependencies() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+
+        // Add tasks
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({
+                    "id": "task-a",
+                    "title": "Task A",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0,
+                    "metric_1": 0,
+                    "metric_2": 0,
+                    "metric_3": 0,
+                    "metric_4": 0,
+                    "metric_5": 0,
+                    "metric_6": 0,
+                    "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null,
+                    "deleted_by": null,
+                    "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+                json!({
+                    "id": "task-b",
+                    "title": "Task B",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0,
+                    "metric_1": 0,
+                    "metric_2": 0,
+                    "metric_3": 0,
+                    "metric_4": 0,
+                    "metric_5": 0,
+                    "metric_6": 0,
+                    "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null,
+                    "deleted_by": null,
+                    "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+            ],
+        );
+
+        // Add dependency
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            vec![json!({
+                "from_task_id": "task-a",
+                "to_task_id": "task-b",
+                "dep_type": "blocks"
+            })],
+        );
+
+        let options = ImportOptions::default();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        assert_eq!(result.rows_imported.get("tasks"), Some(&2));
+        assert_eq!(result.rows_imported.get("dependencies"), Some(&1));
+    }
+
+    #[test]
+    fn test_import_fails_on_non_empty_database() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create a task first
+        use crate::config::StatesConfig;
+        db.create_task(
+            None,
+            "Existing task".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &StatesConfig::default(),
+        )
+        .unwrap();
+
+        let snapshot = Snapshot::new();
+        let options = ImportOptions::fresh(); // Explicitly use fresh mode
+
+        let result = db.import_snapshot(&snapshot, &options);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not empty"));
+    }
+
+    #[test]
+    fn test_import_replace_mode() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create existing task
+        use crate::config::StatesConfig;
+        let existing_id = db.create_task(
+            None,
+            "Existing task".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &StatesConfig::default(),
+        )
+        .unwrap();
+
+        // Verify task exists
+        let task = db.get_task(&existing_id.id).unwrap();
+        assert!(task.is_some());
+        assert_eq!(task.unwrap().title, "Existing task");
+
+        // Create snapshot with different task
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "imported-task",
+                "title": "Imported Task",
+                "description": null,
+                "status": "pending",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": null,
+                "current_thought": null,
+                "metric_0": 0,
+                "metric_1": 0,
+                "metric_2": 0,
+                "metric_3": 0,
+                "metric_4": 0,
+                "metric_5": 0,
+                "metric_6": 0,
+                "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null,
+                "deleted_by": null,
+                "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000000000_i64
+            })],
+        );
+
+        // Import in replace mode
+        let options = ImportOptions::replace();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // Verify old task was deleted and new task imported
+        assert_eq!(result.rows_deleted.get("tasks"), Some(&1));
+        assert_eq!(result.rows_imported.get("tasks"), Some(&1));
+
+        // Old task should be gone
+        let old_task = db.get_task(&existing_id.id).unwrap();
+        assert!(old_task.is_none());
+
+        // New task should exist
+        let new_task = db.get_task("imported-task").unwrap();
+        assert!(new_task.is_some());
+        assert_eq!(new_task.unwrap().title, "Imported Task");
+    }
+
+    #[test]
+    fn test_replace_mode_preserves_workers() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Register a worker
+        db.register_worker(
+            Some("test-worker".to_string()),
+            vec!["rust".to_string(), "test".to_string()],
+            false,
+        ).unwrap();
+
+        // Verify worker exists
+        let workers = db.list_workers().unwrap();
+        assert_eq!(workers.len(), 1);
+        assert_eq!(workers[0].id, "test-worker");
+
+        // Create a task
+        use crate::config::StatesConfig;
+        db.create_task(
+            None,
+            "Task to replace".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &StatesConfig::default(),
+        )
+        .unwrap();
+
+        // Import empty snapshot in replace mode
+        let snapshot = Snapshot::new();
+        let options = ImportOptions::replace();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // Task should be deleted
+        assert_eq!(result.rows_deleted.get("tasks"), Some(&1));
+
+        // Worker should still exist (preserved)
+        let workers = db.list_workers().unwrap();
+        assert_eq!(workers.len(), 1);
+        assert_eq!(workers[0].id, "test-worker");
+    }
+
+    #[test]
+    fn test_clear_project_data() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create tasks with dependencies and tags
+        use crate::config::{StatesConfig, DependenciesConfig};
+        let task_a = db.create_task(
+            None,
+            None, // phase
+            "Task A".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(vec!["rust".to_string(), "test".to_string()]), // tags
+            &StatesConfig::default(),
+        )
+        .unwrap();
+
+        let task_b = db.create_task(
+            None,
+            "Task B".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &StatesConfig::default(),
+        )
+        .unwrap();
+
+        // Add dependency
+        db.add_dependency(&task_a.id, &task_b.id, "blocks", &DependenciesConfig::default()).unwrap();
+
+        // Clear all project data
+        let deleted = db.clear_project_data().unwrap();
+
+        // Verify counts
+        assert_eq!(deleted.get("tasks"), Some(&2));
+        assert_eq!(deleted.get("dependencies"), Some(&1));
+        assert_eq!(deleted.get("task_tags"), Some(&2));
+
+        // Verify tables are empty
+        db.with_conn(|conn| {
+            for table in IMPORT_ORDER {
+                let count: i64 = conn.query_row(
+                    &format!("SELECT COUNT(*) FROM {}", table),
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(count, 0, "Table {} should be empty", table);
+            }
+            Ok(())
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_import_schema_version_mismatch() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+        snapshot.schema_version = 999; // Invalid version
+
+        let options = ImportOptions::default();
+        let result = db.import_snapshot(&snapshot, &options);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Schema version mismatch"));
+    }
+
+    #[test]
+    fn test_import_with_attachments() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+
+        // Add task
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "task-1",
+                "title": "Task with attachment",
+                "description": null,
+                "status": "pending",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": null,
+                "current_thought": null,
+                "metric_0": 0,
+                "metric_1": 0,
+                "metric_2": 0,
+                "metric_3": 0,
+                "metric_4": 0,
+                "metric_5": 0,
+                "metric_6": 0,
+                "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null,
+                "deleted_by": null,
+                "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000000000_i64
+            })],
+        );
+
+        // Add attachment
+        snapshot.tables.insert(
+            "attachments".to_string(),
+            vec![json!({
+                "task_id": "task-1",
+                "order_index": 0,
+                "name": "notes",
+                "mime_type": "text/plain",
+                "content": "Some searchable notes content",
+                "file_path": null,
+                "created_at": 1700000000000_i64
+            })],
+        );
+
+        let options = ImportOptions::default();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        assert_eq!(result.rows_imported.get("tasks"), Some(&1));
+        assert_eq!(result.rows_imported.get("attachments"), Some(&1));
+
+        // Verify attachment FTS was populated
+        let results = db.search_tasks("searchable", None, true, None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].attachment_matches.len(), 1);
+    }
+
+    #[test]
+    fn test_import_with_tags() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+
+        // Add task
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "task-1",
+                "title": "Tagged Task",
+                "description": null,
+                "status": "pending",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": null,
+                "current_thought": null,
+                "metric_0": 0,
+                "metric_1": 0,
+                "metric_2": 0,
+                "metric_3": 0,
+                "metric_4": 0,
+                "metric_5": 0,
+                "metric_6": 0,
+                "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null,
+                "deleted_by": null,
+                "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000000000_i64
+            })],
+        );
+
+        // Add tags
+        snapshot.tables.insert(
+            "task_tags".to_string(),
+            vec![
+                json!({"task_id": "task-1", "tag": "rust"}),
+                json!({"task_id": "task-1", "tag": "backend"}),
+            ],
+        );
+
+        snapshot.tables.insert(
+            "task_needed_tags".to_string(),
+            vec![json!({"task_id": "task-1", "tag": "senior"})],
+        );
+
+        snapshot.tables.insert(
+            "task_wanted_tags".to_string(),
+            vec![json!({"task_id": "task-1", "tag": "rust-expert"})],
+        );
+
+        let options = ImportOptions::default();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        assert_eq!(result.rows_imported.get("task_tags"), Some(&2));
+        assert_eq!(result.rows_imported.get("task_needed_tags"), Some(&1));
+        assert_eq!(result.rows_imported.get("task_wanted_tags"), Some(&1));
+    }
+
+    #[test]
+    fn test_import_task_sequence() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+
+        // Add task
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "task-1",
+                "title": "Task with history",
+                "description": null,
+                "status": "completed",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": 1700000001000_i64,
+                "current_thought": null,
+                "metric_0": 0,
+                "metric_1": 0,
+                "metric_2": 0,
+                "metric_3": 0,
+                "metric_4": 0,
+                "metric_5": 0,
+                "metric_6": 0,
+                "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null,
+                "deleted_by": null,
+                "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000001000_i64
+            })],
+        );
+
+        // Add state history
+        snapshot.tables.insert(
+            "task_sequence".to_string(),
+            vec![
+                json!({
+                    "id": 1,
+                    "task_id": "task-1",
+                    "worker_id": null,
+                    "event": "pending",
+                    "reason": "Task created",
+                    "timestamp": 1700000000000_i64,
+                    "end_timestamp": 1700000000500_i64
+                }),
+                json!({
+                    "id": 2,
+                    "task_id": "task-1",
+                    "worker_id": "worker-1",
+                    "event": "in_progress",
+                    "reason": "Started work",
+                    "timestamp": 1700000000500_i64,
+                    "end_timestamp": 1700000001000_i64
+                }),
+                json!({
+                    "id": 3,
+                    "task_id": "task-1",
+                    "worker_id": "worker-1",
+                    "event": "completed",
+                    "reason": "Done",
+                    "timestamp": 1700000001000_i64,
+                    "end_timestamp": null
+                }),
+            ],
+        );
+
+        let options = ImportOptions::default();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        assert_eq!(result.rows_imported.get("task_sequence"), Some(&3));
+    }
+
+    #[test]
+    fn test_rebuild_fts_indexes() {
+        let db = Database::open_in_memory().unwrap();
+
+        // First, insert a task normally (trigger will fire)
+        db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO tasks (id, title, description, status, priority, created_at, updated_at)
+                 VALUES ('test-task', 'Manual Insert Test', 'Bypass trigger', 'pending', '5', 1700000000000, 1700000000000)",
+                [],
+            )?;
+            Ok(())
+        }).unwrap();
+
+        // FTS should have the task due to triggers
+        let results = db.search_tasks("Manual", None, false, None).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Now delete from FTS to simulate a corrupted/empty FTS state
+        db.with_conn(|conn| {
+            conn.execute("DELETE FROM tasks_fts", [])?;
+            Ok(())
+        }).unwrap();
+
+        // Search should now find nothing
+        let results = db.search_tasks("Manual", None, false, None).unwrap();
+        assert!(results.is_empty());
+
+        // Rebuild FTS
+        db.rebuild_fts_indexes().unwrap();
+
+        // Now search should work again
+        let results = db.search_tasks("Manual", None, false, None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].task_id, "test-task");
+    }
+
+    #[test]
+    fn test_import_mode_default() {
+        // Default mode should be Fresh
+        let options = ImportOptions::default();
+        assert_eq!(options.mode, ImportMode::Fresh);
+    }
+
+    #[test]
+    fn test_import_result_total_deleted() {
+        let mut result = ImportResult::new();
+        result.rows_deleted.insert("tasks".to_string(), 5);
+        result.rows_deleted.insert("dependencies".to_string(), 3);
+        assert_eq!(result.total_deleted(), 8);
+    }
+
+    #[test]
+    fn test_import_result_total_skipped() {
+        let mut result = ImportResult::new();
+        result.rows_skipped.insert("tasks".to_string(), 3);
+        result.rows_skipped.insert("dependencies".to_string(), 2);
+        assert_eq!(result.total_skipped(), 5);
+    }
+
+    #[test]
+    fn test_merge_mode_skips_existing_tasks() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create existing task with specific ID
+        use crate::config::StatesConfig;
+        db.create_task(
+            Some("existing-task".to_string()),
+            "Existing task".to_string(),
+            None,
+            None, // phase
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &StatesConfig::default(),
+        )
+        .unwrap();
+
+        // Create snapshot with same ID task and a new task
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({
+                    "id": "existing-task", // This should be skipped
+                    "title": "Should Be Skipped",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0,
+                    "metric_1": 0,
+                    "metric_2": 0,
+                    "metric_3": 0,
+                    "metric_4": 0,
+                    "metric_5": 0,
+                    "metric_6": 0,
+                    "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null,
+                    "deleted_by": null,
+                    "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+                json!({
+                    "id": "new-task", // This should be imported
+                    "title": "New Task",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0,
+                    "metric_1": 0,
+                    "metric_2": 0,
+                    "metric_3": 0,
+                    "metric_4": 0,
+                    "metric_5": 0,
+                    "metric_6": 0,
+                    "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null,
+                    "deleted_by": null,
+                    "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+            ],
+        );
+
+        // Import in merge mode
+        let options = ImportOptions::merge();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // 1 imported (new-task), 1 skipped (existing-task)
+        assert_eq!(result.rows_imported.get("tasks"), Some(&1));
+        assert_eq!(result.rows_skipped.get("tasks"), Some(&1));
+
+        // Existing task should still have original title
+        let existing = db.get_task("existing-task").unwrap().unwrap();
+        assert_eq!(existing.title, "Existing task");
+
+        // New task should be imported
+        let new_task = db.get_task("new-task").unwrap();
+        assert!(new_task.is_some());
+        assert_eq!(new_task.unwrap().title, "New Task");
+    }
+
+    #[test]
+    fn test_merge_mode_skips_existing_dependencies() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create tasks and dependency
+        use crate::config::{StatesConfig, DependenciesConfig};
+        db.create_task(
+            Some("task-a".to_string()),
+            "Task A".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+        db.create_task(
+            Some("task-b".to_string()),
+            "Task B".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+        db.create_task(
+            Some("task-c".to_string()),
+            "Task C".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+        db.add_dependency("task-a", "task-b", "blocks", &DependenciesConfig::default()).unwrap();
+
+        // Create snapshot with existing and new dependencies
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            vec![
+                json!({
+                    "from_task_id": "task-a",
+                    "to_task_id": "task-b",
+                    "dep_type": "blocks" // Existing - should be skipped
+                }),
+                json!({
+                    "from_task_id": "task-b",
+                    "to_task_id": "task-c",
+                    "dep_type": "blocks" // New - should be imported
+                }),
+            ],
+        );
+
+        // Import in merge mode
+        let options = ImportOptions::merge();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // 1 imported (b->c), 1 skipped (a->b)
+        assert_eq!(result.rows_imported.get("dependencies"), Some(&1));
+        assert_eq!(result.rows_skipped.get("dependencies"), Some(&1));
+    }
+
+    #[test]
+    fn test_merge_mode_skips_state_sequence() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create a task (will have initial state history)
+        use crate::config::StatesConfig;
+        db.create_task(
+            Some("task-1".to_string()),
+            "Task 1".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+
+        // Snapshot with state history
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "task_sequence".to_string(),
+            vec![
+                json!({
+                    "id": 999,
+                    "task_id": "task-1",
+                    "worker_id": null,
+                    "event": "pending",
+                    "reason": "Imported history",
+                    "timestamp": 1700000000000_i64,
+                    "end_timestamp": null
+                }),
+            ],
+        );
+
+        // Import in merge mode
+        let options = ImportOptions::merge();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // State sequence should be all skipped in merge mode
+        assert_eq!(result.rows_imported.get("task_sequence"), Some(&0));
+        assert_eq!(result.rows_skipped.get("task_sequence"), Some(&1));
+    }
+
+    #[test]
+    fn test_merge_mode_adds_new_tags() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create task with tags
+        use crate::config::StatesConfig;
+        db.create_task(
+            Some("task-1".to_string()),
+            "Task 1".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(vec!["existing-tag".to_string()]),
+            &StatesConfig::default(),
+        ).unwrap();
+
+        // Snapshot with existing and new tags
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "task_tags".to_string(),
+            vec![
+                json!({"task_id": "task-1", "tag": "existing-tag"}), // Existing - skip
+                json!({"task_id": "task-1", "tag": "new-tag"}),      // New - import
+            ],
+        );
+
+        // Import in merge mode
+        let options = ImportOptions::merge();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // 1 imported (new-tag), 1 skipped (existing-tag)
+        assert_eq!(result.rows_imported.get("task_tags"), Some(&1));
+        assert_eq!(result.rows_skipped.get("task_tags"), Some(&1));
+    }
+
+    #[test]
+    fn test_import_options_merge() {
+        let options = ImportOptions::merge();
+        assert_eq!(options.mode, ImportMode::Merge);
+    }
+
+    // ============================================================================
+    // Dry-run (preview_import) tests
+    // ============================================================================
+
+    #[test]
+    fn test_preview_fresh_mode_empty_db() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+        
+        // Add a task to the snapshot
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "task-1",
+                "title": "Test Task",
+                "description": null,
+                "status": "pending",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": null,
+                "current_thought": null,
+                "metric_0": 0,
+                "metric_1": 0,
+                "metric_2": 0,
+                "metric_3": 0,
+                "metric_4": 0,
+                "metric_5": 0,
+                "metric_6": 0,
+                "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null,
+                "deleted_by": null,
+                "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000000000_i64
+            })],
+        );
+
+        let options = ImportOptions::fresh();
+        let preview = db.preview_import(&snapshot, &options);
+
+        assert!(preview.would_succeed);
+        assert!(preview.database_is_empty);
+        assert_eq!(preview.mode, ImportMode::Fresh);
+        assert_eq!(preview.total_would_insert(), 1);
+        assert_eq!(preview.total_would_delete(), 0);
+        assert_eq!(preview.total_would_skip(), 0);
+    }
+
+    #[test]
+    fn test_preview_fresh_mode_non_empty_db() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create existing task
+        use crate::config::StatesConfig;
+        db.create_task(
+            None,
+            "Existing task".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+
+        let snapshot = Snapshot::new();
+        let options = ImportOptions::fresh();
+        let preview = db.preview_import(&snapshot, &options);
+
+        // Should fail because database is not empty
+        assert!(!preview.would_succeed);
+        assert!(!preview.database_is_empty);
+        assert!(preview.failure_reason.is_some());
+        assert!(preview.failure_reason.unwrap().contains("not empty"));
+    }
+
+    #[test]
+    fn test_preview_replace_mode() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create existing tasks
+        use crate::config::StatesConfig;
+        db.create_task(
+            Some("existing-1".to_string()),
+            "Existing 1".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+        db.create_task(
+            Some("existing-2".to_string()),
+            "Existing 2".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+
+        // Create snapshot with different task
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "new-task",
+                "title": "New Task",
+                "description": null,
+                "status": "pending",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": null,
+                "current_thought": null,
+                "metric_0": 0,
+                "metric_1": 0,
+                "metric_2": 0,
+                "metric_3": 0,
+                "metric_4": 0,
+                "metric_5": 0,
+                "metric_6": 0,
+                "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null,
+                "deleted_by": null,
+                "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000000000_i64
+            })],
+        );
+
+        let options = ImportOptions::replace();
+        let preview = db.preview_import(&snapshot, &options);
+
+        assert!(preview.would_succeed);
+        assert!(!preview.database_is_empty);
+        assert_eq!(preview.mode, ImportMode::Replace);
+        // Would delete 2 existing tasks
+        assert_eq!(preview.would_delete.get("tasks"), Some(&2));
+        // Would insert 1 new task
+        assert_eq!(preview.would_insert.get("tasks"), Some(&1));
+        assert_eq!(preview.total_would_skip(), 0);
+    }
+
+    #[test]
+    fn test_preview_merge_mode() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create existing task
+        use crate::config::StatesConfig;
+        db.create_task(
+            Some("existing-task".to_string()),
+            "Existing Task".to_string(),
+            None, None, None, None, None, None, None,
+            &StatesConfig::default(),
+        ).unwrap();
+
+        // Create snapshot with existing and new tasks
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({
+                    "id": "existing-task", // Will be skipped
+                    "title": "Should Skip",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0,
+                    "metric_1": 0,
+                    "metric_2": 0,
+                    "metric_3": 0,
+                    "metric_4": 0,
+                    "metric_5": 0,
+                    "metric_6": 0,
+                    "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null,
+                    "deleted_by": null,
+                    "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+                json!({
+                    "id": "new-task", // Will be inserted
+                    "title": "New Task",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0,
+                    "metric_1": 0,
+                    "metric_2": 0,
+                    "metric_3": 0,
+                    "metric_4": 0,
+                    "metric_5": 0,
+                    "metric_6": 0,
+                    "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null,
+                    "deleted_by": null,
+                    "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+            ],
+        );
+
+        let options = ImportOptions::merge();
+        let preview = db.preview_import(&snapshot, &options);
+
+        assert!(preview.would_succeed);
+        assert!(!preview.database_is_empty);
+        assert_eq!(preview.mode, ImportMode::Merge);
+        // Would skip 1 existing task
+        assert_eq!(preview.would_skip.get("tasks"), Some(&1));
+        // Would insert 1 new task
+        assert_eq!(preview.would_insert.get("tasks"), Some(&1));
+        // No deletions in merge mode
+        assert_eq!(preview.total_would_delete(), 0);
+    }
+
+    #[test]
+    fn test_preview_schema_version_mismatch() {
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+        snapshot.schema_version = 999; // Invalid version
+
+        let options = ImportOptions::fresh();
+        let preview = db.preview_import(&snapshot, &options);
+
+        assert!(!preview.would_succeed);
+        assert!(preview.failure_reason.is_some());
+        assert!(preview.failure_reason.unwrap().contains("Schema version mismatch"));
+    }
+
+    #[test]
+    fn test_dry_run_result_totals() {
+        let mut result = DryRunResult::new(ImportMode::Replace);
+        result.existing_rows.insert("tasks".to_string(), 5);
+        result.existing_rows.insert("dependencies".to_string(), 3);
+        result.would_delete.insert("tasks".to_string(), 5);
+        result.would_delete.insert("dependencies".to_string(), 3);
+        result.would_insert.insert("tasks".to_string(), 2);
+        result.would_skip.insert("attachments".to_string(), 1);
+
+        assert_eq!(result.total_existing(), 8);
+        assert_eq!(result.total_would_delete(), 8);
+        assert_eq!(result.total_would_insert(), 2);
+        assert_eq!(result.total_would_skip(), 1);
+    }
+}

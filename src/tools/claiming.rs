@@ -64,6 +64,7 @@ pub fn claim(
         None,               // title
         None,               // description
         Some(claim_status), // status - first timed state
+        None,               // phase
         None,               // priority
         None,               // points
         None,               // tags

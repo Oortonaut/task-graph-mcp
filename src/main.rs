@@ -18,10 +18,12 @@ use rmcp::{
 use serde_json::{Value, json};
 use std::fs::OpenOptions;
 use std::sync::Arc;
+use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode};
 use task_graph_mcp::config::{
-    AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, Prompts, ServerPaths,
-    StatesConfig,
+    AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, PhasesConfig, Prompts,
+    ServerPaths, StatesConfig, UiMode,
 };
+use task_graph_mcp::dashboard;
 use task_graph_mcp::db::Database;
 use task_graph_mcp::error::ToolError;
 use task_graph_mcp::format::OutputFormat;
@@ -29,35 +31,6 @@ use task_graph_mcp::resources::ResourceHandler;
 use task_graph_mcp::tools::ToolHandler;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
-
-/// Task Graph MCP Server
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Path to configuration file
-    #[arg(short, long)]
-    config: Option<String>,
-
-    /// Path to database file (overrides config)
-    #[arg(short, long)]
-    database: Option<String>,
-
-    /// Path to media directory (overrides config)
-    #[arg(short, long)]
-    media_dir: Option<String>,
-
-    /// Path to log directory (overrides config)
-    #[arg(long)]
-    log_dir: Option<String>,
-
-    /// Enable verbose logging
-    #[arg(short, long)]
-    verbose: bool,
-
-    /// Logging output: 0/off, 1/stdout, 2/stderr (default), or filename
-    #[arg(short, long, default_value = "2")]
-    log: String,
-}
 
 /// MCP server handler.
 #[derive(Clone)]
@@ -76,6 +49,7 @@ impl TaskGraphServer {
         server_paths: Arc<ServerPaths>,
         prompts: Arc<Prompts>,
         states_config: Arc<StatesConfig>,
+        phases_config: Arc<PhasesConfig>,
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
@@ -89,6 +63,7 @@ impl TaskGraphServer {
                 server_paths,
                 Arc::clone(&prompts),
                 Arc::clone(&states_config),
+                Arc::clone(&phases_config),
                 Arc::clone(&deps_config),
                 Arc::clone(&auto_advance),
                 Arc::clone(&attachments_config),
@@ -225,17 +200,25 @@ impl ServerHandler for TaskGraphServer {
     }
 }
 
+/// Convert CLI UiMode to config UiMode
+fn cli_ui_mode_to_config(cli_mode: CliUiMode) -> UiMode {
+    match cli_mode {
+        CliUiMode::None => UiMode::None,
+        CliUiMode::Web => UiMode::Web,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
     // Initialize logging based on --log option
-    let level = if args.verbose {
+    let level = if cli.verbose {
         Level::DEBUG
     } else {
         Level::INFO
     };
-    match args.log.as_str() {
+    match cli.log.as_str() {
         "0" | "off" => {
             // No logging
         }
@@ -269,24 +252,57 @@ async fn main() -> Result<()> {
     }
 
     // Load configuration and track config path
-    let config_path_used = args.config.clone();
-    let mut config = if let Some(config_path) = &args.config {
+    let config_path_used = cli.config.clone();
+    let mut config = if let Some(config_path) = &cli.config {
         Config::load(config_path)?
     } else {
         Config::load_or_default()
     };
 
     // Override paths from CLI arguments
-    if let Some(db_path) = &args.database {
+    if let Some(db_path) = &cli.database {
         config.server.db_path = db_path.into();
     }
-    if let Some(media_dir) = &args.media_dir {
+    if let Some(media_dir) = &cli.media_dir {
         config.server.media_dir = media_dir.into();
     }
-    if let Some(log_dir) = &args.log_dir {
+    if let Some(log_dir) = &cli.log_dir {
         config.server.log_dir = log_dir.into();
     }
 
+    // Override UI settings from CLI arguments
+    if let Some(ui_mode) = cli.ui {
+        config.server.ui.mode = cli_ui_mode_to_config(ui_mode);
+    }
+    if let Some(ui_port) = cli.ui_port {
+        config.server.ui.port = ui_port;
+    }
+
+    // Handle subcommands
+    match cli.command {
+        Some(Command::Export(_args)) => {
+            // TODO: Implement export command
+            anyhow::bail!("Export command not yet implemented");
+        }
+        Some(Command::Import(_args)) => {
+            // TODO: Implement import command
+            anyhow::bail!("Import command not yet implemented");
+        }
+        Some(Command::Diff(_args)) => {
+            // TODO: Implement diff command
+            anyhow::bail!("Diff command not yet implemented");
+        }
+        Some(Command::Serve) | None => {
+            // Default: run MCP server
+            run_server(config, config_path_used).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Run the MCP server
+async fn run_server(config: Config, config_path_used: Option<String>) -> Result<()> {
     // Ensure directories exist
     config.ensure_db_dir()?;
     config.ensure_media_dir()?;
@@ -306,6 +322,10 @@ async fn main() -> Result<()> {
     info!("Database: {:?}", config.server.db_path);
     info!("Media dir: {:?}", config.server.media_dir);
     info!("Log dir: {:?}", config.server.log_dir);
+    info!("UI mode: {:?}", config.server.ui.mode);
+    if config.server.ui.mode == UiMode::Web {
+        info!("UI port: {}", config.server.ui.port);
+    }
 
     // Open database
     let db = Database::open(&config.server.db_path)?;
@@ -323,21 +343,35 @@ async fn main() -> Result<()> {
 
     // Create server handler
     let states_config = Arc::new(config.states.clone());
+    let phases_config = Arc::new(config.phases.clone());
     let deps_config = Arc::new(config.dependencies.clone());
     let auto_advance = Arc::new(config.auto_advance.clone());
     let attachments_config = Arc::new(config.attachments.clone());
     let server = TaskGraphServer::new(
-        db,
+        Arc::clone(&db),
         config.server.media_dir.clone(),
         config.server.skills_dir.clone(),
         server_paths,
         prompts,
         states_config,
+        phases_config,
         deps_config,
         auto_advance,
         attachments_config,
         config.server.default_format,
     );
+
+    // Start the HTTP dashboard server if UI mode is Web
+    let _dashboard_shutdown = if config.server.ui.mode == UiMode::Web {
+        let (shutdown_tx, bound_addr) = dashboard::start_server(
+            Arc::clone(&db),
+            config.server.ui.port,
+        ).await?;
+        info!("Dashboard available at http://{}", bound_addr);
+        Some(shutdown_tx)
+    } else {
+        None
+    };
 
     // Run the stdio server
     info!("Server ready, listening on stdio");

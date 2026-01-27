@@ -455,6 +455,7 @@ mod tests {
             title: title.to_string(),
             description: None,
             status: status.to_string(),
+            phase: None,
             priority,
             worker_id: None,
             claimed_at: None,

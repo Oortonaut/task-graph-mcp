@@ -2,7 +2,7 @@
 
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{
-    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig,
+    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, StatesConfig,
     UnknownKeyBehavior,
 };
 use crate::db::Database;
@@ -334,11 +334,17 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
     ]
 }
 
-pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
+pub fn create(
+    db: &Database,
+    states_config: &StatesConfig,
+    phases_config: &PhasesConfig,
+    args: Value,
+) -> Result<Value> {
     let id = get_string(&args, "id");
     let description =
         get_string(&args, "description").ok_or_else(|| ToolError::missing_field("description"))?;
     let parent_id = get_string(&args, "parent");
+    let phase = get_string(&args, "phase");
     // Support both integer and string priority
     let priority = get_i32(&args, "priority")
         .or_else(|| get_string(&args, "priority").map(|s| parse_priority(&s)));
@@ -348,10 +354,18 @@ pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
     let needed_tags = get_string_array(&args, "needed_tags");
     let wanted_tags = get_string_array(&args, "wanted_tags");
 
+    // Check phase validity (may return warning)
+    let phase_warning = if let Some(ref p) = phase {
+        phases_config.check_phase(p)?
+    } else {
+        None
+    };
+
     let task = db.create_task(
         id,
         description,
         parent_id,
+        phase,
         priority,
         points,
         time_estimate_ms,
@@ -361,16 +375,28 @@ pub fn create(db: &Database, states_config: &StatesConfig, args: Value) -> Resul
         states_config,
     )?;
 
-    Ok(json!({
+    let mut response = json!({
         "id": &task.id,
         "description": task.description,
         "status": task.status,
+        "phase": task.phase,
         "priority": task.priority,
         "created_at": task.created_at
-    }))
+    });
+
+    if let Some(warning) = phase_warning {
+        response["phase_warning"] = json!(warning);
+    }
+
+    Ok(response)
 }
 
-pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
+pub fn create_tree(
+    db: &Database,
+    states_config: &StatesConfig,
+    phases_config: &PhasesConfig,
+    args: Value,
+) -> Result<Value> {
     let tree: TaskTreeInput = serde_json::from_value(
         args.get("tree")
             .cloned()
@@ -380,8 +406,8 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
     let child_type = get_string(&args, "child_type");
     let sibling_type = get_string(&args, "sibling_type");
 
-    let (root_id, all_ids) =
-        db.create_task_tree(tree, parent_id, child_type, sibling_type, states_config)?;
+    let (root_id, all_ids, phase_warnings) =
+        db.create_task_tree(tree, parent_id, child_type, sibling_type, states_config, phases_config)?;
 
     // Fetch the root task to return full details
     let root_task = db.get_task(&root_id)?.ok_or_else(|| {
@@ -391,18 +417,25 @@ pub fn create_tree(db: &Database, states_config: &StatesConfig, args: Value) -> 
         )
     })?;
 
-    Ok(json!({
+    let mut response = json!({
         "root": {
             "id": root_task.id,
             "title": root_task.title,
             "description": root_task.description,
             "status": root_task.status,
+            "phase": root_task.phase,
             "priority": root_task.priority,
             "created_at": root_task.created_at
         },
         "all_ids": all_ids,
         "count": all_ids.len()
-    }))
+    });
+
+    if !phase_warnings.is_empty() {
+        response["phase_warnings"] = json!(phase_warnings);
+    }
+
+    Ok(response)
 }
 
 pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
@@ -488,6 +521,7 @@ pub fn list_tasks(
     let blocked = get_bool(&args, "blocked").unwrap_or(false);
     let claimed = get_bool(&args, "claimed").unwrap_or(false);
     let limit = get_i32(&args, "limit");
+    let phase = get_string(&args, "phase");
 
     // Extract tag filtering parameters
     let tags_any = get_string_array(&args, "tags_any");
@@ -576,6 +610,7 @@ pub fn list_tasks(
                 .and_then(|v| v.first().map(|s| s.as_str()));
             db.list_tasks(
                 status,
+                phase.as_deref(),
                 owner.as_deref(),
                 parent_id,
                 limit,
@@ -584,6 +619,11 @@ pub fn list_tasks(
             )?
         }
     };
+
+    // Apply phase filter for ready/blocked/claimed paths (list_tasks handles it internally)
+    if let Some(ref p) = phase {
+        tasks.retain(|t| t.phase.as_deref() == Some(p.as_str()));
+    }
 
     // Apply limit (some paths may already have limit applied, but this ensures consistency)
     if let Some(l) = limit {
@@ -620,6 +660,7 @@ pub fn update(
     db: &Database,
     attachments_config: &AttachmentsConfig,
     states_config: &StatesConfig,
+    phases_config: &PhasesConfig,
     deps_config: &DependenciesConfig,
     auto_advance: &AutoAdvanceConfig,
     args: Value,
@@ -635,6 +676,7 @@ pub fn update(
         None
     };
     let status = get_string(&args, "status");
+    let phase = get_string(&args, "phase");
     // Support both integer and string priority
     let priority = get_i32(&args, "priority")
         .or_else(|| get_string(&args, "priority").map(|s| parse_priority(&s)));
@@ -752,6 +794,13 @@ pub fn update(
         }
     }
 
+    // Check phase validity (may return warning)
+    let phase_warning = if let Some(ref p) = phase {
+        phases_config.check_phase(p)?
+    } else {
+        None
+    };
+
     // Perform the task update
     let (task, unblocked, auto_advanced) = db.update_task_unified(
         &task_id,
@@ -760,6 +809,7 @@ pub fn update(
         title,
         description,
         status,
+        phase,
         priority,
         points,
         tags,
@@ -794,6 +844,10 @@ pub fn update(
                 "attachment_warnings".to_string(),
                 json!(attachment_warnings),
             );
+        }
+        // Include phase warning if any
+        if let Some(ref warning) = phase_warning {
+            map.insert("phase_warning".to_string(), json!(warning));
         }
     }
 

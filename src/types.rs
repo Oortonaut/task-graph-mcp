@@ -49,6 +49,7 @@ pub struct Task {
     pub title: String,
     pub description: Option<String>,
     pub status: String,
+    pub phase: Option<String>,
     pub priority: Priority,
     pub worker_id: Option<String>,
     pub claimed_at: Option<i64>,
@@ -108,6 +109,9 @@ pub struct TaskTreeInput {
     /// Task description.
     pub description: Option<String>,
 
+    /// Task phase (type of work: explore, design, implement, etc.).
+    pub phase: Option<String>,
+
     /// Task priority.
     pub priority: Option<Priority>,
 
@@ -165,6 +169,24 @@ pub struct ClaimEvent {
     pub claim_id: Option<i64>,
 }
 
+/// A unified task sequence event for tracking status and phase changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSequenceEvent {
+    pub id: i64,
+    pub task_id: String,
+    pub worker_id: Option<String>,
+    /// Status value (None if phase-only change)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// Phase value (None if status-only change)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    pub reason: Option<String>,
+    pub timestamp: i64,
+    pub end_timestamp: Option<i64>,
+}
+
+/// Legacy alias for backward compatibility in exports.
 /// A task state transition event for time tracking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskStateEvent {
