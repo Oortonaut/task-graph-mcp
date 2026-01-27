@@ -173,7 +173,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "update",
-            "Update a task's properties. Status changes handle ownership automatically: transitioning to a timed status (e.g., in_progress) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it. For push coordination: use assignee to assign a task to another agent (sets owner and transitions to 'assigned' status). Only the owner can update a claimed task unless force=true.",
+            "Update a task's properties. Status changes handle ownership automatically: transitioning to a timed status (e.g., working) claims the task, transitioning to non-timed releases it, transitioning to terminal (e.g., completed) completes it. For push coordination: use assignee to assign a task to another agent (sets owner and transitions to 'assigned' status). Only the owner can update a claimed task unless force=true.",
             json!({
                 "worker_id": {
                     "type": "string",
@@ -185,7 +185,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 },
                 "assignee": {
                     "type": "string",
-                    "description": "Agent ID to assign the task to (push coordination). Sets owner_agent to assignee and transitions to 'assigned' status. The assignee can then claim (transition to in_progress) when ready."
+                    "description": "Agent ID to assign the task to (push coordination). Sets owner_agent to assignee and transitions to 'assigned' status. The assignee can then claim (transition to working) when ready."
                 },
                 "status": {
                     "type": "string",

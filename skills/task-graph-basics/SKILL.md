@@ -92,7 +92,7 @@ Every worker MUST connect before using task-graph tools:
 | `claim` | Take ownership (shortcut) | `worker_id`, `task`, `force` |
 
 **Ownership via `update`:**
-- `update(state="in_progress")` → Claims task (sets owner)
+- `update(state="working")` → Claims task (sets owner)
 - `update(state="pending")` → Releases task (clears owner)
 - `update(state="completed")` → Completes task (clears owner)
 - Use `force=true` to take from another worker
@@ -154,7 +154,7 @@ Every worker MUST connect before using task-graph tools:
 Default state machine (configurable via YAML):
 
 ```
-pending ──→ in_progress ──→ completed
+pending ──→ working ──→ completed
    │             │
    │             └──→ failed ──→ pending (retry)
    │
@@ -163,13 +163,13 @@ pending ──→ in_progress ──→ completed
 
 | State | Timed | Exits To |
 |-------|-------|----------|
-| `pending` | No | `in_progress`, `cancelled` |
-| `in_progress` | Yes | `completed`, `failed`, `pending` |
+| `pending` | No | `working`, `cancelled` |
+| `working` | Yes | `completed`, `failed`, `pending` |
 | `completed` | No | (terminal) |
 | `failed` | No | `pending` |
 | `cancelled` | No | (terminal) |
 
-**Timed states** (like `in_progress`) automatically:
+**Timed states** (like `working`) automatically:
 - Set owner when entering
 - Track `time_actual_ms`
 - Clear owner when leaving
@@ -182,7 +182,7 @@ The `update` tool handles ownership based on state transitions:
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│ Transition to TIMED state (e.g., in_progress)          │
+│ Transition to TIMED state (e.g., working)          │
 │ → CLAIMS task: validates tags, checks limit, sets owner│
 ├────────────────────────────────────────────────────────┤
 │ Transition to NON-TIMED state (e.g., pending)          │

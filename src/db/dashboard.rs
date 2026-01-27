@@ -133,7 +133,7 @@ pub struct WorkerClaimedTask {
 }
 
 impl Database {
-    /// Get task statistics for the dashboard (total, in_progress, completed).
+    /// Get task statistics for the dashboard (total, working, completed).
     pub fn get_task_stats(&self) -> Result<(i64, i64, i64)> {
         self.with_conn(|conn| {
             let total: i64 = conn.query_row(
@@ -142,8 +142,8 @@ impl Database {
                 |row| row.get(0),
             )?;
             
-            let in_progress: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE status = 'in_progress' AND deleted_at IS NULL",
+            let working: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM tasks WHERE status = 'working' AND deleted_at IS NULL",
                 [],
                 |row| row.get(0),
             )?;
@@ -154,7 +154,7 @@ impl Database {
                 |row| row.get(0),
             )?;
             
-            Ok((total, in_progress, completed))
+            Ok((total, working, completed))
         })
     }
     
@@ -206,8 +206,8 @@ impl Database {
             
             let mut stmt = conn.prepare(
                 "SELECT w.id, 
-                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1),
-                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'in_progress')
+                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1),
+                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working')
                  FROM workers w
                  WHERE w.last_heartbeat > ?1
                  ORDER BY w.last_heartbeat DESC"
@@ -355,7 +355,7 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT id, title, status, current_thought 
                  FROM tasks 
-                 WHERE worker_id = ?1 AND status = 'in_progress' AND deleted_at IS NULL
+                 WHERE worker_id = ?1 AND status = 'working' AND deleted_at IS NULL
                  ORDER BY claimed_at DESC"
             )?;
             

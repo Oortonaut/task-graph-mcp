@@ -79,7 +79,7 @@ A coordinator assigns tasks directly to you. The task appears with:
 # Check for assigned tasks
 list_tasks(owner=worker_id, status="assigned")
 
-# Start work (transitions to in_progress)
+# Start work (transitions to working)
 claim(worker_id=worker_id, task=task_id)
 ```
 
@@ -113,7 +113,7 @@ list_tasks(ready=true, worker_id=worker_id)
 │ 2. CLAIM                                            │
 │    claim(worker_id=worker_id, task=task_id)         │
 │    • Now you own this task                          │
-│    • Status changes to in_progress                  │
+│    • Status changes to working                  │
 │    • Timer starts for time tracking                 │
 ├─────────────────────────────────────────────────────┤
 │ 3. WORK                                             │

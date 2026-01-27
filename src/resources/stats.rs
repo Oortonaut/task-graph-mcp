@@ -52,7 +52,7 @@ pub fn get_acp_plan(db: &Database) -> Result<Value> {
             // Map status to ACP format
             let status = match t.status.as_str() {
                 "pending" => "todo",
-                "in_progress" => "in_progress",
+                "working" => "working",
                 "completed" => "done",
                 _ => &t.status, // Pass through other states
             };

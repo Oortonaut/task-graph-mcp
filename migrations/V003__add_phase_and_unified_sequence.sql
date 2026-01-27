@@ -47,3 +47,7 @@ CREATE INDEX idx_task_seq_phase ON task_sequence(phase) WHERE phase IS NOT NULL;
 -- Add indexes for phase filtering on tasks
 CREATE INDEX idx_tasks_phase ON tasks(phase);
 CREATE INDEX idx_tasks_phase_status ON tasks(phase, status);
+
+-- Rename 'in_progress' status to 'working'
+UPDATE tasks SET status = 'working' WHERE status = 'in_progress';
+UPDATE task_sequence SET status = 'working' WHERE status = 'in_progress';

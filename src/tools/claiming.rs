@@ -53,7 +53,7 @@ pub fn claim(
         .iter()
         .find(|(_, def)| def.timed)
         .map(|(name, _)| name.clone())
-        .unwrap_or_else(|| "in_progress".to_string());
+        .unwrap_or_else(|| "working".to_string());
 
     // Use unified update which handles claiming when transitioning to timed state
     // Claim transitions TO a blocking state, so unblocked/auto_advanced will be empty

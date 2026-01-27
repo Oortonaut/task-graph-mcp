@@ -66,7 +66,7 @@ Track completion over time:
 ├─────────────────────────────────────────┤
 │ Queries:                                │
 │ • list_tasks(status="completed")        │
-│ • list_tasks(status="in_progress")      │
+│ • list_tasks(status="working")      │
 │ • list_tasks(status="pending")          │
 │                                         │
 │ Calculate:                              │
@@ -178,7 +178,7 @@ Analyze agent activity:
 list_tasks(status="completed")
 
 # Multiple statuses
-list_tasks(status=["pending", "in_progress"])
+list_tasks(status=["pending", "working"])
 
 # Only ready (unclaimed, unblocked)
 list_tasks(ready=true)
@@ -235,7 +235,7 @@ Generated: {timestamp}
 ## Overview
 - **Total Tasks:** {total}
 - **Completed:** {completed} ({percent}%)
-- **In Progress:** {in_progress}
+- **In Progress:** {working}
 - **Blocked:** {blocked}
 
 ## Velocity

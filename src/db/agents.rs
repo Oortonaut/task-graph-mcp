@@ -250,7 +250,7 @@ impl Database {
 
             // Return current claim count
             let count: i32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'in_progress'",
+                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'working'",
                 params![worker_id],
                 |row| row.get(0),
             )?;
@@ -337,8 +337,8 @@ impl Database {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
-                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'in_progress') as claim_count,
-                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
+                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working') as claim_count,
+                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1) as current_thought
                  FROM workers w ORDER BY w.registered_at DESC",
             )?;
 
@@ -389,8 +389,8 @@ impl Database {
             // Start with base query
             let mut sql = String::from(
                 "SELECT DISTINCT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
-                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'in_progress') as claim_count,
-                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'in_progress' AND current_thought IS NOT NULL LIMIT 1) as current_thought
+                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working') as claim_count,
+                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1) as current_thought
                  FROM workers w WHERE 1=1",
             );
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -602,7 +602,7 @@ impl Database {
     pub fn get_claim_count(&self, worker_id: &str) -> Result<i32> {
         self.with_conn(|conn| {
             let count: i32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'in_progress'",
+                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'working'",
                 params![worker_id],
                 |row| row.get(0),
             )?;

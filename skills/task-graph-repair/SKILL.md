@@ -42,7 +42,7 @@ Run these queries to identify issues:
 | Query | Looking For |
 |-------|-------------|
 | `list_tasks(blocked=true)` | Tasks stuck on deps |
-| `list_tasks(status="in_progress")` | Potentially stale work |
+| `list_tasks(status="working")` | Potentially stale work |
 | `list_agents()` | Disconnected/stale agents |
 | `list_marks()` | Abandoned file marks |
 | `list_tasks(parent="null")` | Unexpected root tasks |
@@ -116,7 +116,7 @@ unblock(blocker=task_a, blocked=task_b)
 
 ```
 # Find claimed tasks
-list_tasks(status="in_progress")
+list_tasks(status="working")
 
 # Check agent status
 list_agents()
@@ -236,7 +236,7 @@ delete(task=old_task_id)
 get_state_history(task=task_id)
 
 # Should show transitions through timed states
-# If missing in_progress, time wasn't tracked
+# If missing working, time wasn't tracked
 ```
 
 **Repair:**
@@ -249,7 +249,7 @@ attach(task=task_id, name="time-estimate",
        content="Estimated actual time: 2 hours",
        mime="text/plain")
 
-# For future: ensure workers use claim() which sets in_progress
+# For future: ensure workers use claim() which sets working
 ```
 
 ---

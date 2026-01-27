@@ -448,7 +448,7 @@ mod task_tests {
                 &task.id,
                 Some("Updated".to_string()),
                 Some(Some("New Description".to_string())),
-                Some("in_progress".to_string()),
+                Some("working".to_string()),
                 Some(8),
                 None,
                 None,
@@ -458,7 +458,7 @@ mod task_tests {
 
         assert_eq!(updated.title, "Updated");
         assert_eq!(updated.description, Some("New Description".to_string()));
-        assert_eq!(updated.status, "in_progress");
+        assert_eq!(updated.status, "working");
         assert_eq!(updated.priority, 8);
     }
 
@@ -483,12 +483,12 @@ mod task_tests {
             .unwrap();
         assert!(task.completed_at.is_none());
 
-        // Need to transition through in_progress first (pending -> in_progress -> completed)
+        // Need to transition through working first (pending -> working -> completed)
         db.update_task(
             &task.id,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None,
             None,
             None,
@@ -710,12 +710,12 @@ mod task_tests {
                 &states_config,
             )
             .unwrap();
-        // Transition through in_progress to completed
+        // Transition through working to completed
         db.update_task(
             &task2.id,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None,
             None,
             None,
@@ -808,7 +808,7 @@ mod task_claiming_tests {
         let claimed = db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
         assert_eq!(claimed.worker_id, Some(agent.id.clone()));
-        assert_eq!(claimed.status, "in_progress");
+        assert_eq!(claimed.status, "working");
         assert!(claimed.claimed_at.is_some());
         assert!(claimed.started_at.is_some());
     }
@@ -1035,7 +1035,7 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        // Update to in_progress (timed state) should claim the task
+        // Update to working (timed state) should claim the task
         let (updated, _unblocked, auto_advanced) = db
             .update_task_unified(
                 &task.id,
@@ -1043,7 +1043,7 @@ mod task_claiming_tests {
                 None, // assignee
                 None,
                 None,
-                Some("in_progress".to_string()),
+                Some("working".to_string()),
                 None, // phase
                 None,
                 None,
@@ -1059,7 +1059,7 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        assert_eq!(updated.status, "in_progress");
+        assert_eq!(updated.status, "working");
         assert_eq!(updated.worker_id, Some(agent.id.clone()));
         assert!(updated.claimed_at.is_some());
         assert!(auto_advanced.is_empty()); // No auto-advance with default config
@@ -1095,7 +1095,7 @@ mod task_claiming_tests {
             None, // assignee
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None, // phase
             None,
             None,
@@ -1175,7 +1175,7 @@ mod task_claiming_tests {
                 None, // assignee
                 None,
                 None,
-                Some("in_progress".to_string()),
+                Some("working".to_string()),
                 None, // phase
                 None,
                 None,
@@ -1228,7 +1228,7 @@ mod task_claiming_tests {
             None, // assignee
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None, // phase
             None,
             None,
@@ -1278,7 +1278,7 @@ mod task_claiming_tests {
             None, // assignee
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None, // phase
             None,
             None,
@@ -1365,12 +1365,12 @@ mod task_claiming_tests {
         definitions.insert(
             "pending".to_string(),
             StateDefinition {
-                exits: vec!["in_progress".to_string(), "cancelled".to_string()],
+                exits: vec!["working".to_string(), "cancelled".to_string()],
                 timed: false,
             },
         );
         definitions.insert(
-            "in_progress".to_string(),
+            "working".to_string(),
             StateDefinition {
                 exits: vec![
                     "reviewing".to_string(),
@@ -1385,7 +1385,7 @@ mod task_claiming_tests {
             "reviewing".to_string(),
             StateDefinition {
                 exits: vec![
-                    "in_progress".to_string(),
+                    "working".to_string(),
                     "completed".to_string(),
                     "failed".to_string(),
                 ],
@@ -1419,7 +1419,7 @@ mod task_claiming_tests {
             disconnect_state: "pending".to_string(),
             blocking_states: vec![
                 "pending".to_string(),
-                "in_progress".to_string(),
+                "working".to_string(),
                 "reviewing".to_string(),
             ],
             definitions,
@@ -1450,7 +1450,7 @@ mod task_claiming_tests {
                 None, // assignee
                 None,
                 None,
-                Some("in_progress".to_string()),
+                Some("working".to_string()),
                 None, // phase
                 None,
                 None,
@@ -1466,7 +1466,7 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        assert_eq!(updated.status, "in_progress");
+        assert_eq!(updated.status, "working");
         assert_eq!(updated.worker_id, Some(agent.id.clone()));
 
         // Transition to second timed state - should preserve ownership
@@ -1499,7 +1499,7 @@ mod task_claiming_tests {
 
         // Verify state history was recorded for both transitions
         let history = db.get_task_state_history(&task.id).unwrap();
-        // Should have: pending (initial), in_progress, reviewing
+        // Should have: pending (initial), working, reviewing
         assert!(
             history.len() >= 3,
             "Expected at least 3 history entries, got {}",
@@ -1512,8 +1512,8 @@ mod task_claiming_tests {
             "History should contain 'pending'"
         );
         assert!(
-            states.contains(&"in_progress"),
-            "History should contain 'in_progress'"
+            states.contains(&"working"),
+            "History should contain 'working'"
         );
         assert!(
             states.contains(&"reviewing"),
@@ -1548,9 +1548,9 @@ mod task_claiming_tests {
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
         let claimed = db.get_task(&task.id).unwrap().unwrap();
-        assert_eq!(claimed.status, "in_progress");
+        assert_eq!(claimed.status, "working");
 
-        // Update to the same state (in_progress -> in_progress)
+        // Update to the same state (working -> working)
         let (updated, _, _) = db
             .update_task_unified(
                 &task.id,
@@ -1558,7 +1558,7 @@ mod task_claiming_tests {
                 None, // assignee
                 None,
                 None,
-                Some("in_progress".to_string()),
+                Some("working".to_string()),
                 None, // phase
                 None,
                 None,
@@ -1574,16 +1574,16 @@ mod task_claiming_tests {
             )
             .unwrap();
 
-        assert_eq!(updated.status, "in_progress");
+        assert_eq!(updated.status, "working");
         assert_eq!(updated.worker_id, Some(agent.id.clone()));
 
         // Verify no additional history was recorded (status didn't change)
         let history = db.get_task_state_history(&task.id).unwrap();
-        // Should have: pending (initial), in_progress (from claim) - but NOT another in_progress
-        let in_progress_count = history.iter().filter(|e| e.status.as_deref() == Some("in_progress")).count();
+        // Should have: pending (initial), working (from claim) - but NOT another working
+        let working_count = history.iter().filter(|e| e.status.as_deref() == Some("working")).count();
         assert_eq!(
-            in_progress_count, 1,
-            "Should only have one in_progress entry, not duplicates"
+            working_count, 1,
+            "Should only have one working entry, not duplicates"
         );
     }
 
@@ -1668,7 +1668,7 @@ mod task_claiming_tests {
 
         // Verify state history was recorded for all transitions
         let history = db.get_task_state_history(&task.id).unwrap();
-        // Should have: pending (initial), in_progress (claim), failed, pending
+        // Should have: pending (initial), working (claim), failed, pending
         assert!(
             history.len() >= 4,
             "Expected at least 4 history entries, got {}",
@@ -1739,7 +1739,7 @@ mod task_claiming_tests {
             None,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None, // phase
             None,
             None,
@@ -1834,7 +1834,7 @@ mod task_claiming_tests {
             None,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None, // phase
             None,
             None,
@@ -1937,7 +1937,7 @@ mod task_claiming_tests {
             None,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None, // phase
             None,
             None,
@@ -1957,7 +1957,7 @@ mod task_claiming_tests {
             "Claim should succeed after blocking task is completed"
         );
         let (task, _, _) = result.unwrap();
-        assert_eq!(task.status, "in_progress");
+        assert_eq!(task.status, "working");
         assert_eq!(task.worker_id.as_deref(), Some(agent.id.as_str()));
     }
 
@@ -2012,7 +2012,7 @@ mod task_claiming_tests {
             None,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None, // phase
             None,
             None,
@@ -2032,7 +2032,7 @@ mod task_claiming_tests {
             "Claim with force=true should succeed even when task has unsatisfied dependencies"
         );
         let (task, _, _) = result.unwrap();
-        assert_eq!(task.status, "in_progress");
+        assert_eq!(task.status, "working");
     }
 }
 
@@ -2318,12 +2318,12 @@ mod dependency_tests {
         db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
             .unwrap();
 
-        // Complete blocker (need to transition through in_progress first)
+        // Complete blocker (need to transition through working first)
         db.update_task(
             &task1.id,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None,
             None,
             None,
@@ -2841,12 +2841,12 @@ mod stats_tests {
                 &states_config,
             )
             .unwrap();
-        // Transition through in_progress to completed
+        // Transition through working to completed
         db.update_task(
             &task2.id,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some("working".to_string()),
             None,
             None,
             None,
@@ -3006,7 +3006,7 @@ mod state_transition_tests {
     }
 
     #[test]
-    fn claim_task_records_in_progress_transition() {
+    fn claim_task_records_working_transition() {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
@@ -3032,12 +3032,12 @@ mod state_transition_tests {
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].status.as_deref().unwrap(), "pending");
         assert!(history[0].end_timestamp.is_some()); // Closed by claim
-        assert_eq!(history[1].status.as_deref().unwrap(), "in_progress");
+        assert_eq!(history[1].status.as_deref().unwrap(), "working");
         assert!(history[1].worker_id.is_some());
     }
 
     #[test]
-    fn complete_task_accumulates_time_from_in_progress() {
+    fn complete_task_accumulates_time_from_working() {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db.register_worker(None, vec![], false).unwrap();
@@ -3105,11 +3105,11 @@ mod state_transition_tests {
             .unwrap();
 
         let updated = db.get_task(&task.id).unwrap().unwrap();
-        // Should have accumulated time from both in_progress periods
+        // Should have accumulated time from both working periods
         assert!(updated.time_actual_ms.unwrap() >= 100);
 
         let history = db.get_task_state_history(&task.id).unwrap();
-        // pending -> in_progress -> pending -> in_progress -> completed
+        // pending -> working -> pending -> working -> completed
         assert_eq!(history.len(), 5);
     }
 
@@ -3284,9 +3284,9 @@ mod state_transition_tests {
         let states: Vec<&str> = history.iter().map(|e| e.status.as_deref().unwrap_or("")).collect();
         assert!(
             states.contains(&"pending")
-                && states.contains(&"in_progress")
+                && states.contains(&"working")
                 && states.contains(&"completed"),
-            "Expected pending, in_progress, and completed in history, got {:?}",
+            "Expected pending, working, and completed in history, got {:?}",
             states
         );
 
@@ -3399,8 +3399,8 @@ mod auto_advance_tests {
         // Note: We need a "ready" state that tasks can transition to.
         // By default, StatesConfig may not have "ready" as a valid state.
         // Let's use the initial state transitions. We'll need to check what's valid.
-        // Actually, for this test, let's just use in_progress since it should be a valid transition.
-        // But in_progress is timed, which would require claiming.
+        // Actually, for this test, let's just use working since it should be a valid transition.
+        // But working is timed, which would require claiming.
         // Let's check if pending can go to cancelled (non-timed) for testing.
         // Actually the plan suggests adding a "ready" state, but we should test with existing states.
         // We can test by checking if auto_advance returns the list even if the state is the same.
@@ -3411,7 +3411,7 @@ mod auto_advance_tests {
         // Let's just verify the list is returned when a dependency is satisfied.
 
         // Test with completed as target - but that's terminal and not a valid transition from pending
-        // Let's use in_progress as target - but that would claim the task
+        // Let's use working as target - but that would claim the task
         // The issue is the default state machine doesn't have a non-timed intermediate state
 
         // For this test, let's just verify the auto_advanced list is populated
@@ -3654,7 +3654,7 @@ mod auto_advance_tests {
         db.add_dependency(&task1.id, &task2.id, "blocks", &deps_config)
             .unwrap();
 
-        // Manually move task2 to in_progress (not initial state)
+        // Manually move task2 to working (not initial state)
         db.claim_task(&task2.id, &agent.id, &states_config).unwrap();
 
         // Complete task1
@@ -3685,7 +3685,7 @@ mod auto_advance_tests {
         // task2 should NOT be auto-advanced because it's not in initial state
         assert!(auto_advanced.is_empty());
         let task2_updated = db.get_task(&task2.id).unwrap().unwrap();
-        assert_eq!(task2_updated.status, "in_progress"); // Unchanged
+        assert_eq!(task2_updated.status, "working"); // Unchanged
     }
 
     #[test]
@@ -3775,7 +3775,7 @@ mod auto_advance_tests {
 
         // task2 should be auto-advanced to cancelled
         // task3 should NOT be auto-advanced because "cancelled" is not a blocking state
-        // Wait, cancelled is not in blocking_states (which is [pending, in_progress] by default)
+        // Wait, cancelled is not in blocking_states (which is [pending, working] by default)
         // So task2 transitioning to cancelled should NOT trigger task3 to auto-advance
         // in the same transaction - it would need a separate update
         assert_eq!(auto_advanced.len(), 1);

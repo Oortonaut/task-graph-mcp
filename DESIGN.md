@@ -179,7 +179,7 @@ title Task State Machine (Default Configuration)
 
 state "pending" as pending : Initial state
 state "assigned" as assigned : Push coordination
-state "in_progress" as in_progress : **Timed state**\nAccumulates time_actual_ms
+state "working" as working : **Timed state**\nAccumulates time_actual_ms
 state "completed" as completed : Terminal (success)
 state "failed" as failed : Terminal (retriable)
 state "cancelled" as cancelled : Terminal (abandoned)
@@ -187,23 +187,23 @@ state "cancelled" as cancelled : Terminal (abandoned)
 [*] --> pending : create()
 
 pending --> assigned : update(assignee=X)
-pending --> in_progress : claim() / update(status)
+pending --> working : claim() / update(status)
 pending --> cancelled : update(status)
 
-assigned --> in_progress : claim() by assignee
+assigned --> working : claim() by assignee
 assigned --> pending : release
 assigned --> cancelled : update(status)
 
-in_progress --> completed : update(status)
-in_progress --> failed : update(status)
-in_progress --> pending : release / disconnect
+working --> completed : update(status)
+working --> failed : update(status)
+working --> pending : release / disconnect
 
 failed --> pending : retry
 
 completed --> [*]
 cancelled --> [*]
 
-note right of in_progress
+note right of working
   Only timed states contribute
   to time_actual_ms tracking.
   
@@ -226,7 +226,7 @@ end note
 |-------|-------|----------|----------|-------------|
 | `pending` | No | No | Yes | Initial state, waiting for claim |
 | `assigned` | No | No | Yes | Assigned to specific worker (push model) |
-| `in_progress` | **Yes** | No | Yes | Active work, time tracked |
+| `working` | **Yes** | No | Yes | Active work, time tracked |
 | `completed` | No | Yes | No | Successfully finished |
 | `failed` | No | Yes | No | Failed, can retry |
 | `cancelled` | No | Yes | No | Abandoned, cannot retry |
@@ -350,7 +350,7 @@ server -> tools : call_tool("claim", args)
 tools -> db : BEGIN TRANSACTION
 tools -> db : check_dependencies()
 tools -> db : check_tag_requirements()
-tools -> db : update_task(status=in_progress)
+tools -> db : update_task(status=working)
 tools -> db : record_state_transition()
 tools -> db : COMMIT
 db --> tools : claimed task
@@ -468,7 +468,7 @@ s --> b : ok (no conflict)
 ### Why Configurable States?
 
 Different workflows need different state machines:
-- Simple: `pending` → `in_progress` → `completed`
+- Simple: `pending` → `working` → `completed`
 - With review: Add `review` state before `completed`
 - With ready queue: Add `ready` state after `pending`
 

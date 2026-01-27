@@ -27,7 +27,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
             },
             "status_filter": {
                 "type": "string",
-                "description": "Optional status to filter results by (e.g., 'pending', 'in_progress')"
+                "description": "Optional status to filter results by (e.g., 'pending', 'working')"
             }
         }),
         vec!["query"],

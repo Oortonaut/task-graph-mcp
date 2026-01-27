@@ -200,7 +200,7 @@ get(task=parent_id, children=true, format="markdown")
 
 | Signal | Meaning | Action |
 |--------|---------|--------|
-| Task `in_progress` long | Agent may be stuck | Check `thinking`, offer help |
+| Task `working` long | Agent may be stuck | Check `thinking`, offer help |
 | Multiple tasks blocked | Bottleneck | Prioritize blocker |
 | Agent disconnected | Crashed or done | Check for orphaned claims |
 | No ready tasks | Work complete or stuck | Verify tree completion |
@@ -226,9 +226,9 @@ When a worker disconnects unexpectedly, their claimed tasks remain in-progress:
 
 ```
 # 1. Check for orphaned claims
-list_tasks(status="in_progress", format="markdown")
+list_tasks(status="working", format="markdown")
 list_agents(format="markdown")
-# Compare: tasks in_progress but owner not in agents list
+# Compare: tasks working but owner not in agents list
 
 # 2. Release orphaned tasks back to pool
 update(agent=coordinator_id, task=orphaned_task, state="pending", force=true)
@@ -302,7 +302,7 @@ Coordinator explicitly assigns tasks to specific workers. Good for:
 │            worker_id)           → sees assigned tasks       │
 │     → task.status = "assigned"                              │
 │     → task.owner = worker_id    claim(task) to start        │
-│                                 → status = "in_progress"    │
+│                                 → status = "working"    │
 │  3. Monitor progress            ... do work ...             │
 │                                 complete(task)              │
 └─────────────────────────────────────────────────────────────┘

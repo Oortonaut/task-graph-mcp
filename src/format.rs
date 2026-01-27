@@ -495,7 +495,7 @@ mod tests {
             task: make_test_task(
                 "root-1",
                 "API Refactoring Sprint",
-                "in_progress",
+                "working",
                 8,
                 Some(16),
             ),
@@ -542,7 +542,7 @@ mod tests {
 
         // Check root formatting
         assert!(result.contains("# API Refactoring Sprint"));
-        assert!(result.contains("IN_PROGRESS"));
+        assert!(result.contains("WORKING"));
 
         // Check tree structure characters
         assert!(result.contains("├── Tier 1: Prerequisites"));

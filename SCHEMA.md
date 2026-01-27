@@ -185,7 +185,7 @@ Append-only audit log of task state transitions, enabling automatic time trackin
 - `idx_task_state_seq_open` on `task_id` WHERE `end_timestamp IS NULL`
 
 **Notes:**
-- Time spent in "working" states (like `in_progress`) is automatically added to `time_actual_ms` when transitioning out
+- Time spent in "working" states (like `working`) is automatically added to `time_actual_ms` when transitioning out
 - The `end_timestamp` is filled when the next transition occurs
 - Provides complete audit trail of task lifecycle
 
@@ -197,7 +197,7 @@ Task states are fully configurable via YAML. The configuration defines:
 
 - **initial** - Default state for new tasks (default: `pending`)
 - **disconnect_state** - State for tasks when their owner disconnects; must be untimed (default: `pending`)
-- **blocking_states** - States that block dependent tasks (default: `[pending, in_progress]`)
+- **blocking_states** - States that block dependent tasks (default: `[pending, working]`)
 - **definitions** - Per-state settings including allowed transitions and time tracking
 
 ### Default States
@@ -206,12 +206,12 @@ Task states are fully configurable via YAML. The configuration defines:
 states:
   initial: pending
   disconnect_state: pending
-  blocking_states: [pending, in_progress]
+  blocking_states: [pending, working]
   definitions:
     pending:
-      exits: [in_progress, cancelled]
+      exits: [working, cancelled]
       timed: false
-    in_progress:
+    working:
       exits: [completed, failed, pending]
       timed: true
     completed:
@@ -242,7 +242,7 @@ states:
 
 ### Dependency Propagation
 
-When a task transitions from a blocking state to a non-blocking state (e.g., `in_progress` → `completed`), the system automatically:
+When a task transitions from a blocking state to a non-blocking state (e.g., `working` → `completed`), the system automatically:
 
 1. **Reports unblocked tasks** - The `update` tool response includes an `unblocked` array listing task IDs whose dependencies are now satisfied
 2. **Optionally auto-advances** - If `auto_advance` is enabled, unblocked tasks transition to the configured target state

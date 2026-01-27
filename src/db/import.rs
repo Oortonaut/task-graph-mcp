@@ -1881,7 +1881,7 @@ mod tests {
                     "id": 2,
                     "task_id": "task-1",
                     "worker_id": "worker-1",
-                    "event": "in_progress",
+                    "event": "working",
                     "reason": "Started work",
                     "timestamp": 1700000000500_i64,
                     "end_timestamp": 1700000001000_i64

@@ -1167,7 +1167,7 @@ impl Database {
     }
 
     /// Claim a task for an agent.
-    /// Uses the first timed state (typically "in_progress") as the claiming state.
+    /// Uses the first timed state (typically "working") as the claiming state.
     pub fn claim_task(
         &self,
         task_id: &str,
@@ -1176,13 +1176,13 @@ impl Database {
     ) -> Result<Task> {
         let now = now_ms();
 
-        // Find the first timed state to use for claiming (typically "in_progress")
+        // Find the first timed state to use for claiming (typically "working")
         let claim_status = states_config
             .definitions
             .iter()
             .find(|(_, def)| def.timed)
             .map(|(name, _)| name.as_str())
-            .unwrap_or("in_progress");
+            .unwrap_or("working");
 
         self.with_conn(|conn| {
             // Get the task (using internal helper to avoid deadlock)
@@ -1337,13 +1337,13 @@ impl Database {
     ) -> Result<Task> {
         let now = now_ms();
 
-        // Find the first timed state to use for claiming (typically "in_progress")
+        // Find the first timed state to use for claiming (typically "working")
         let claim_status = states_config
             .definitions
             .iter()
             .find(|(_, def)| def.timed)
             .map(|(name, _)| name.as_str())
-            .unwrap_or("in_progress");
+            .unwrap_or("working");
 
         self.with_conn(|conn| {
             // Get the task

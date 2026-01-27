@@ -31,7 +31,7 @@ server -> tools : call_tool("claim", args)
 tools -> db : BEGIN TRANSACTION
 tools -> db : check_dependencies()
 tools -> db : check_tag_requirements()
-tools -> db : update_task(status=in_progress)
+tools -> db : update_task(status=working)
 tools -> db : record_state_transition()
 tools -> db : COMMIT
 db --> tools : claimed task

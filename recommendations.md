@@ -29,7 +29,7 @@ Coordinated 16 worker agents completing 15 tasks:
 ### Progress Visibility
 - `thinking()` updates show real-time worker status
 - `list_agents` dashboard shows all workers + current thoughts
-- `list_tasks(status="in_progress")` shows active work
+- `list_tasks(status="working")` shows active work
 
 ### Task Dependencies
 - `sibling_type: "follows"` for sequential subtasks (top-level param)

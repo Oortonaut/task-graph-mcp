@@ -144,7 +144,7 @@ auto_advance:
 
 ### States Configuration
 
-Task states are configurable. Default states: `pending`, `in_progress`, `completed`, `failed`, `cancelled`.
+Task states are configurable. Default states: `pending`, `working`, `completed`, `failed`, `cancelled`.
 
 To add a `ready` state for auto-advance:
 
@@ -152,13 +152,13 @@ To add a `ready` state for auto-advance:
 states:
   initial: pending
   disconnect_state: pending  # State for tasks when owner disconnects (must be untimed)
-  blocking_states: [pending, in_progress]
+  blocking_states: [pending, working]
   definitions:
     pending:
-      exits: [ready, in_progress, cancelled]
+      exits: [ready, working, cancelled]
     ready:
-      exits: [in_progress, cancelled]
-    in_progress:
+      exits: [working, cancelled]
+    working:
       exits: [completed, failed, pending]
       timed: true    # Time in this state counts toward time_actual_ms
     completed:

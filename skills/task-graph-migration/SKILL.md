@@ -237,7 +237,7 @@ create_tree(tree={
 | Source | task-graph |
 |--------|------------|
 | open, todo, backlog | pending |
-| in progress, doing, active | in_progress |
+| in progress, doing, active | working |
 | done, closed, complete | completed |
 | blocked, on hold | pending + blocked_by |
 | cancelled, wontfix | cancelled |
