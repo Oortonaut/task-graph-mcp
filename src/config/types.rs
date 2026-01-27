@@ -1,4 +1,6 @@
-//! Configuration loading and management.
+//! Configuration types and structures.
+//!
+//! This module contains all the configuration types used throughout the application.
 
 use crate::format::OutputFormat;
 use anyhow::{Result, anyhow};
@@ -326,19 +328,19 @@ impl Default for ServerConfig {
 }
 
 fn default_db_path() -> PathBuf {
-    PathBuf::from(".task-graph/tasks.db")
+    PathBuf::from("task-graph/tasks.db")
 }
 
 fn default_media_dir() -> PathBuf {
-    PathBuf::from(".task-graph/media")
+    PathBuf::from("task-graph/media")
 }
 
 fn default_skills_dir() -> PathBuf {
-    PathBuf::from(".task-graph/skills")
+    PathBuf::from("task-graph/skills")
 }
 
 fn default_log_dir() -> PathBuf {
-    PathBuf::from(".task-graph/logs")
+    PathBuf::from("task-graph/logs")
 }
 
 fn default_claim_limit() -> i32 {
@@ -814,6 +816,7 @@ impl Default for PhasesConfig {
 fn default_phases() -> HashSet<String> {
     [
         "deliver",    // Top-level deliverable
+        "triage",     // Initial assessment and prioritization
         "explore",    // Research and discovery
         "diagnose",   // Debugging and troubleshooting
         "design",     // Architecture and design
@@ -878,6 +881,8 @@ impl Config {
     }
 
     /// Load configuration from default locations or return defaults.
+    /// 
+    /// **Deprecated**: Use `ConfigLoader::load()` instead for proper tier merging.
     pub fn load_or_default() -> Self {
         // Try TASK_GRAPH_CONFIG_PATH environment variable first
         if let Ok(config_path) = std::env::var("TASK_GRAPH_CONFIG_PATH")
@@ -886,7 +891,12 @@ impl Config {
             return config;
         }
 
-        // Try .task-graph/config.yaml
+        // Try task-graph/config.yaml (new location)
+        if let Ok(config) = Self::load("task-graph/config.yaml") {
+            return config;
+        }
+
+        // Try .task-graph/config.yaml (deprecated location)
         if let Ok(config) = Self::load(".task-graph/config.yaml") {
             return config;
         }
@@ -967,8 +977,15 @@ impl Prompts {
     }
 
     /// Load prompts from default location or return defaults.
+    /// 
+    /// **Deprecated**: Use `ConfigLoader` for proper tier merging.
     pub fn load_or_default() -> Self {
-        // Try .task-graph/prompts.yaml
+        // Try task-graph/prompts.yaml (new location)
+        if let Ok(prompts) = Self::load("task-graph/prompts.yaml") {
+            return prompts;
+        }
+
+        // Try .task-graph/prompts.yaml (deprecated location)
         if let Ok(prompts) = Self::load(".task-graph/prompts.yaml") {
             return prompts;
         }

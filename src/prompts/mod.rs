@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 /// Default prompts embedded at compile time.
 pub mod defaults {
-    pub const ENTER_WORKING: &str = include_str!("../defaults/prompts/enter~working.md");
+    pub const ENTER_WORKING: &str = include_str!("../../config/prompts/enter~working.md");
 }
 
 /// Configuration for prompt directories.

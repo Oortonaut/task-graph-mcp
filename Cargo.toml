@@ -44,6 +44,7 @@ clap = { version = "4", features = ["derive"] }
 
 # Config
 serde_yaml = "0.9"
+dirs = "6"
 
 # Async traits
 async-trait = "0.1"

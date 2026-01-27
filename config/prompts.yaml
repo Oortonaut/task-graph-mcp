@@ -1,0 +1,15 @@
+# Task Graph MCP Server Prompts Configuration
+#
+# Override LLM-facing instructions and tool descriptions.
+# Create prompts.yaml in:
+#   - task-graph/prompts.yaml (project-level)
+#   - ~/.task-graph/prompts.yaml (user-level)
+
+# Server instructions shown to the LLM
+# instructions: |
+#   Custom instructions for your project...
+
+# Tool description overrides
+# tools:
+#   create_task:
+#     description: "Custom description for create_task tool"

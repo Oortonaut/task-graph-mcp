@@ -1,16 +1,19 @@
 //! Skill resources - expose bundled skills via MCP resources with override support.
 //!
 //! Skills can be overridden by placing custom SKILL.md files in:
-//! - `.task-graph/skills/{name}/SKILL.md` (project-local)
+//! - `~/.task-graph/skills/{name}/SKILL.md` (user-level, highest priority)
+//! - `task-graph/skills/{name}/SKILL.md` (project-level)
+//! - `.task-graph/skills/{name}/SKILL.md` (project-level, deprecated)
 //!
 //! The lookup order is:
-//! 1. Project-local override (`.task-graph/skills/`)
-//! 2. Embedded default (compiled into binary)
+//! 1. User override (`~/.task-graph/skills/`)
+//! 2. Project override (`task-graph/skills/` or `.task-graph/skills/`)
+//! 3. Embedded default (compiled into binary from `config/skills/`)
 //!
 //! ## Security
 //!
 //! Custom (non-override) skills require explicit approval before content is served.
-//! Approvals are stored in `.task-graph/skills/.approved` (one skill name per line).
+//! Approvals are stored in the skills directory as `.approved` (one skill name per line).
 //! Built-in skills and overrides of built-in skills are trusted by default.
 
 use anyhow::Result;
@@ -19,14 +22,14 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Embedded skill content (compiled into binary).
-/// These are the SKILL.md files from the skills/ directory.
+/// These are the SKILL.md files from the config/skills/ directory.
 pub mod embedded {
-    pub const BASICS: &str = include_str!("../../skills/task-graph-basics/SKILL.md");
-    pub const COORDINATOR: &str = include_str!("../../skills/task-graph-coordinator/SKILL.md");
-    pub const WORKER: &str = include_str!("../../skills/task-graph-worker/SKILL.md");
-    pub const REPORTING: &str = include_str!("../../skills/task-graph-reporting/SKILL.md");
-    pub const MIGRATION: &str = include_str!("../../skills/task-graph-migration/SKILL.md");
-    pub const REPAIR: &str = include_str!("../../skills/task-graph-repair/SKILL.md");
+    pub const BASICS: &str = include_str!("../../config/skills/task-graph-basics/SKILL.md");
+    pub const COORDINATOR: &str = include_str!("../../config/skills/task-graph-coordinator/SKILL.md");
+    pub const WORKER: &str = include_str!("../../config/skills/task-graph-worker/SKILL.md");
+    pub const REPORTING: &str = include_str!("../../config/skills/task-graph-reporting/SKILL.md");
+    pub const MIGRATION: &str = include_str!("../../config/skills/task-graph-migration/SKILL.md");
+    pub const REPAIR: &str = include_str!("../../config/skills/task-graph-repair/SKILL.md");
 }
 
 /// Skill metadata for listing.

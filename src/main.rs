@@ -18,10 +18,10 @@ use rmcp::{
 use serde_json::{Value, json};
 use std::fs::OpenOptions;
 use std::sync::Arc;
-use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode};
+use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode, migrate};
 use task_graph_mcp::config::{
-    AttachmentsConfig, AutoAdvanceConfig, Config, DependenciesConfig, PhasesConfig, Prompts,
-    ServerPaths, StatesConfig, UiMode,
+    AttachmentsConfig, AutoAdvanceConfig, Config, ConfigLoader, DependenciesConfig, PhasesConfig,
+    Prompts, ServerPaths, StatesConfig, UiMode,
 };
 use task_graph_mcp::dashboard;
 use task_graph_mcp::db::Database;
@@ -253,13 +253,29 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Load configuration and track config path
-    let config_path_used = cli.config.clone();
-    let mut config = if let Some(config_path) = &cli.config {
-        Config::load(config_path)?
-    } else {
-        Config::load_or_default()
-    };
+    // Load configuration using the new ConfigLoader with tier merging
+    // If explicit config path given, set it as env var for ConfigLoader to pick up
+    // SAFETY: This is safe at program startup before any other threads are spawned
+    if let Some(config_path) = &cli.config {
+        // Use unsafe block for set_var which is required in Rust 2024 edition
+        unsafe {
+            std::env::set_var("TASK_GRAPH_CONFIG_PATH", config_path);
+        }
+    }
+    let mut loader = ConfigLoader::load()?;
+
+    // Track if using deprecated paths
+    if loader.is_using_deprecated() {
+        eprintln!(
+            "Warning: Using deprecated config directory '.task-graph/'. \
+             Run 'task-graph migrate' to move to 'task-graph/'."
+        );
+    }
+
+    let config_path_used = loader.config_path().map(|p| p.to_string_lossy().to_string());
+
+    // Get mutable reference to apply CLI overrides
+    let config = loader.config_mut();
 
     // Override paths from CLI arguments
     if let Some(db_path) = &cli.database {
@@ -294,9 +310,17 @@ async fn main() -> Result<()> {
             // TODO: Implement diff command
             anyhow::bail!("Diff command not yet implemented");
         }
+        Some(Command::Migrate(args)) => {
+            // Run migration command
+            migrate::run_migrate(&args)?;
+        }
         Some(Command::Serve) | None => {
+            // Load prompts using the loader (before consuming it)
+            let prompts = loader.load_prompts();
+            // Get the final config
+            let config = loader.into_config();
             // Default: run MCP server
-            run_server(config, config_path_used).await?;
+            run_server(config, prompts, config_path_used).await?;
         }
     }
 
@@ -304,7 +328,7 @@ async fn main() -> Result<()> {
 }
 
 /// Run the MCP server
-async fn run_server(config: Config, config_path_used: Option<String>) -> Result<()> {
+async fn run_server(config: Config, prompts: Prompts, config_path_used: Option<String>) -> Result<()> {
     // Ensure directories exist
     config.ensure_db_dir()?;
     config.ensure_media_dir()?;
@@ -314,8 +338,8 @@ async fn run_server(config: Config, config_path_used: Option<String>) -> Result<
     config.states.validate()?;
     config.dependencies.validate()?;
 
-    // Load prompts
-    let prompts = Arc::new(Prompts::load_or_default());
+    // Wrap prompts in Arc
+    let prompts = Arc::new(prompts);
 
     info!(
         "Starting Task Graph MCP Server v{}",

@@ -1,0 +1,170 @@
+# Task Graph MCP Server Configuration
+# 
+# This file contains default configuration values.
+# Override by creating config.yaml in:
+#   - task-graph/config.yaml (project-level)
+#   - ~/.task-graph/config.yaml (user-level)
+#
+# Environment variables take highest precedence:
+#   TASK_GRAPH_DB_PATH, TASK_GRAPH_MEDIA_DIR, TASK_GRAPH_LOG_DIR, TASK_GRAPH_SKILLS_DIR
+
+server:
+  # Path to SQLite database file
+  db_path: "task-graph/tasks.db"
+  
+  # Path to media directory for file attachments
+  media_dir: "task-graph/media"
+  
+  # Path to skills directory for custom skills
+  skills_dir: "task-graph/skills"
+  
+  # Path to log directory
+  log_dir: "task-graph/logs"
+  
+  # Maximum tasks an agent can claim simultaneously
+  claim_limit: 5
+  
+  # Seconds before a claim is considered stale (15 minutes)
+  stale_timeout_seconds: 900
+  
+  # Default output format: json or markdown
+  default_format: json
+  
+  # UI configuration
+  ui:
+    # UI mode: none (MCP only) or web (enable dashboard)
+    mode: none
+    # Port for web dashboard
+    port: 31994
+
+# Path handling configuration
+paths:
+  # Path style: relative or project_prefixed
+  style: relative
+
+# Task state machine configuration
+states:
+  # Default state for new tasks
+  initial: pending
+  
+  # State for tasks when agent disconnects (must be untimed)
+  disconnect_state: pending
+  
+  # States that block dependent tasks
+  blocking_states:
+    - pending
+    - assigned
+    - working
+  
+  # State definitions with transitions and timing
+  definitions:
+    pending:
+      exits: [assigned, working, cancelled]
+      timed: false
+    assigned:
+      exits: [working, pending, cancelled]
+      timed: false
+    working:
+      exits: [completed, failed, pending]
+      timed: true
+    completed:
+      exits: [pending]
+      timed: false
+    failed:
+      exits: [pending]
+      timed: false
+    cancelled:
+      exits: []
+      timed: false
+
+# Dependency type configuration
+dependencies:
+  definitions:
+    blocks:
+      display: horizontal
+      blocks: start
+    follows:
+      display: horizontal
+      blocks: start
+    contains:
+      display: vertical
+      blocks: completion
+    duplicate:
+      display: horizontal
+      blocks: none
+    see-also:
+      display: horizontal
+      blocks: none
+    relates-to:
+      display: horizontal
+      blocks: none
+
+# Auto-advance configuration
+auto_advance:
+  enabled: false
+  target_state: null
+
+# Attachment key definitions
+attachments:
+  # Behavior for unknown keys: allow, warn, reject
+  unknown_key: warn
+  
+  definitions:
+    commit:
+      mime: "text/git.hash"
+      mode: append
+    checkin:
+      mime: "text/p4.changelist"
+      mode: append
+    meta:
+      mime: "application/json"
+      mode: replace
+    note:
+      mime: "text/plain"
+      mode: append
+    log:
+      mime: "text/plain"
+      mode: append
+    error:
+      mime: "text/plain"
+      mode: append
+    output:
+      mime: "text/plain"
+      mode: append
+    diff:
+      mime: "text/x-diff"
+      mode: append
+    changelist:
+      mime: "text/plain"
+      mode: append
+    plan:
+      mime: "text/markdown"
+      mode: replace
+    result:
+      mime: "application/json"
+      mode: replace
+    context:
+      mime: "text/plain"
+      mode: replace
+
+# Phase definitions for work categorization
+phases:
+  # Behavior for unknown phases: allow, warn, reject
+  unknown_phase: warn
+  
+  definitions:
+    - deliver
+    - triage
+    - explore
+    - diagnose
+    - design
+    - plan
+    - implement
+    - test
+    - review
+    - security
+    - doc
+    - integrate
+    - deploy
+    - monitor
+    - optimize

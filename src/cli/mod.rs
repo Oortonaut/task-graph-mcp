@@ -6,11 +6,13 @@
 pub mod diff;
 pub mod export;
 pub mod import;
+pub mod migrate;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use diff::DiffArgs;
 use export::ExportArgs;
 use import::ImportArgs;
+use migrate::MigrateArgs;
 
 /// UI mode for the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
@@ -79,4 +81,7 @@ pub enum Command {
 
     /// Compare snapshot files or snapshot against database
     Diff(DiffArgs),
+
+    /// Migrate from deprecated .task-graph/ to task-graph/ directory
+    Migrate(MigrateArgs),
 }
