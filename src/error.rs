@@ -1,4 +1,4 @@
-//! Structured error types for tool responses.
+//! Structured error and warning types for tool responses.
 
 use serde::Serialize;
 use std::fmt;
@@ -33,6 +33,108 @@ pub enum ErrorCode {
     DatabaseError,
     InternalError,
     UnknownTool,
+}
+
+/// Warning codes for non-fatal issues.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WarningCode {
+    /// Referenced task does not exist (link skipped)
+    TaskNotFound,
+    /// Referenced dependency does not exist (link skipped)
+    DependencyNotFound,
+    /// Tag is not in the known tags list
+    UnknownTag,
+    /// Phase is not in the known phases list
+    UnknownPhase,
+    /// Duplicate operation (no-op)
+    Duplicate,
+    /// Deprecated feature or parameter
+    Deprecated,
+}
+
+/// A warning about a non-fatal issue in a tool operation.
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolWarning {
+    pub code: WarningCode,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+impl ToolWarning {
+    pub fn new(code: WarningCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            field: None,
+            value: None,
+        }
+    }
+
+    pub fn with_field(mut self, field: impl Into<String>) -> Self {
+        self.field = Some(field.into());
+        self
+    }
+
+    pub fn with_value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
+        self
+    }
+
+    // Convenience constructors
+
+    pub fn task_not_found(task_id: &str) -> Self {
+        Self::new(
+            WarningCode::TaskNotFound,
+            format!("Task '{}' not found, skipped", task_id),
+        )
+        .with_value(task_id)
+    }
+
+    pub fn dependency_not_found(task_id: &str, field: &str) -> Self {
+        Self::new(
+            WarningCode::DependencyNotFound,
+            format!("Dependency target '{}' not found, link skipped", task_id),
+        )
+        .with_field(field)
+        .with_value(task_id)
+    }
+
+    pub fn unknown_tag(tag: &str) -> Self {
+        Self::new(
+            WarningCode::UnknownTag,
+            format!("Tag '{}' is not in known tags list", tag),
+        )
+        .with_value(tag)
+    }
+
+    pub fn unknown_phase(phase: &str) -> Self {
+        Self::new(
+            WarningCode::UnknownPhase,
+            format!("Phase '{}' is not in known phases list", phase),
+        )
+        .with_value(phase)
+    }
+
+    pub fn duplicate(what: &str) -> Self {
+        Self::new(WarningCode::Duplicate, format!("{} already exists", what))
+    }
+
+    pub fn deprecated(feature: &str, alternative: &str) -> Self {
+        Self::new(
+            WarningCode::Deprecated,
+            format!("'{}' is deprecated, use '{}' instead", feature, alternative),
+        )
+    }
+}
+
+impl fmt::Display for ToolWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
 }
 
 /// Structured error for tool responses.

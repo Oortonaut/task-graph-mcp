@@ -27,6 +27,7 @@ pub mod state_transitions;
 pub mod stats;
 pub mod tasks;
 
+pub use deps::AddDependencyResult;
 pub use search::{AttachmentMatch, SearchResult};
 
 use anyhow::Result;

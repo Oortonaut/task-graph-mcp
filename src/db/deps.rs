@@ -103,8 +103,34 @@ fn build_order_clause(sort_by: Option<&str>, sort_order: Option<&str>) -> String
     format!("{} {}", field, order)
 }
 
+/// Result of attempting to add a dependency.
+#[derive(Debug)]
+pub enum AddDependencyResult {
+    /// Dependency was created successfully.
+    Created,
+    /// Dependency already existed (no change).
+    AlreadyExists,
+    /// Source task does not exist.
+    FromTaskNotFound,
+    /// Target task does not exist.
+    ToTaskNotFound,
+}
+
 impl Database {
+    /// Check if a task exists by ID.
+    pub fn task_exists(&self, task_id: &str) -> Result<bool> {
+        self.with_conn(|conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        })
+    }
+
     /// Add a typed dependency (from blocks/contains to).
+    /// Returns Ok(()) on success. For soft linking with warnings, use add_dependency_soft.
     pub fn add_dependency(
         &self,
         from_task_id: &str,
@@ -112,6 +138,26 @@ impl Database {
         dep_type: &str,
         deps_config: &DependenciesConfig,
     ) -> Result<()> {
+        match self.add_dependency_soft(from_task_id, to_task_id, dep_type, deps_config)? {
+            AddDependencyResult::Created | AddDependencyResult::AlreadyExists => Ok(()),
+            AddDependencyResult::FromTaskNotFound => {
+                Err(anyhow!("Source task '{}' not found", from_task_id))
+            }
+            AddDependencyResult::ToTaskNotFound => {
+                Err(anyhow!("Target task '{}' not found", to_task_id))
+            }
+        }
+    }
+
+    /// Add a typed dependency with soft failure (returns result status instead of error).
+    /// Use this when you want to handle missing tasks as warnings.
+    pub fn add_dependency_soft(
+        &self,
+        from_task_id: &str,
+        to_task_id: &str,
+        dep_type: &str,
+        deps_config: &DependenciesConfig,
+    ) -> Result<AddDependencyResult> {
         // Validate dependency type
         if !deps_config.is_valid_dep_type(dep_type) {
             return Err(anyhow!(
@@ -119,6 +165,14 @@ impl Database {
                 dep_type,
                 deps_config.dep_type_names()
             ));
+        }
+
+        // Check if tasks exist first
+        if !self.task_exists(from_task_id)? {
+            return Ok(AddDependencyResult::FromTaskNotFound);
+        }
+        if !self.task_exists(to_task_id)? {
+            return Ok(AddDependencyResult::ToTaskNotFound);
         }
 
         // For vertical (contains) dependencies, check single-parent constraint
@@ -142,11 +196,15 @@ impl Database {
         }
 
         self.with_conn(|conn| {
-            conn.execute(
+            let changes = conn.execute(
                 "INSERT OR IGNORE INTO dependencies (from_task_id, to_task_id, dep_type) VALUES (?1, ?2, ?3)",
                 params![from_task_id, to_task_id, dep_type],
             )?;
-            Ok(())
+            if changes == 0 {
+                Ok(AddDependencyResult::AlreadyExists)
+            } else {
+                Ok(AddDependencyResult::Created)
+            }
         })
     }
 

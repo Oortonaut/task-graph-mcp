@@ -2,8 +2,8 @@
 
 use super::{get_string, make_tool_with_prompts};
 use crate::config::{DependenciesConfig, Prompts};
-use crate::db::Database;
-use crate::error::ToolError;
+use crate::db::{AddDependencyResult, Database};
+use crate::error::{ToolError, ToolWarning};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
@@ -174,17 +174,30 @@ pub fn link(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Res
     let dep_type = get_string(&args, "type").unwrap_or_else(|| "blocks".to_string());
 
     let mut created = Vec::new();
+    let mut warnings: Vec<ToolWarning> = Vec::new();
     let mut errors = Vec::new();
 
     // Create all combinations of from x to
     for from_id in &from_ids {
         for to_id in &to_ids {
-            match db.add_dependency(from_id, to_id, &dep_type, deps_config) {
-                Ok(()) => created.push(json!({
+            match db.add_dependency_soft(from_id, to_id, &dep_type, deps_config) {
+                Ok(AddDependencyResult::Created) => created.push(json!({
                     "from": from_id,
                     "to": to_id,
                     "type": &dep_type
                 })),
+                Ok(AddDependencyResult::AlreadyExists) => {
+                    warnings.push(ToolWarning::duplicate(&format!(
+                        "dependency {} -> {}",
+                        from_id, to_id
+                    )));
+                }
+                Ok(AddDependencyResult::FromTaskNotFound) => {
+                    warnings.push(ToolWarning::task_not_found(from_id).with_field("from"));
+                }
+                Ok(AddDependencyResult::ToTaskNotFound) => {
+                    warnings.push(ToolWarning::dependency_not_found(to_id, "to"));
+                }
                 Err(e) => errors.push(json!({
                     "from": from_id,
                     "to": to_id,
@@ -197,6 +210,7 @@ pub fn link(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Res
     Ok(json!({
         "success": errors.is_empty(),
         "created": created,
+        "warnings": warnings,
         "errors": errors,
         "type": dep_type
     }))
