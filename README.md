@@ -1,21 +1,23 @@
 # Task Graph MCP Server
 
-**Multi-agent AI coordination that actually works.**
+**Agent task workflows that actually work.**
 
-When you have multiple AI agents working on the same codebase, things go wrong fast. Agents overwrite each other's changes. They duplicate work. They break dependencies. Task Graph solves this with proper coordination primitives: DAG-based task dependencies, advisory file locks, and atomic claiming—all through the Model Context Protocol.
+When you have AI agents working on complex tasks, things go wrong fast. Agents lose context, skip steps, forget to coordinate. Task Graph solves this with structured workflows: phases to guide work, prompts for automatic guidance, gates to enforce quality, and coordination primitives for multi-agent scenarios—all through the Model Context Protocol.
 
 ## Why Task Graph?
 
-**The problem**: You've got a complex task that needs multiple AI agents working in parallel. Maybe a coordinator breaking down work, specialists handling different domains, validators checking results. Without coordination, it's chaos.
+**The problem**: You've got complex tasks that need structured execution. Maybe a single agent working through phases, or multiple agents coordinating in parallel. Without proper workflows, agents lose track, skip steps, and produce inconsistent results.
 
 **What you get**:
 
-- **No stepping on toes** — Advisory file locks let agents see who's editing what and why. No more blind overwrites or merge conflicts.
-- **Dependency-aware execution** — Tasks form a DAG with cycle detection. Agents only claim work when dependencies are satisfied.
+- **Structured workflows** — Phases (explore, implement, review, test) guide agents through work. Transition prompts provide automatic guidance at each step.
+- **Quality gates** — Require tests to pass, code to be committed, or reviews to complete before transitions. Enforce your standards automatically.
+- **Ready-to-use topologies** — Pre-built workflows for solo work, parallel swarms, specialist relays, or hierarchical delegation. Start immediately, customize later.
+- **Configurable workflows** — Define your own states, phases, prompts, and gates. Match your process, not ours.
+- **Multi-agent coordination** — Advisory file locks, DAG dependencies, atomic claiming. No more conflicts or duplicate work.
 - **Token-efficient** — Designed for LLM context limits. Compact queries, minimal round-trips, structured outputs.
 - **Built-in accounting** — Track tokens, cost, and time per task. Know exactly what your agents are spending.
 - **Zero infrastructure** — SQLite with WAL mode. No database server to run. Just point at a file.
-- **Configurable workflows** — Define your own states, transitions, and dependency types. Match your process, not ours.
 
 ## Features
 
@@ -23,6 +25,10 @@ When you have multiple AI agents working on the same codebase, things go wrong f
 |---------|-------------|
 | **Task Hierarchy** | Unlimited nesting with parent/child relationships |
 | **DAG Dependencies** | Typed edges (blocks, follows, contains) with cycle detection |
+| **Phases** | Categorize work type (explore, implement, review, test, deploy) |
+| **Workflows** | Named workflow topologies (solo, swarm, relay, hierarchical) |
+| **Transition Prompts** | Automatic agent guidance on status/phase changes |
+| **Gates** | Exit requirements for status/phase transitions |
 | **Atomic Claiming** | Strict locking with limits and tag-based routing |
 | **File Coordination** | Advisory locks with reasons and change polling |
 | **Cost Tracking** | Token usage and USD cost per task |
@@ -51,14 +57,15 @@ cargo install task-graph-mcp
 ```
 
 ```
-# Worker workflow (worker_id auto-generated if omitted)
-connect(tags=["code","image-in"])                        → "bright-lunar-swift-fox"
+# Agent workflow (worker_id auto-generated if omitted)
+connect(workflow="swarm", tags=["code"])                 → "bright-lunar-swift-fox"
 list_tasks(ready=true, agent="bright-lunar-swift-fox")   → claimable work
-claim(worker_id="bright-lunar-swift-fox", task="analyze-images")  → you own it
-thinking(agent="bright-lunar-swift-fox", thought="Processing...")  → visible to others
-update(worker_id="bright-lunar-swift-fox", task="analyze-images",  → done
+claim(worker_id="bright-lunar-swift-fox", task="add-auth")  → you own it
+update(..., phase="implement")                           → enter implementation phase
+thinking(agent="bright-lunar-swift-fox", thought="Adding JWT...")  → visible to others
+update(worker_id="bright-lunar-swift-fox", task="add-auth",
        status="completed",
-       attachments=[{type:"commit", content:"abc123"}])
+       attachments=[{type:"commit", content:"abc123"}])  → done
 ```
 
 ## Installation
@@ -276,7 +283,7 @@ Environment variables:
 
 | Tool | Description |
 |------|-------------|
-| `connect(worker_id?, tags?, force?, db_path?, media_dir?, log_dir?, config_path?)` | Register a worker. Returns `worker_id` and active `paths`. Path args are informational (set via env/CLI before server starts). |
+| `connect(worker_id?, tags?, workflow?, force?, db_path?, media_dir?, log_dir?, config_path?)` | Register a worker. Optional `workflow` selects named workflow (solo, swarm, relay, hierarchical). Returns `worker_id` and active `paths`. |
 | `disconnect(worker_id: worker_str, final_status?: status_str = "pending")` | Unregister worker and release all claims/locks. |
 | `list_workers(tags?: str[], file?: filename, task?: task_str, depth?: int)` | List connected workers with filters. |
 
@@ -288,7 +295,7 @@ Environment variables:
 | `create_tree(tree, parent?, child_type?, sibling_type?)` | Create nested task tree. `child_type` (default: "contains") for parent→child deps, `sibling_type` for sibling deps. |
 | `get(task: task_str)` | Get task by ID with attachment metadata and counts. |
 | `list_tasks(status?: status_str[], ready?: bool, blocked?: bool, claimed?: bool, owner?: worker_str, parent?: task_str, worker_id?: worker_str, tags_any?: str[], tags_all?: str[], sort_by?: str, sort_order?: str, limit?: int)` | Query tasks with filters. Use `ready=true` for claimable tasks. |
-| `update(worker_id: worker_str, task: task_str, status?: status_str, assignee?: worker_str, title?: str, description?: str, priority?: int, points?: int, tags?: str[], needed_tags?: str[], wanted_tags?: str[], time_estimate_ms?: int, reason?: str, force?: bool, attachments?: object[])` | Update task. Status changes auto-manage ownership. Include `attachments` to record commits/changelists. |
+| `update(worker_id: worker_str, task: task_str, status?: status_str, phase?: str, assignee?: worker_str, title?: str, description?: str, priority?: int, points?: int, tags?: str[], needed_tags?: str[], wanted_tags?: str[], time_estimate_ms?: int, reason?: str, force?: bool, attachments?: object[])` | Update task. Status/phase changes auto-manage ownership and trigger prompts. Include `attachments` to record commits/changelists. |
 | `delete(worker_id: worker_str, task: task_str, cascade?: bool, reason?: str, obliterate?: bool, force?: bool)` | Delete task. Soft delete by default; `obliterate=true` for permanent. |
 | `scan(task: task_str, before?: int, after?: int, above?: int, below?: int)` | Scan task graph in multiple directions. Depth: 0=none, N=levels, -1=all. |
 | `search(query: str, limit?: int = 20, include_attachments?: bool, status_filter?: status_str)` | FTS5 search. Supports phrases, prefix*, AND/OR/NOT, title:word. |
@@ -340,6 +347,7 @@ Environment variables:
 
 | Tool | Description |
 |------|-------------|
+| `check_gates(task: task_str)` | Check gate requirements before status/phase transition. Returns unsatisfied gates with pass/warn/fail status. |
 | `query(sql: str, params?: str[], limit?: int = 100, format?: str)` | Execute read-only SQL. SELECT only. Requires permission. |
 
 ## MCP Resources
@@ -354,6 +362,9 @@ Environment variables:
 | `tasks://tree/{id}` | Task with all descendants |
 | `files://marks` | All file marks |
 | `workers://all` | Registered workers |
+| `workflow://current` | Current workflow configuration |
+| `workflow://{name}` | Named workflow (solo, swarm, relay, hierarchical) |
+| `config://current` | Current server configuration |
 | `plan://acp` | ACP-compatible plan export |
 | `stats://summary` | Aggregate statistics |
 
@@ -455,6 +466,85 @@ Workers declare capabilities via tags when connecting. Tasks can require specifi
 }
 ```
 
+## Workflows and Phases
+
+### Phases
+
+Tasks can have a `phase` to categorize the type of work being performed:
+
+```json
+{
+  "title": "Add authentication",
+  "phase": "implement"
+}
+```
+
+Built-in phases: `explore`, `implement`, `review`, `test`, `security`, `deploy`, `triage`, `diagnose`, `design`, `plan`, `doc`, `integrate`, `monitor`, `optimize`
+
+Phases enable:
+- **Transition prompts** — Automatic guidance when entering/exiting phases
+- **Gates** — Requirements that must be satisfied before phase transitions
+- **Role-based routing** — In relay workflows, specialists own specific phases
+
+### Named Workflows
+
+Pre-built workflow topologies optimize for different coordination patterns:
+
+| Workflow | Description | Best For |
+|----------|-------------|----------|
+| `solo` | Single agent, full autonomy | Simple tasks, prototyping |
+| `swarm` | Parallel generalists, pull-based | High throughput, independent tasks |
+| `relay` | Sequential specialists, handoffs | Complex tasks, domain expertise |
+| `hierarchical` | Lead/worker delegation | Large projects, team coordination |
+
+Select a workflow on connect:
+
+```
+connect(worker_id="agent-1", workflow="swarm")
+```
+
+Each workflow provides tailored prompts and coordination guidance. See [WORKFLOW_TOPOLOGIES.md](docs/WORKFLOW_TOPOLOGIES.md) for detailed patterns.
+
+### Transition Prompts
+
+Agents receive automatic guidance when status or phase changes:
+
+```yaml
+# workflows.yaml
+states:
+  working:
+    prompts:
+      enter: |
+        You are now working on this task.
+        From {{current_status}} you can transition to: {{valid_exits}}
+      exit: |
+        Before leaving:
+        - [ ] Attach results
+        - [ ] Log costs
+```
+
+Prompts support template variables: `{{current_status}}`, `{{valid_exits}}`, `{{current_phase}}`, `{{valid_phases}}`
+
+### Gates
+
+Gates are requirements that must be satisfied before status or phase transitions:
+
+```yaml
+gates:
+  status:working:
+    - type: gate/tests
+      enforcement: warn
+      description: "Tests must pass"
+```
+
+Satisfy a gate by attaching evidence:
+
+```
+attach(task="123", type="gate/tests", content="All tests passing")
+```
+
+Enforcement levels: `allow` (advisory), `warn` (blocks unless `force=true`), `reject` (hard block)
+
 ## File Coordination
 
 Agents can coordinate file edits using advisory marks with change tracking:
@@ -500,6 +590,8 @@ Worker B: mark_file("worker-b", "src/main.rs", "adding tests")
 
 | | Task Graph | Linear task lists | Custom databases |
 |---|---|---|---|
+| Workflow phases | ✓ Built-in with prompts | ✗ Manual tracking | DIY |
+| Quality gates | ✓ Configurable enforcement | ✗ | DIY |
 | Multi-agent safe | ✓ Atomic claims, file locks | ✗ Race conditions | Maybe, DIY |
 | Dependency tracking | ✓ DAG with cycle detection | ✗ Manual ordering | DIY |
 | MCP native | ✓ First-class | ✗ Wrapper needed | ✗ Wrapper needed |
@@ -522,4 +614,4 @@ Apache 2.0
 
 ---
 
-Built for the era of AI agents that actually need to work together.
+Built for AI agents that need structured workflows and reliable coordination.

@@ -1,13 +1,13 @@
 [package]
 name = "task-graph-mcp"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
-description = "MCP server for atomic, token-efficient task management for multi-agent coordination"
+description = "MCP server for agent task workflows with phases, prompts, gates, and multi-agent coordination"
 license = "Apache-2.0"
 repository = "https://github.com/Oortonaut/task-graph-mcp"
 homepage = "https://github.com/Oortonaut/task-graph-mcp"
 readme = "README.md"
-keywords = ["mcp", "task-management", "multi-agent", "ai", "coordination"]
+keywords = ["mcp", "agent-workflow", "multi-agent", "ai", "task-management"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]

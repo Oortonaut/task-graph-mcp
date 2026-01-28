@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "task-graph-mcp"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
