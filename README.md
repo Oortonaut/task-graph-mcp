@@ -124,6 +124,8 @@ Options:
 
 ## Configuration
 
+> **Full reference**: See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for complete configuration documentation including workflows, prompts, gates, roles, and tags.
+
 Create `.task-graph/config.yaml`:
 
 ```yaml
@@ -503,6 +505,16 @@ Worker B: mark_file("worker-b", "src/main.rs", "adding tests")
 | MCP native | ✓ First-class | ✗ Wrapper needed | ✗ Wrapper needed |
 | Token accounting | ✓ Built-in | ✗ | DIY |
 | Setup required | None | None | Database server |
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | Complete configuration reference (config.yaml, workflows, prompts, gates, tags) |
+| [SCHEMA.md](docs/SCHEMA.md) | Database schema and state machine documentation |
+| [DESIGN.md](docs/DESIGN.md) | Architecture and design decisions |
+| [WORKFLOW_TOPOLOGIES.md](docs/WORKFLOW_TOPOLOGIES.md) | Multi-agent workflow patterns (solo, swarm, relay, hierarchical) |
+| [EXPORT_IMPORT.md](docs/EXPORT_IMPORT.md) | Data export and import functionality |
 
 ## License
 
