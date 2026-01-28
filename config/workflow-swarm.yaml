@@ -276,3 +276,59 @@ swarm_prompts:
     - Avoid conflicting work
     - Understand swarm activity
     - Identify collaboration opportunities
+
+# =============================================================================
+# ATTACHMENT GUIDANCE
+# =============================================================================
+# Recommended attachment types for swarm workflows. These types are pre-defined
+# in config.yaml with appropriate MIME types and modes.
+#
+# Swarm work is fast and atomic - attachments should be brief and actionable.
+# Other agents may read your attachments to understand context or continue work.
+
+attachments:
+  # Primary attachments for swarm tasks
+  recommended:
+    result:
+      description: Structured output from completed work (JSON)
+      when: Task completion - attach final state or output data
+      example: |
+        attach(task=id, type="result", content='{"files_changed": 2, "tests_added": 1}')
+
+    note:
+      description: Brief observations or context for other agents
+      when: Discoveries during work that others should know
+      example: |
+        attach(task=id, type="note", content="Config file uses YAML anchors - follow pattern")
+
+    error:
+      description: Record of errors encountered
+      when: Task fails or encounters issues
+      example: |
+        attach(task=id, type="error", content="Build failed: missing dependency foo")
+
+    commit:
+      description: Git commit hash reference
+      when: Code changes committed
+      example: |
+        attach(task=id, type="commit", content="abc123f")
+
+  # Useful for coordination
+  coordination:
+    context:
+      description: Information needed by next agent (replaces previous)
+      when: Passing essential context to whoever picks up related work
+      example: |
+        attach(task=id, type="context", content="Entry point is src/main.rs:42")
+
+    output:
+      description: Command or tool output worth preserving
+      when: Test results, build output, or diagnostic information
+      example: |
+        attach(task=id, type="output", content="cargo test: 42 passed, 0 failed")
+
+  # Avoid in swarm (too heavyweight for atomic tasks)
+  discouraged:
+    - plan      # Swarm tasks are pre-planned, use for parent tasks only
+    - diff      # Keep tasks atomic; large diffs suggest task should be split
+    - log       # Use thinking() for real-time updates instead

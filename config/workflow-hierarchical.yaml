@@ -439,3 +439,94 @@ hierarchical:
     stale_task_hours: 4         # Warn if task claimed > 4 hours
     max_worker_claims: 3        # Alert if worker has > 3 claims
     velocity_window_days: 7     # Calculate velocity over 7 days
+
+# =============================================================================
+# ATTACHMENT GUIDANCE
+# =============================================================================
+# Recommended attachment types for hierarchical workflows. These types are
+# pre-defined in config.yaml with appropriate MIME types and modes.
+#
+# Hierarchical workflows involve lead-worker communication. Attachments serve
+# as the primary channel for context passing, progress reporting, and results.
+
+attachments:
+  # Lead -> Worker communication
+  lead_to_worker:
+    context:
+      description: Essential background info workers need (replaces)
+      when: Task creation or when providing guidance
+      example: |
+        # Lead attaches context when creating subtask
+        attach(task=subtask_id, type="context", content="Parent feature uses Repository pattern. Follow existing conventions in src/repos/")
+
+    plan:
+      description: Decomposition details and approach (markdown, replaces)
+      when: Complex tasks requiring structured guidance
+      example: |
+        attach(task=id, type="plan", content="## Implementation Plan\n1. Add interface\n2. Implement adapter\n3. Wire up DI")
+
+    note:
+      description: Clarifications or additional instructions (appends)
+      when: Responding to worker questions or adding guidance
+      example: |
+        attach(task=id, type="note", content="Re: your question - use the existing ErrorKind enum")
+
+  # Worker -> Lead reporting
+  worker_to_lead:
+    result:
+      description: Structured completion data (JSON, replaces)
+      when: Task completion - summarize what was done
+      example: |
+        attach(task=id, type="result", content='{"status": "complete", "tests_added": 5, "coverage": "87%"}')
+
+    note:
+      description: Progress updates, questions, observations (appends)
+      when: Throughout work - keep lead informed
+      example: |
+        attach(task=id, type="note", content="Found existing utility that handles this - reusing instead of new impl")
+
+    error:
+      description: Blockers or failures needing lead attention (appends)
+      when: Unable to proceed - explain what's blocking
+      example: |
+        attach(task=id, type="error", content="Blocked: need DB schema migration before this can proceed")
+
+  # Version control integration
+  code_artifacts:
+    commit:
+      description: Git commit hash linking task to code (appends)
+      when: After committing changes
+      example: |
+        attach(task=id, type="commit", content="abc123f")
+
+    diff:
+      description: Code changes for review or context (appends)
+      when: Sharing changes without committing, or for lead review
+      example: |
+        attach(task=id, type="diff", content="--- a/src/api.rs\n+++ b/src/api.rs\n@@ -10,3 +10,8 @@...")
+
+    changelist:
+      description: List of files modified (appends)
+      when: Summarizing scope of changes
+      example: |
+        attach(task=id, type="changelist", content="src/api.rs\nsrc/models/user.rs\ntests/api_test.rs")
+
+  # Operational tracking
+  operations:
+    log:
+      description: Chronological work record (appends)
+      when: Long-running tasks - audit trail
+      example: |
+        attach(task=id, type="log", content="10:30 - Started implementation\n11:15 - Hit issue with X\n11:45 - Resolved, continuing")
+
+    output:
+      description: Command or test output (appends)
+      when: Test results, build logs, or diagnostic info
+      example: |
+        attach(task=id, type="output", content="cargo test auth:: -- 12 passed, 0 failed")
+
+    meta:
+      description: Structured metadata (JSON, replaces)
+      when: Tracking estimates, actuals, or custom metrics
+      example: |
+        attach(task=id, type="meta", content='{"estimated_points": 3, "actual_hours": 2.5}')

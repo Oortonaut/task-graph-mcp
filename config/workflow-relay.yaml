@@ -437,6 +437,119 @@ handoff_protocol:
       mime: text/markdown
       required_for: []
 
+# =============================================================================
+# ATTACHMENT GUIDANCE
+# =============================================================================
+# Recommended attachment types for relay workflows. These types are pre-defined
+# in config.yaml with appropriate MIME types and modes.
+#
+# Relay workflows depend heavily on attachments for handoff between specialists.
+# Each phase produces artifacts that downstream specialists consume.
+
+attachments:
+  # Phase-specific deliverables (use these type names for handoff)
+  phase_deliverables:
+    plan:
+      description: Design specification document (markdown, replaces)
+      when: Designer phase completion - the primary handoff artifact
+      example: |
+        attach(task=id, type="plan", content="## Design Spec\n### Problem\n...\n### Solution\n...\n### Acceptance Criteria\n...")
+
+    note:
+      description: Phase observations and guidance for next specialist (appends)
+      when: Each handoff - provide context the next specialist needs
+      example: |
+        # Designer -> Implementer
+        attach(task=id, type="note", content="Edge case: handle empty input gracefully per AC #3")
+        # Implementer -> Reviewer
+        attach(task=id, type="note", content="Deviated from design in auth flow - see comment in code")
+
+    result:
+      description: Phase outcome summary (JSON, replaces)
+      when: Phase completion - structured status for tracking
+      example: |
+        # Reviewer completion
+        attach(task=id, type="result", content='{"verdict": "approved", "issues_found": 2, "issues_resolved": 2}')
+        # Tester completion
+        attach(task=id, type="result", content='{"passed": true, "tests_run": 15, "coverage": "92%"}')
+
+  # Version control artifacts
+  code_artifacts:
+    commit:
+      description: Git commit hash (appends)
+      when: Implementer commits code, or after addressing review feedback
+      example: |
+        attach(task=id, type="commit", content="abc123f - Implement user auth per design spec")
+
+    diff:
+      description: Code changes for review (appends)
+      when: Implementer -> Reviewer handoff, showing what changed
+      example: |
+        attach(task=id, type="diff", content="--- a/src/auth.rs\n+++ b/src/auth.rs\n...")
+
+    changelist:
+      description: Files modified in this phase (appends)
+      when: Implementer completion - scope of changes
+      example: |
+        attach(task=id, type="changelist", content="src/auth.rs\nsrc/middleware.rs\ntests/auth_test.rs")
+
+  # Quality and testing
+  quality:
+    error:
+      description: Issues found during review or testing (appends)
+      when: Reviewer finds bugs, Tester finds failures
+      example: |
+        # Reviewer
+        attach(task=id, type="error", content="Missing null check in parse_input() - line 42")
+        # Tester
+        attach(task=id, type="error", content="Test failed: test_auth_timeout - expected 401, got 500")
+
+    output:
+      description: Test execution output (appends)
+      when: Tester phase - raw test results
+      example: |
+        attach(task=id, type="output", content="Running auth tests...\n✓ test_login_success\n✓ test_login_failure\n...")
+
+    log:
+      description: Phase activity log (appends)
+      when: Detailed audit trail for complex phases
+      example: |
+        attach(task=id, type="log", content="Review started 10:00\nFound issue #1 10:15\nDiscussed with impl 10:30\nResolved 10:45")
+
+  # Metadata and tracking
+  metadata:
+    meta:
+      description: Phase metrics and metadata (JSON, replaces)
+      when: Tracking time, effort, or custom phase data
+      example: |
+        attach(task=id, type="meta", content='{"phase": "review", "duration_minutes": 45, "issues_found": 3}')
+
+    context:
+      description: Essential context that must not be lost (replaces)
+      when: Critical information for downstream phases
+      example: |
+        attach(task=id, type="context", content="Auth uses JWT with 1h expiry - test must account for token refresh")
+
+  # Workflow gates (if configured)
+  gates:
+    gate/tests:
+      description: Evidence that tests pass
+      when: Before transitioning past test gate
+      example: |
+        attach(task=id, type="gate/tests", content="All 42 tests passing as of commit abc123f")
+
+    gate/review:
+      description: Evidence of review approval
+      when: Before transitioning past review gate
+      example: |
+        attach(task=id, type="gate/review", content="Approved by reviewer-agent after addressing 2 issues")
+
+    gate/commit:
+      description: Evidence of committed code
+      when: Before transitioning past commit gate
+      example: |
+        attach(task=id, type="gate/commit", content="abc123f - merged to main")
+
 # Task tree template for relay workflow
 templates:
   feature:

@@ -232,3 +232,81 @@ combos:
       - Look for bugs
       - Check edge cases
       - Verify test coverage
+
+# =============================================================================
+# ATTACHMENT GUIDANCE
+# =============================================================================
+# Recommended attachment types for solo workflows. These types are pre-defined
+# in config.yaml with appropriate MIME types and modes.
+#
+# Solo work benefits from thorough documentation since you may return to tasks
+# later with less context. Use attachments to create a record for your future self.
+
+attachments:
+  # Primary attachments for solo work
+  recommended:
+    note:
+      description: Observations, decisions, and context (appends)
+      when: Throughout work - capture reasoning and discoveries
+      example: |
+        attach(task=id, type="note", content="Chose HashMap over BTreeMap for O(1) lookups")
+
+    plan:
+      description: Approach and design decisions (markdown, replaces)
+      when: Design phase - document your planned approach
+      example: |
+        attach(task=id, type="plan", content="## Approach\n1. Refactor X\n2. Add tests\n3. Update docs")
+
+    result:
+      description: Structured outcome data (JSON, replaces)
+      when: Task completion - record what was accomplished
+      example: |
+        attach(task=id, type="result", content='{"status": "complete", "files_changed": ["src/lib.rs"]}')
+
+    context:
+      description: Essential state needed to resume work (replaces)
+      when: Before pausing - capture where you left off
+      example: |
+        attach(task=id, type="context", content="Next: implement error handling in parse_config()")
+
+  # Documentation and history
+  documentation:
+    log:
+      description: Chronological record of actions taken (appends)
+      when: Long-running tasks - maintain audit trail
+      example: |
+        attach(task=id, type="log", content="[2024-01-15] Refactored auth module")
+
+    diff:
+      description: Code changes for reference (appends)
+      when: Before committing - preserve what changed
+      example: |
+        attach(task=id, type="diff", content="--- a/src/lib.rs\n+++ b/src/lib.rs\n...")
+
+    commit:
+      description: Git commit hash reference (appends)
+      when: After committing - link task to version control
+      example: |
+        attach(task=id, type="commit", content="abc123f - Implement user authentication")
+
+  # Debugging and troubleshooting
+  debugging:
+    error:
+      description: Errors encountered during work (appends)
+      when: Failures or blockers - document for later debugging
+      example: |
+        attach(task=id, type="error", content="Integration test timeout after 30s")
+
+    output:
+      description: Command/tool output (appends)
+      when: Preserving diagnostic information
+      example: |
+        attach(task=id, type="output", content="cargo clippy: 3 warnings\n- unused import...")
+
+  # Metadata
+  metadata:
+    meta:
+      description: Structured task metadata (JSON, replaces)
+      when: Tracking effort, dependencies, or custom fields
+      example: |
+        attach(task=id, type="meta", content='{"estimated_hours": 4, "actual_hours": 3.5}')
