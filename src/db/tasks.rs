@@ -2,14 +2,26 @@
 
 use super::state_transitions::record_state_transition;
 use super::{Database, now_ms};
-use crate::config::{AutoAdvanceConfig, DependenciesConfig, PhasesConfig, StatesConfig};
+use crate::config::{
+    AutoAdvanceConfig, DependenciesConfig, PhasesConfig, StatesConfig, TagsConfig,
+};
 use crate::types::{
     PRIORITY_DEFAULT, Priority, Task, TaskTree, TaskTreeInput, Worker, clamp_priority,
     parse_priority,
 };
 use anyhow::{Result, anyhow};
+use petname::{Generator, Petnames};
 use rusqlite::{Connection, Row, params};
-use uuid::Uuid;
+
+/// Default number of words for generated task IDs.
+const TASK_ID_WORDS: u8 = 4;
+
+/// Generate a petname-based task ID using the large wordlist.
+fn generate_task_id() -> String {
+    Petnames::large()
+        .generate_one(TASK_ID_WORDS, "-")
+        .unwrap_or_else(|| format!("task-{}", super::now_ms()))
+}
 
 /// Build an ORDER BY clause from sort_by and sort_order parameters.
 /// Returns a safe SQL ORDER BY expression.
@@ -177,7 +189,15 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
         let last_status: Option<String> = row.get(5)?;
         let last_phase: Option<String> = row.get(6)?;
 
-        Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase))
+        Ok((
+            id,
+            tags_json,
+            max_claims,
+            registered_at,
+            last_heartbeat,
+            last_status,
+            last_phase,
+        ))
     });
 
     match result {
@@ -217,7 +237,7 @@ impl Database {
         tags: Option<Vec<String>>,
         states_config: &StatesConfig,
     ) -> Result<Task> {
-        let task_id = id.unwrap_or_else(|| Uuid::now_v7().to_string());
+        let task_id = id.unwrap_or_else(generate_task_id);
         let now = now_ms();
         let priority = clamp_priority(priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
@@ -295,6 +315,28 @@ impl Database {
         })
     }
 
+    /// Convenience method to create a task with just description.
+    /// All other parameters use defaults. Useful for tests.
+    pub fn create_task_simple(
+        &self,
+        description: impl Into<String>,
+        states_config: &StatesConfig,
+    ) -> Result<Task> {
+        self.create_task(
+            None,
+            description.into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            states_config,
+        )
+    }
+
     /// Create a task tree from nested input.
     /// Uses child_type for parent-child dependencies (default: "contains").
     /// Uses sibling_type for sibling dependencies (default: none/parallel).
@@ -306,9 +348,11 @@ impl Database {
         sibling_type: Option<String>,
         states_config: &StatesConfig,
         phases_config: &PhasesConfig,
-    ) -> Result<(String, Vec<String>, Vec<String>)> {
+        tags_config: &TagsConfig,
+    ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>)> {
         let mut all_ids = Vec::new();
         let mut phase_warnings = Vec::new();
+        let mut tag_warnings = Vec::new();
         // Default child_type to "contains" if not specified
         let child_type = child_type.or_else(|| Some("contains".to_string()));
 
@@ -323,11 +367,13 @@ impl Database {
                 sibling_type.as_deref(),
                 &mut all_ids,
                 &mut phase_warnings,
+                &mut tag_warnings,
                 states_config,
                 phases_config,
+                tags_config,
             )?;
             tx.commit()?;
-            Ok((root_id, all_ids, phase_warnings))
+            Ok((root_id, all_ids, phase_warnings, tag_warnings))
         })
     }
 
@@ -1666,8 +1712,10 @@ fn create_tree_recursive(
     sibling_type: Option<&str>,
     all_ids: &mut Vec<String>,
     phase_warnings: &mut Vec<String>,
+    tag_warnings: &mut Vec<String>,
     states_config: &StatesConfig,
     phases_config: &PhasesConfig,
+    tags_config: &TagsConfig,
 ) -> Result<String> {
     // Check if this node references an existing task
     let task_id = if let Some(ref ref_id) = input.ref_id {
@@ -1683,8 +1731,7 @@ fn create_tree_recursive(
         ref_id.clone()
     } else {
         // Create a new task
-        let generated_id = Uuid::now_v7().to_string();
-        let task_id = input.id.clone().unwrap_or(generated_id);
+        let task_id = input.id.clone().unwrap_or_else(generate_task_id);
         let now = now_ms();
         let priority = clamp_priority(input.priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
@@ -1699,6 +1746,18 @@ fn create_tree_recursive(
         let needed_tags = input.needed_tags.clone().unwrap_or_default();
         let wanted_tags = input.wanted_tags.clone().unwrap_or_default();
         let tags = input.tags.clone().unwrap_or_default();
+
+        // Check tag validity for all tag types
+        for warning in tags_config.validate_tags(&tags)? {
+            tag_warnings.push(format!("Task '{}': {}", task_id, warning));
+        }
+        for warning in tags_config.validate_tags(&needed_tags)? {
+            tag_warnings.push(format!("Task '{}' needed_tags: {}", task_id, warning));
+        }
+        for warning in tags_config.validate_tags(&wanted_tags)? {
+            tag_warnings.push(format!("Task '{}' wanted_tags: {}", task_id, warning));
+        }
+
         let needed_tags_json = serde_json::to_string(&needed_tags)?;
         let wanted_tags_json = serde_json::to_string(&wanted_tags)?;
         let tags_json = serde_json::to_string(&tags)?;
@@ -1760,8 +1819,10 @@ fn create_tree_recursive(
             sibling_type,
             all_ids,
             phase_warnings,
+            tag_warnings,
             states_config,
             phases_config,
+            tags_config,
         )?;
         prev_child_id = Some(child_id);
     }

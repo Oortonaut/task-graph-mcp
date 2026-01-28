@@ -51,14 +51,14 @@ cargo install task-graph-mcp
 ```
 
 ```
-# Worker workflow
-connect(worker_id="worker-1", tags=["rust","backend"])  → worker_id
-list_tasks(ready=true, worker_id="worker-1")            → claimable work
-claim(worker_id="worker-1", task="task-123")            → you own it
-thinking(worker_id="worker-1", thought="Implementing...") → visible to others
-update(worker_id="worker-1", task="task-123",           → done, deps unblock
+# Worker workflow (worker_id auto-generated if omitted)
+connect(tags=["code","image-in"])                        → "bright-lunar-swift-fox"
+list_tasks(ready=true, agent="bright-lunar-swift-fox")   → claimable work
+claim(worker_id="bright-lunar-swift-fox", task="analyze-images")  → you own it
+thinking(agent="bright-lunar-swift-fox", thought="Processing...")  → visible to others
+update(worker_id="bright-lunar-swift-fox", task="analyze-images",  → done
        status="completed",
-       attachments=[{name:"commit", content:"abc123"}])
+       attachments=[{type:"commit", content:"abc123"}])
 ```
 
 ## Installation
@@ -423,16 +423,33 @@ Use `ref` to integrate existing tasks into a tree structure:
 
 ## Tag-Based Affinity
 
-Tasks can specify required capabilities with a non-empty list. Use either for one tag:
+Workers declare capabilities via tags when connecting. Tasks can require specific tags to control which workers can claim them.
 
-- `agent_tags_all`: Agent must have ALL of these (AND)
-- `agent_tags_any`: Agent must have AT LEAST ONE (OR)
+**Example tag categories:**
+- **Model capabilities**: `image-in`, `audio-out`, `video-in`, `code`, `bulk`
+- **Access levels**: `prod-access`, `admin`, `external`
+- **Specializations**: `rust`, `python`, `frontend`, `database`
+
+*Note: Roles like coordinator/reviewer/deployer are better represented using phases.*
+
+**Task requirements:**
+- `needed_tags` (AND): Agent must have ALL of these
+- `wanted_tags` (OR): Agent must have AT LEAST ONE
+
+```json
+{
+  "title": "Analyze screenshot and generate code",
+  "needed_tags": ["image-in", "code"],
+  "wanted_tags": ["bulk"]
+}
+```
 
 ```json
 {
   "title": "Deploy to production",
-  "agent_tags_all": ["deploy", "prod-access"],
-  "agent_tags_any": ["aws", "gcp"]
+  "phase": "deploy",
+  "needed_tags": ["prod-access"],
+  "wanted_tags": ["aws", "gcp"]
 }
 ```
 

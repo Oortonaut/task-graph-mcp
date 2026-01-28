@@ -1,7 +1,9 @@
 //! Worker connection and management tools.
 
 use super::{get_bool, get_i32, get_string, get_string_array, make_tool_with_prompts};
-use crate::config::{Prompts, ServerPaths, StatesConfig};
+use crate::config::{
+    DependenciesConfig, PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig,
+};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{OutputFormat, ToolResult, format_workers_markdown};
@@ -17,7 +19,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
             json!({
                 "worker_id": {
                     "type": "string",
-                    "description": "Use a session ID, GUID, hash, or assigned name. Leave empty for a random human petname."
+                    "description": "Only use if assigned a unique name (e.g., 'worker-17', 'coordinator'). Avoid generic names like 'claude'. Leave empty for an auto-generated petname."
                 },
                 "tags": {
                     "type": "array",
@@ -114,10 +116,21 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     ]
 }
 
-pub fn connect(db: &Database, server_paths: &ServerPaths, args: Value) -> Result<Value> {
+pub fn connect(
+    db: &Database,
+    server_paths: &ServerPaths,
+    states_config: &StatesConfig,
+    phases_config: &PhasesConfig,
+    deps_config: &DependenciesConfig,
+    tags_config: &TagsConfig,
+    args: Value,
+) -> Result<Value> {
     let worker_id = get_string(&args, "worker_id");
     let tags = get_string_array(&args, "tags").unwrap_or_default();
     let force = get_bool(&args, "force").unwrap_or(false);
+
+    // Validate tags if provided
+    let tag_warnings = tags_config.validate_tags(&tags)?;
 
     // Check for path override requests (informational - paths are set at server startup)
     let mut path_notes: Vec<String> = Vec::new();
@@ -168,7 +181,23 @@ pub fn connect(db: &Database, server_paths: &ServerPaths, args: Value) -> Result
 
     let worker = db.register_worker(worker_id, tags, force)?;
 
+    // Build config summary for the response
+    let timed_states: Vec<&str> = states_config
+        .definitions
+        .iter()
+        .filter(|(_, def)| def.timed)
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    let terminal_states: Vec<&str> = states_config
+        .definitions
+        .iter()
+        .filter(|(_, def)| def.exits.is_empty())
+        .map(|(name, _)| name.as_str())
+        .collect();
+
     let mut response = json!({
+        "version": env!("CARGO_PKG_VERSION"),
         "worker_id": &worker.id,
         "tags": worker.tags,
         "max_claims": worker.max_claims,
@@ -178,11 +207,25 @@ pub fn connect(db: &Database, server_paths: &ServerPaths, args: Value) -> Result
             "media_dir": server_paths.media_dir.to_string_lossy(),
             "log_dir": server_paths.log_dir.to_string_lossy(),
             "config_path": server_paths.config_path.as_ref().map(|p| p.to_string_lossy().to_string())
+        },
+        "config": {
+            "states": states_config.state_names(),
+            "initial_state": &states_config.initial,
+            "timed_states": timed_states,
+            "terminal_states": terminal_states,
+            "blocking_states": &states_config.blocking_states,
+            "phases": phases_config.phase_names(),
+            "dependency_types": deps_config.dep_type_names(),
+            "known_tags": tags_config.tag_names()
         }
     });
 
     if !path_notes.is_empty() {
         response["path_warnings"] = json!(path_notes);
+    }
+
+    if !tag_warnings.is_empty() {
+        response["tag_warnings"] = json!(tag_warnings);
     }
 
     Ok(response)

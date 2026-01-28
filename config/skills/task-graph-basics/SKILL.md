@@ -20,7 +20,7 @@ Foundation skill providing shared patterns, tool reference, and connection workf
 
 ```
 # First thing in any session - connect as a worker
-connect(tags=["your", "capabilities"])
+connect(tags=["code", "image-in"])
 → Returns worker_id (SAVE THIS for all subsequent calls)
 
 # Find work
@@ -42,9 +42,8 @@ Every worker MUST connect before using task-graph tools:
 ┌─────────────────────────────────────────────────────┐
 │ 1. CONNECT                                          │
 │    connect(                                         │
-│      worker_id="my-worker-id", # Optional custom ID │
-│      tags=["python", "testing"], # Capabilities     │
-│      force=true               # Reconnect if exists │
+│      worker_id="worker-17",   # Only if assigned!   │
+│      tags=["code", "audio-out"], # Capabilities     │
 │    )                                                │
 │    → Returns: worker_id                             │
 │    → SAVE THIS ID for all subsequent calls          │
@@ -57,6 +56,14 @@ Every worker MUST connect before using task-graph tools:
 │    → Releases all claims and locks                  │
 └─────────────────────────────────────────────────────┘
 ```
+
+**Choosing a worker_id:**
+- Only provide a worker_id if you've been assigned one that seems unique
+- `"claude"` → BAD (too generic, will collide)
+- `"coordinator"` → Likely OK (role-based, probably unique)
+- `"worker-17"` → Good (explicitly assigned)
+- If you don't have an assigned name, **omit worker_id entirely** — a unique
+  petname will be generated for you automatically
 
 **Tags enable task affinity:**
 - `agent_tags_all` on tasks: Worker must have ALL (AND logic)
@@ -302,7 +309,8 @@ search(query="auth", include_attachments=true, status_filter="pending")
 |-------|-------|----------|
 | "Task already claimed" | Another worker owns it | Use `force=true` or pick another |
 | "Dependencies not satisfied" | Blockers incomplete | Wait or help complete blockers |
-| "Worker not found" | Invalid/expired worker_id | Reconnect with `force=true` |
+| "Worker ID already registered" | Name collision | Omit worker_id to get a unique petname |
+| "Worker not found" | Invalid/expired worker_id | Reconnect (let stale reaping clean up old) |
 | "Tag mismatch" | Worker lacks required tags | Check `agent_tags_all`/`agent_tags_any` |
 
 ---

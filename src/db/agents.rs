@@ -3,18 +3,29 @@
 use super::{Database, now_ms};
 use crate::types::{CleanupSummary, DisconnectSummary, Worker};
 use anyhow::{Result, anyhow};
+use petname::{Generator, Petnames};
 use rusqlite::{Connection, params};
 
-/// Maximum length for worker IDs.
-pub const MAX_WORKER_ID_LEN: usize = 36;
+/// Maximum length for worker IDs (4-word petnames can be ~50 chars).
+pub const MAX_WORKER_ID_LEN: usize = 64;
+
+/// Default number of words for generated petnames.
+const PETNAME_WORDS: u8 = 4;
 
 /// Maximum attempts to generate a unique petname before falling back.
 const MAX_PETNAME_ATTEMPTS: u32 = 100;
 
+/// Generate a petname using the large wordlist.
+fn generate_petname(words: u8) -> String {
+    Petnames::large()
+        .generate_one(words, "-")
+        .unwrap_or_else(|| format!("worker-{}", now_ms()))
+}
+
 /// Generate a unique petname-based worker ID.
-/// Tries base petname first, then appends numbers (e.g., "happy-turtle-2").
+/// Tries base petname first, then appends numbers (e.g., "happy-turtle-swift-fox-2").
 fn generate_unique_petname(conn: &Connection) -> String {
-    let base = petname::petname(2, "-").unwrap_or_else(|| "worker".to_string());
+    let base = generate_petname(PETNAME_WORDS);
 
     // Check if base name is available
     let exists: bool = conn
@@ -29,7 +40,7 @@ fn generate_unique_petname(conn: &Connection) -> String {
         return base;
     }
 
-    // Try appending numbers: happy-turtle-2, happy-turtle-3, etc.
+    // Try appending numbers: happy-turtle-swift-fox-2, etc.
     for i in 2..=MAX_PETNAME_ATTEMPTS {
         let candidate = format!("{}-{}", base, i);
         let exists: bool = conn
@@ -44,8 +55,8 @@ fn generate_unique_petname(conn: &Connection) -> String {
         }
     }
 
-    // Fallback: generate a completely new petname with 3 words for uniqueness
-    petname::petname(3, "-").unwrap_or_else(|| format!("worker-{}", now_ms()))
+    // Fallback: generate a completely new petname with 5 words for uniqueness
+    generate_petname(5)
 }
 
 /// Internal helper to get a worker using an existing connection (avoids deadlock).
@@ -64,7 +75,15 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
         let last_status: Option<String> = row.get(5)?;
         let last_phase: Option<String> = row.get(6)?;
 
-        Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase))
+        Ok((
+            id,
+            tags_json,
+            max_claims,
+            registered_at,
+            last_heartbeat,
+            last_status,
+            last_phase,
+        ))
     });
 
     match result {
@@ -186,11 +205,27 @@ impl Database {
                 let last_status: Option<String> = row.get(5)?;
                 let last_phase: Option<String> = row.get(6)?;
 
-                Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase))
+                Ok((
+                    id,
+                    tags_json,
+                    max_claims,
+                    registered_at,
+                    last_heartbeat,
+                    last_status,
+                    last_phase,
+                ))
             });
 
             match result {
-                Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase)) => {
+                Ok((
+                    id,
+                    tags_json,
+                    max_claims,
+                    registered_at,
+                    last_heartbeat,
+                    last_status,
+                    last_phase,
+                )) => {
                     let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                     Ok(Some(Worker {
                         id,
@@ -256,14 +291,16 @@ impl Database {
     ) -> Result<(Option<String>, Option<String>)> {
         self.with_conn(|conn| {
             // Get current state
-            let (old_status, old_phase): (Option<String>, Option<String>) = conn.query_row(
-                "SELECT last_status, last_phase FROM workers WHERE id = ?1",
-                params![worker_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            ).map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => anyhow!("Worker not found"),
-                e => e.into(),
-            })?;
+            let (old_status, old_phase): (Option<String>, Option<String>) = conn
+                .query_row(
+                    "SELECT last_status, last_phase FROM workers WHERE id = ?1",
+                    params![worker_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => anyhow!("Worker not found"),
+                    e => e.into(),
+                })?;
 
             // Update to new state
             conn.execute(
@@ -353,11 +390,27 @@ impl Database {
                     let last_status: Option<String> = row.get(5)?;
                     let last_phase: Option<String> = row.get(6)?;
 
-                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase))
+                    Ok((
+                        id,
+                        tags_json,
+                        max_claims,
+                        registered_at,
+                        last_heartbeat,
+                        last_status,
+                        last_phase,
+                    ))
                 })?
                 .filter_map(|r| r.ok())
                 .map(
-                    |(id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase)| {
+                    |(
+                        id,
+                        tags_json,
+                        max_claims,
+                        registered_at,
+                        last_heartbeat,
+                        last_status,
+                        last_phase,
+                    )| {
                         let tags: Vec<String> =
                             serde_json::from_str(&tags_json).unwrap_or_default();
                         Worker {
@@ -599,11 +652,27 @@ impl Database {
                     let last_status: Option<String> = row.get(5)?;
                     let last_phase: Option<String> = row.get(6)?;
 
-                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase))
+                    Ok((
+                        id,
+                        tags_json,
+                        max_claims,
+                        registered_at,
+                        last_heartbeat,
+                        last_status,
+                        last_phase,
+                    ))
                 })?
                 .filter_map(|r| r.ok())
                 .map(
-                    |(id, tags_json, max_claims, registered_at, last_heartbeat, last_status, last_phase)| {
+                    |(
+                        id,
+                        tags_json,
+                        max_claims,
+                        registered_at,
+                        last_heartbeat,
+                        last_status,
+                        last_phase,
+                    )| {
                         let tags: Vec<String> =
                             serde_json::from_str(&tags_json).unwrap_or_default();
                         Worker {
