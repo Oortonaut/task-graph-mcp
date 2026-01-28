@@ -143,7 +143,7 @@ pub fn get_table_ordering(table: &str) -> &'static str {
     match table {
         "tasks" => "ORDER BY id",
         "dependencies" => "ORDER BY from_task_id, to_task_id, dep_type",
-        "attachments" => "ORDER BY task_id, order_index",
+        "attachments" => "ORDER BY task_id, attachment_type, sequence",
         "task_tags" => "ORDER BY task_id, tag",
         "task_needed_tags" => "ORDER BY task_id, tag",
         "task_wanted_tags" => "ORDER BY task_id, tag",
@@ -158,7 +158,7 @@ pub fn get_table_primary_key(table: &str) -> &'static [&'static str] {
     match table {
         "tasks" => &["id"],
         "dependencies" => &["from_task_id", "to_task_id", "dep_type"],
-        "attachments" => &["task_id", "order_index"],
+        "attachments" => &["task_id", "attachment_type", "sequence"],
         "task_tags" => &["task_id", "tag"],
         "task_needed_tags" => &["task_id", "tag"],
         "task_wanted_tags" => &["task_id", "tag"],
@@ -213,6 +213,6 @@ mod tests {
             get_table_primary_key("dependencies"),
             &["from_task_id", "to_task_id", "dep_type"]
         );
-        assert_eq!(get_table_primary_key("attachments"), &["task_id", "order_index"]);
+        assert_eq!(get_table_primary_key("attachments"), &["task_id", "attachment_type", "sequence"]);
     }
 }

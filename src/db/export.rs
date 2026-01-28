@@ -58,7 +58,7 @@ impl Database {
     /// Tables are queried with deterministic ordering per the export spec:
     /// - tasks: ORDER BY id
     /// - dependencies: ORDER BY from_task_id, to_task_id, dep_type
-    /// - attachments: ORDER BY task_id, order_index
+    /// - attachments: ORDER BY task_id, attachment_type, sequence
     /// - task_tags: ORDER BY task_id, tag
     /// - task_needed_tags: ORDER BY task_id, tag
     /// - task_wanted_tags: ORDER BY task_id, tag
@@ -145,25 +145,26 @@ impl Database {
         })
     }
 
-    /// Export all attachments ordered by task_id, order_index.
+    /// Export all attachments ordered by task_id, attachment_type, sequence.
     fn export_attachments(&self) -> Result<Vec<Attachment>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT task_id, order_index, name, mime_type, content, file_path, created_at
+                "SELECT task_id, attachment_type, sequence, name, mime_type, content, file_path, created_at
                  FROM attachments
-                 ORDER BY task_id, order_index",
+                 ORDER BY task_id, attachment_type, sequence",
             )?;
 
             let attachments = stmt
                 .query_map([], |row| {
                     Ok(Attachment {
                         task_id: row.get(0)?,
-                        order_index: row.get(1)?,
-                        name: row.get(2)?,
-                        mime_type: row.get(3)?,
-                        content: row.get(4)?,
-                        file_path: row.get(5)?,
-                        created_at: row.get(6)?,
+                        attachment_type: row.get(1)?,
+                        sequence: row.get(2)?,
+                        name: row.get(3)?,
+                        mime_type: row.get(4)?,
+                        content: row.get(5)?,
+                        file_path: row.get(6)?,
+                        created_at: row.get(7)?,
                     })
                 })?
                 .filter_map(|r| r.ok())

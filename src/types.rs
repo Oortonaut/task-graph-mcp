@@ -245,12 +245,13 @@ pub struct ClaimUpdates {
 }
 
 /// An attachment on a task.
-/// Primary key is (task_id, order_index).
+/// Primary key is (task_id, attachment_type, sequence).
 /// If file_path is set, content is stored in the referenced file; otherwise content is inline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attachment {
     pub task_id: String,
-    pub order_index: i32,
+    pub attachment_type: String,
+    pub sequence: i32,
     pub name: String,
     pub mime_type: String,
     pub content: String,
@@ -262,11 +263,12 @@ pub struct Attachment {
 }
 
 /// Attachment metadata (without content).
-/// Primary key is (task_id, order_index).
+/// Primary key is (task_id, attachment_type, sequence).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttachmentMeta {
     pub task_id: String,
-    pub order_index: i32,
+    pub attachment_type: String,
+    pub sequence: i32,
     pub name: String,
     pub mime_type: String,
     /// Path to the file containing the content (if stored as file).

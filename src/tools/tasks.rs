@@ -242,9 +242,13 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "items": {
                         "type": "object",
                         "properties": {
+                            "type": {
+                                "type": "string",
+                                "description": "Attachment type/category (e.g., 'commit', 'changelist', 'note'). Used for indexing and replace operations."
+                            },
                             "name": {
                                 "type": "string",
-                                "description": "Attachment name/key (e.g., 'commit', 'changelist', 'note')"
+                                "description": "Optional label/name for the attachment (arbitrary string)"
                             },
                             "content": {
                                 "type": "string",
@@ -257,10 +261,10 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                             "mode": {
                                 "type": "string",
                                 "enum": ["append", "replace"],
-                                "description": "How to handle existing attachment with same name (uses configured default if omitted)"
+                                "description": "How to handle existing attachments of this type: 'append' adds new, 'replace' deletes all of this type first"
                             }
                         },
-                        "required": ["name", "content"]
+                        "required": ["type", "content"]
                     }
                 }
             }),
@@ -712,16 +716,17 @@ pub fn update(
 
     if let Some(attachments_arr) = args.get("attachments").and_then(|v| v.as_array()) {
         for att_value in attachments_arr {
-            let name = att_value.get("name").and_then(|v| v.as_str());
+            let attachment_type = att_value.get("type").and_then(|v| v.as_str());
+            let name = att_value.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let content = att_value.get("content").and_then(|v| v.as_str());
             let mime_override = att_value.get("mime").and_then(|v| v.as_str());
             let mode_override = att_value.get("mode").and_then(|v| v.as_str());
 
-            let name = match name {
-                Some(n) => n,
+            let attachment_type = match attachment_type {
+                Some(t) => t,
                 None => {
                     attachment_warnings
-                        .push("Skipped attachment: missing 'name' field".to_string());
+                        .push("Skipped attachment: missing 'type' field".to_string());
                     continue;
                 }
             };
@@ -730,25 +735,25 @@ pub fn update(
                 Some(c) => c,
                 None => {
                     attachment_warnings.push(format!(
-                        "Skipped attachment '{}': missing 'content' field",
-                        name
+                        "Skipped attachment type '{}': missing 'content' field",
+                        attachment_type
                     ));
                     continue;
                 }
             };
 
             // Check unknown key behavior
-            if !attachments_config.is_known_key(name) {
+            if !attachments_config.is_known_key(attachment_type) {
                 match attachments_config.unknown_key {
                     UnknownKeyBehavior::Reject => {
                         attachment_warnings.push(format!(
-                            "Rejected attachment '{}': unknown key (configure in attachments.definitions or set unknown_key to 'allow')",
-                            name
+                            "Rejected attachment type '{}': unknown type (configure in attachments.definitions or set unknown_key to 'allow')",
+                            attachment_type
                         ));
                         continue;
                     }
                     UnknownKeyBehavior::Warn => {
-                        attachment_warnings.push(format!("Unknown attachment key '{}'", name));
+                        attachment_warnings.push(format!("Unknown attachment type '{}'", attachment_type));
                     }
                     UnknownKeyBehavior::Allow => {}
                 }
@@ -757,40 +762,42 @@ pub fn update(
             // Use config defaults for mime/mode, but allow explicit overrides
             let mime_type = mime_override
                 .map(String::from)
-                .unwrap_or_else(|| attachments_config.get_mime_default(name).to_string());
-            let mode = mode_override.unwrap_or_else(|| attachments_config.get_mode_default(name));
+                .unwrap_or_else(|| attachments_config.get_mime_default(attachment_type).to_string());
+            let mode = mode_override.unwrap_or_else(|| attachments_config.get_mode_default(attachment_type));
 
             // Validate mode
             if mode != "append" && mode != "replace" {
                 attachment_warnings.push(format!(
-                    "Skipped attachment '{}': mode must be 'append' or 'replace'",
-                    name
+                    "Skipped attachment type '{}': mode must be 'append' or 'replace'",
+                    attachment_type
                 ));
                 continue;
             }
 
-            // Handle replace mode - delete existing attachment with same name
+            // Handle replace mode - delete all existing attachments of this type
             if mode == "replace" {
-                let _ = db.delete_attachment_by_name(&task_id, name);
+                let _ = db.delete_attachments_by_type(&task_id, attachment_type);
             }
 
             // Add the attachment
             match db.add_attachment(
                 &task_id,
+                attachment_type.to_string(),
                 name.to_string(),
                 content.to_string(),
                 Some(mime_type.clone()),
                 None,
             ) {
-                Ok(order_index) => {
+                Ok(sequence) => {
                     attachment_results.push(json!({
+                        "type": attachment_type,
+                        "sequence": sequence,
                         "name": name,
-                        "order_index": order_index,
                         "mime_type": mime_type
                     }));
                 }
                 Err(e) => {
-                    attachment_warnings.push(format!("Failed to add attachment '{}': {}", name, e));
+                    attachment_warnings.push(format!("Failed to add attachment type '{}': {}", attachment_type, e));
                 }
             }
         }

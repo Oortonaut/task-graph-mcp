@@ -3825,7 +3825,8 @@ mod attachment_tests {
         // Add attachments with different MIME types
         db.add_attachment(
             &task.id,
-            "data.json".to_string(),
+            "data-json".to_string(),
+            String::new(),
             r#"{"key": "value"}"#.to_string(),
             Some("application/json".to_string()),
             None,
@@ -3833,7 +3834,8 @@ mod attachment_tests {
         .unwrap();
         db.add_attachment(
             &task.id,
-            "readme.txt".to_string(),
+            "readme-txt".to_string(),
+            String::new(),
             "This is a text file".to_string(),
             Some("text/plain".to_string()),
             None,
@@ -3841,7 +3843,8 @@ mod attachment_tests {
         .unwrap();
         db.add_attachment(
             &task.id,
-            "notes.md".to_string(),
+            "notes-md".to_string(),
+            String::new(),
             "# Notes\nSome markdown".to_string(),
             Some("text/markdown".to_string()),
             None,
@@ -3853,26 +3856,27 @@ mod attachment_tests {
             .get_attachments_filtered(&task.id, None, Some("application/json"))
             .unwrap();
         assert_eq!(json_attachments.len(), 1);
-        assert_eq!(json_attachments[0].name, "data.json");
+        assert_eq!(json_attachments[0].attachment_type, "data-json");
 
         // Test filtering by MIME type prefix (text/)
         let text_attachments = db
             .get_attachments_filtered(&task.id, None, Some("text/"))
             .unwrap();
         assert_eq!(text_attachments.len(), 2);
-        let names: Vec<&str> = text_attachments.iter().map(|a| a.name.as_str()).collect();
-        assert!(names.contains(&"readme.txt"));
-        assert!(names.contains(&"notes.md"));
+        let types: Vec<&str> = text_attachments.iter().map(|a| a.attachment_type.as_str()).collect();
+        assert!(types.contains(&"readme-txt"));
+        assert!(types.contains(&"notes-md"));
     }
 
     #[test]
-    fn get_attachments_filtered_by_name_pattern() {
+    fn get_attachments_filtered_by_type_pattern() {
         let db = setup_db();
         let task = create_test_task(&db);
 
         db.add_attachment(
             &task.id,
-            "data.json".to_string(),
+            "data-json".to_string(),
+            String::new(),
             r#"{"key": "value"}"#.to_string(),
             Some("application/json".to_string()),
             None,
@@ -3880,7 +3884,8 @@ mod attachment_tests {
         .unwrap();
         db.add_attachment(
             &task.id,
-            "config.json".to_string(),
+            "config-json".to_string(),
+            String::new(),
             r#"{"setting": true}"#.to_string(),
             Some("application/json".to_string()),
             None,
@@ -3888,7 +3893,8 @@ mod attachment_tests {
         .unwrap();
         db.add_attachment(
             &task.id,
-            "readme.txt".to_string(),
+            "readme-txt".to_string(),
+            String::new(),
             "Text content".to_string(),
             Some("text/plain".to_string()),
             None,
@@ -3896,27 +3902,28 @@ mod attachment_tests {
         .unwrap();
 
         // Filter by glob pattern
-        let json_files = db
-            .get_attachments_filtered(&task.id, Some("*.json"), None)
+        let json_types = db
+            .get_attachments_filtered(&task.id, Some("*-json"), None)
             .unwrap();
-        assert_eq!(json_files.len(), 2);
+        assert_eq!(json_types.len(), 2);
 
-        // Filter by specific name
-        let data_file = db
-            .get_attachments_filtered(&task.id, Some("data.json"), None)
+        // Filter by specific type
+        let data_type = db
+            .get_attachments_filtered(&task.id, Some("data-json"), None)
             .unwrap();
-        assert_eq!(data_file.len(), 1);
-        assert_eq!(data_file[0].name, "data.json");
+        assert_eq!(data_type.len(), 1);
+        assert_eq!(data_type[0].attachment_type, "data-json");
     }
 
     #[test]
-    fn get_attachments_filtered_by_both_name_and_mime() {
+    fn get_attachments_filtered_by_both_type_and_mime() {
         let db = setup_db();
         let task = create_test_task(&db);
 
         db.add_attachment(
             &task.id,
-            "data.json".to_string(),
+            "data-json".to_string(),
+            String::new(),
             r#"{"key": "value"}"#.to_string(),
             Some("application/json".to_string()),
             None,
@@ -3924,7 +3931,8 @@ mod attachment_tests {
         .unwrap();
         db.add_attachment(
             &task.id,
-            "schema.json".to_string(),
+            "schema-json".to_string(),
+            String::new(),
             r#"{"type": "object"}"#.to_string(),
             Some("application/json".to_string()),
             None,
@@ -3932,19 +3940,20 @@ mod attachment_tests {
         .unwrap();
         db.add_attachment(
             &task.id,
-            "data.txt".to_string(),
+            "data-txt".to_string(),
+            String::new(),
             "Plain text".to_string(),
             Some("text/plain".to_string()),
             None,
         )
         .unwrap();
 
-        // Filter by both name pattern and MIME type
+        // Filter by both type pattern and MIME type
         let result = db
-            .get_attachments_filtered(&task.id, Some("data.*"), Some("application/json"))
+            .get_attachments_filtered(&task.id, Some("data-*"), Some("application/json"))
             .unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "data.json");
+        assert_eq!(result[0].attachment_type, "data-json");
     }
 
     #[test]
@@ -3954,7 +3963,8 @@ mod attachment_tests {
 
         db.add_attachment(
             &task.id,
-            "file1.txt".to_string(),
+            "file1".to_string(),
+            String::new(),
             "Content 1".to_string(),
             Some("text/plain".to_string()),
             None,
@@ -3962,7 +3972,8 @@ mod attachment_tests {
         .unwrap();
         db.add_attachment(
             &task.id,
-            "file2.json".to_string(),
+            "file2".to_string(),
+            String::new(),
             "{}".to_string(),
             Some("application/json".to_string()),
             None,

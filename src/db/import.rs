@@ -485,8 +485,8 @@ impl Database {
             // Rebuild attachments_fts (only text content)
             conn.execute("DELETE FROM attachments_fts", [])?;
             conn.execute(
-                "INSERT INTO attachments_fts(task_id, order_index, name, content)
-                 SELECT task_id, order_index, name, content
+                "INSERT INTO attachments_fts(task_id, attachment_type, sequence, name, content)
+                 SELECT task_id, attachment_type, sequence, name, content
                  FROM attachments
                  WHERE mime_type LIKE 'text/%'",
                 [],
@@ -629,13 +629,13 @@ fn preview_merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Res
     for row in rows {
         let obj = row.as_object().context("Attachment row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
-        let order_index = get_i32(obj, "order_index")?;
-        let name = get_string(obj, "name")?;
+        let attachment_type = get_string(obj, "attachment_type")?;
+        let sequence = get_i32(obj, "sequence")?;
 
         let exists: bool = conn
             .query_row(
-                "SELECT 1 FROM attachments WHERE task_id = ?1 AND name = ?2 AND order_index = ?3",
-                params![&task_id, &name, order_index],
+                "SELECT 1 FROM attachments WHERE task_id = ?1 AND attachment_type = ?2 AND sequence = ?3",
+                params![&task_id, &attachment_type, sequence],
                 |_| Ok(true),
             )
             .unwrap_or(false);
@@ -854,11 +854,11 @@ fn merge_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(us
     Ok((imported, skipped))
 }
 
-/// Merge attachments - skip if exact match (task_id + name + order_index) exists.
+/// Merge attachments - skip if exact match (task_id + attachment_type + sequence) exists.
 fn merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
     let mut insert_stmt = conn.prepare(
-        "INSERT INTO attachments (task_id, order_index, name, mime_type, content, file_path, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO attachments (task_id, attachment_type, sequence, name, mime_type, content, file_path, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
 
     let mut imported = 0;
@@ -867,14 +867,14 @@ fn merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usi
     for row in rows {
         let obj = row.as_object().context("Attachment row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
-        let order_index = get_i32(obj, "order_index")?;
-        let name = get_string(obj, "name")?;
+        let attachment_type = get_string(obj, "attachment_type")?;
+        let sequence = get_i32(obj, "sequence")?;
 
-        // Check if attachment already exists (by task_id + name + order_index)
+        // Check if attachment already exists (by task_id + attachment_type + sequence)
         let exists: bool = conn
             .query_row(
-                "SELECT 1 FROM attachments WHERE task_id = ?1 AND name = ?2 AND order_index = ?3",
-                params![&task_id, &name, order_index],
+                "SELECT 1 FROM attachments WHERE task_id = ?1 AND attachment_type = ?2 AND sequence = ?3",
+                params![&task_id, &attachment_type, sequence],
                 |_| Ok(true),
             )
             .unwrap_or(false);
@@ -886,8 +886,9 @@ fn merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usi
 
         insert_stmt.execute(params![
             task_id,
-            order_index,
-            name,
+            attachment_type,
+            sequence,
+            get_string(obj, "name")?,
             get_string(obj, "mime_type")?,
             get_string(obj, "content")?,
             get_opt_string(obj, "file_path"),
@@ -1105,8 +1106,8 @@ fn import_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<us
 /// Import attachments table.
 fn import_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
     let mut stmt = conn.prepare(
-        "INSERT INTO attachments (task_id, order_index, name, mime_type, content, file_path, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO attachments (task_id, attachment_type, sequence, name, mime_type, content, file_path, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
 
     let mut count = 0;
@@ -1115,7 +1116,8 @@ fn import_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usi
 
         stmt.execute(params![
             get_string(obj, "task_id")?,
-            get_i32(obj, "order_index")?,
+            get_string(obj, "attachment_type")?,
+            get_i32(obj, "sequence")?,
             get_string(obj, "name")?,
             get_string(obj, "mime_type")?,
             get_string(obj, "content")?,
@@ -1732,8 +1734,9 @@ mod tests {
             "attachments".to_string(),
             vec![json!({
                 "task_id": "task-1",
-                "order_index": 0,
-                "name": "notes",
+                "attachment_type": "notes",
+                "sequence": 0,
+                "name": "",
                 "mime_type": "text/plain",
                 "content": "Some searchable notes content",
                 "file_path": null,

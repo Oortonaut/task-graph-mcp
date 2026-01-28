@@ -219,8 +219,18 @@ pub fn format_attachments_markdown(attachments: &[crate::types::AttachmentMeta])
     }
 
     for attachment in attachments {
-        md.push_str(&format!("## {}\n", attachment.name));
-        md.push_str(&format!("- **index**: {}\n", attachment.order_index));
+        // Use type as header, with name in parentheses if present
+        let header = if attachment.name.is_empty() {
+            format!("{} [{}]", attachment.attachment_type, attachment.sequence)
+        } else {
+            format!("{} [{}]: {}", attachment.attachment_type, attachment.sequence, attachment.name)
+        };
+        md.push_str(&format!("## {}\n", header));
+        md.push_str(&format!("- **type**: {}\n", attachment.attachment_type));
+        md.push_str(&format!("- **sequence**: {}\n", attachment.sequence));
+        if !attachment.name.is_empty() {
+            md.push_str(&format!("- **name**: {}\n", attachment.name));
+        }
         md.push_str(&format!("- **mime**: {}\n", attachment.mime_type));
 
         if let Some(ref fp) = attachment.file_path {

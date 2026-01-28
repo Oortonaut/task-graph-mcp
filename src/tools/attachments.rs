@@ -15,6 +15,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
         make_tool_with_prompts(
             "attach",
             "Add an attachment to a task. Use for notes, comments, or file references.\n\n\
+             Attachments are indexed by (task_id, type, sequence). Each type auto-increments its own sequence.\n\n\
              For inline content: provide 'content' directly.\n\
              For file reference: provide 'file' path (existing file, will be referenced).\n\
              For media storage: provide 'content' + 'store_as_file'=true (saves to .task-graph/media/).",
@@ -30,9 +31,13 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                     ],
                     "description": "Task ID or array of Task IDs for bulk attachment"
                 },
+                "type": {
+                    "type": "string",
+                    "description": "Attachment type/category (e.g., 'commit', 'note', 'changelist'). Used for indexing and replace operations."
+                },
                 "name": {
                     "type": "string",
-                    "description": "Attachment name (use 'meta' for structured metadata)"
+                    "description": "Optional label/name for the attachment (arbitrary string, not used for indexing)"
                 },
                 "content": {
                     "type": "string",
@@ -53,10 +58,10 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "mode": {
                     "type": "string",
                     "enum": ["append", "replace"],
-                    "description": "How to handle existing attachment with same name: 'append' (default) keeps both, 'replace' deletes old"
+                    "description": "How to handle existing attachments of the same type: 'append' (default) adds new, 'replace' deletes all existing of this type first"
                 }
             }),
-            vec!["task", "name"],
+            vec!["task", "type"],
             prompts,
         ),
         make_tool_with_prompts(
@@ -68,9 +73,9 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                     "type": "string",
                     "description": "Task ID"
                 },
-                "name": {
+                "type": {
                     "type": "string",
-                    "description": "Filter by attachment name pattern (glob syntax: * matches any chars)"
+                    "description": "Filter by attachment type pattern (glob syntax: * matches any chars)"
                 },
                 "mime": {
                     "type": "string",
@@ -82,7 +87,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "detach",
-            "Delete an attachment by task and name.",
+            "Delete attachments by task and type. Deletes all attachments of the specified type.",
             json!({
                 "agent": {
                     "type": "string",
@@ -92,23 +97,23 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                     "type": "string",
                     "description": "Task ID"
                 },
-                "name": {
+                "type": {
                     "type": "string",
-                    "description": "Attachment name to delete"
+                    "description": "Attachment type to delete (all attachments of this type will be removed)"
                 },
-                "delete_file": {
+                "delete_files": {
                     "type": "boolean",
-                    "description": "If true, also delete the file from .task-graph/media/ (default: false)"
+                    "description": "If true, also delete files from .task-graph/media/ (default: false)"
                 }
             }),
-            vec!["agent", "task", "name"],
+            vec!["agent", "task", "type"],
             prompts,
         ),
     ]
 }
 
 /// Generate a unique filename for media storage.
-fn generate_media_filename(task_id: &str, name: &str, mime_type: &str) -> String {
+fn generate_media_filename(task_id: &str, attachment_type: &str, mime_type: &str) -> String {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -128,8 +133,8 @@ fn generate_media_filename(task_id: &str, name: &str, mime_type: &str) -> String
         _ => "bin",
     };
 
-    // Sanitize name for filename
-    let safe_name: String = name
+    // Sanitize type for filename
+    let safe_type: String = attachment_type
         .chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' {
@@ -140,7 +145,7 @@ fn generate_media_filename(task_id: &str, name: &str, mime_type: &str) -> String
         })
         .collect();
 
-    format!("{}_{}_{}.{}", task_id, safe_name, timestamp, ext)
+    format!("{}_{}_{}.{}", task_id, safe_type, timestamp, ext)
 }
 
 /// Check if a file path is within the media directory.
@@ -186,22 +191,23 @@ pub fn attach(
         .into());
     }
 
-    let name = get_string(&args, "name").ok_or_else(|| ToolError::missing_field("name"))?;
+    let attachment_type = get_string(&args, "type").ok_or_else(|| ToolError::missing_field("type"))?;
+    let name = get_string(&args, "name").unwrap_or_default();
     let content = get_string(&args, "content");
     let file_path = get_string(&args, "file");
     let store_as_file = get_bool(&args, "store_as_file").unwrap_or(false);
 
     // Check if this is a known key and handle unknown_key behavior
-    let is_known = attachments_config.is_known_key(&name);
+    let is_known = attachments_config.is_known_key(&attachment_type);
     let warning: Option<String> = if !is_known {
         match attachments_config.unknown_key {
             UnknownKeyBehavior::Reject => {
                 return Err(ToolError::new(
                     ErrorCode::InvalidFieldValue,
-                    format!("Unknown attachment key '{}'. Configure it in attachments.definitions or set unknown_key to 'allow' or 'warn'.", name)
+                    format!("Unknown attachment type '{}'. Configure it in attachments.definitions or set unknown_key to 'allow' or 'warn'.", attachment_type)
                 ).into());
             }
-            UnknownKeyBehavior::Warn => Some(format!("Unknown attachment key '{}'", name)),
+            UnknownKeyBehavior::Warn => Some(format!("Unknown attachment type '{}'", attachment_type)),
             UnknownKeyBehavior::Allow => None,
         }
     } else {
@@ -210,9 +216,9 @@ pub fn attach(
 
     // Use config defaults for mime/mode, but allow explicit overrides from args
     let mime_type = get_string(&args, "mime")
-        .unwrap_or_else(|| attachments_config.get_mime_default(&name).to_string());
+        .unwrap_or_else(|| attachments_config.get_mime_default(&attachment_type).to_string());
     let mode = get_string(&args, "mode")
-        .unwrap_or_else(|| attachments_config.get_mode_default(&name).to_string());
+        .unwrap_or_else(|| attachments_config.get_mode_default(&attachment_type).to_string());
 
     // Validate mode
     if mode != "append" && mode != "replace" {
@@ -253,13 +259,14 @@ pub fn attach(
     let mut results = Vec::new();
 
     for task_id in &task_ids {
-        // Replace mode: delete existing attachment with same name before adding new one
-        if mode == "replace"
-            && let Ok(Some(old_file_path)) = db.delete_attachment_by_name(task_id, &name)
-        {
-            // Clean up old media file if it was in media dir
-            if is_in_media_dir(&old_file_path, media_dir) {
-                let _ = std::fs::remove_file(&old_file_path);
+        // Replace mode: delete all existing attachments of this type before adding new one
+        if mode == "replace" {
+            let old_file_paths = db.delete_attachments_by_type(task_id, &attachment_type)?;
+            // Clean up old media files if they were in media dir
+            for old_fp in old_file_paths {
+                if is_in_media_dir(&old_fp, media_dir) {
+                    let _ = std::fs::remove_file(&old_fp);
+                }
             }
         }
 
@@ -267,7 +274,7 @@ pub fn attach(
         let (final_content, final_file_path): (String, Option<String>) =
             if store_as_file && file_path.is_none() {
                 // Store content to media directory (per-task file)
-                let filename = generate_media_filename(task_id, &name, &mime_type);
+                let filename = generate_media_filename(task_id, &attachment_type, &mime_type);
                 let media_file_path = media_dir.join(&filename);
 
                 // Ensure media directory exists
@@ -282,8 +289,9 @@ pub fn attach(
                 (base_content.clone(), base_file_path.clone())
             };
 
-        let order_index = db.add_attachment(
+        let sequence = db.add_attachment(
             task_id,
+            attachment_type.clone(),
             name.clone(),
             final_content,
             Some(mime_type.clone()),
@@ -292,8 +300,13 @@ pub fn attach(
 
         let mut result = json!({
             "task_id": task_id,
-            "order_index": order_index
+            "type": &attachment_type,
+            "sequence": sequence
         });
+
+        if !name.is_empty() {
+            result["name"] = json!(&name);
+        }
 
         if let Some(fp) = final_file_path {
             result["file_path"] = json!(fp);
@@ -324,7 +337,7 @@ pub fn attachments(
     args: Value,
 ) -> Result<Value> {
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
-    let name_pattern = get_string(&args, "name");
+    let type_pattern = get_string(&args, "type");
     let mime_pattern = get_string(&args, "mime");
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::parse(&s))
@@ -332,7 +345,7 @@ pub fn attachments(
 
     // Get filtered attachments (metadata only)
     let attachments =
-        db.get_attachments_filtered(&task_id, name_pattern.as_deref(), mime_pattern.as_deref())?;
+        db.get_attachments_filtered(&task_id, type_pattern.as_deref(), mime_pattern.as_deref())?;
 
     match format {
         OutputFormat::Markdown => Ok(markdown_to_json(format_attachments_markdown(&attachments))),
@@ -342,9 +355,10 @@ pub fn attachments(
                 .map(|a| {
                     let mut obj = json!({
                         "task_id": &a.task_id,
-                        "order_index": a.order_index,
-                        "name": a.name,
-                        "mime_type": a.mime_type,
+                        "type": &a.attachment_type,
+                        "sequence": a.sequence,
+                        "name": &a.name,
+                        "mime_type": &a.mime_type,
                         "created_at": a.created_at
                     });
 
@@ -366,28 +380,29 @@ pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let _agent_id = get_string(&args, "agent");
 
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
-    let name = get_string(&args, "name").ok_or_else(|| ToolError::missing_field("name"))?;
-    let delete_file = get_bool(&args, "delete_file").unwrap_or(false);
+    let attachment_type = get_string(&args, "type").ok_or_else(|| ToolError::missing_field("type"))?;
+    let delete_files = get_bool(&args, "delete_files").unwrap_or(false);
 
-    // Delete from database (returns whether deleted and file_path if one was set)
-    let (deleted, file_path) = db.delete_attachment_by_name_ex(&task_id, &name)?;
+    // Delete from database (returns count and file_paths)
+    let (deleted_count, file_paths) = db.delete_attachments_by_type_ex(&task_id, &attachment_type)?;
 
-    // If attachment had a file in media dir and delete_file is true, delete it
-    let mut file_deleted = false;
-    if delete_file
-        && let Some(fp) = &file_path
-        && is_in_media_dir(fp, media_dir)
-    {
-        let path = Path::new(fp);
-        if path.exists()
-            && let Ok(()) = std::fs::remove_file(path)
-        {
-            file_deleted = true;
+    // If delete_files is true, delete files that were in media dir
+    let mut files_deleted = 0;
+    if delete_files {
+        for fp in &file_paths {
+            if is_in_media_dir(fp, media_dir) {
+                let path = Path::new(fp);
+                if path.exists() {
+                    if std::fs::remove_file(path).is_ok() {
+                        files_deleted += 1;
+                    }
+                }
+            }
         }
     }
 
     Ok(json!({
-        "success": deleted,
-        "file_deleted": file_deleted
+        "deleted_count": deleted_count,
+        "files_deleted": files_deleted
     }))
 }

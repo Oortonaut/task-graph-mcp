@@ -30,10 +30,12 @@ pub struct SearchResult {
 /// A matching attachment from full-text search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttachmentMatch {
-    /// Attachment name
+    /// Attachment type/category
+    pub attachment_type: String,
+    /// Sequence within type
+    pub sequence: i32,
+    /// Attachment name/label
     pub name: String,
-    /// Order index within task
-    pub order_index: i32,
     /// Highlighted content snippet
     pub content_snippet: String,
 }
@@ -110,34 +112,37 @@ impl Database {
                 // Search attachments
                 let attachment_sql = "SELECT
                     afts.task_id,
-                    afts.order_index,
+                    afts.attachment_type,
+                    afts.sequence,
                     afts.name,
-                    snippet(attachments_fts, 3, '<mark>', '</mark>', '...', 64) as content_snippet
+                    snippet(attachments_fts, 4, '<mark>', '</mark>', '...', 64) as content_snippet
                 FROM attachments_fts afts
                 WHERE attachments_fts MATCH ?1
                 ORDER BY bm25(attachments_fts)
                 LIMIT ?2";
 
                 let mut att_stmt = conn.prepare(attachment_sql)?;
-                let att_matches: Vec<(String, i32, String, String)> = att_stmt
+                let att_matches: Vec<(String, String, i32, String, String)> = att_stmt
                     .query_map(params![query, limit * 3], |row| {
                         Ok((
                             row.get::<_, String>(0)?,
-                            row.get::<_, i32>(1)?,
-                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i32>(2)?,
                             row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
                         ))
                     })?
                     .filter_map(|r| r.ok())
                     .collect();
 
                 // Group attachment matches by task_id and merge with task results
-                for (task_id, order_index, name, content_snippet) in att_matches {
+                for (task_id, attachment_type, sequence, name, content_snippet) in att_matches {
                     // Check if task already in results
                     if let Some(result) = results.iter_mut().find(|r| r.task_id == task_id) {
                         result.attachment_matches.push(AttachmentMatch {
+                            attachment_type,
+                            sequence,
                             name,
-                            order_index,
                             content_snippet,
                         });
                     } else {
@@ -172,8 +177,9 @@ impl Database {
                                 title_snippet: title,
                                 description_snippet: description,
                                 attachment_matches: vec![AttachmentMatch {
+                                    attachment_type,
+                                    sequence,
                                     name,
-                                    order_index,
                                     content_snippet,
                                 }],
                             });
@@ -396,6 +402,7 @@ mod tests {
         db.add_attachment(
             &task.id,
             "notes".to_string(),
+            String::new(),
             "Important searchable content here".to_string(),
             Some("text/plain".to_string()),
             None,
@@ -407,6 +414,6 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].task_id, task.id);
         assert_eq!(results[0].attachment_matches.len(), 1);
-        assert_eq!(results[0].attachment_matches[0].name, "notes");
+        assert_eq!(results[0].attachment_matches[0].attachment_type, "notes");
     }
 }
