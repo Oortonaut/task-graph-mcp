@@ -39,43 +39,24 @@ server:
 
 # Path handling configuration
 paths:
+  # Root directory for sandboxing (default: ".")
+  # All file operations are restricted to paths within this directory
+  root: "."
+  
   # Path style: relative or project_prefixed
   style: relative
-
-# Task state machine configuration
-states:
-  # Default state for new tasks
-  initial: pending
   
-  # State for tasks when agent disconnects (must be untimed)
-  disconnect_state: pending
+  # Auto-map single-letter Windows drives (default: false)
+  # When true, paths like "c:path/to/file" are treated as Windows drive paths
+  map_windows_drives: false
   
-  # States that block dependent tasks
-  blocking_states:
-    - pending
-    - assigned
-    - working
-  
-  # State definitions with transitions and timing
-  definitions:
-    pending:
-      exits: [assigned, working, cancelled]
-      timed: false
-    assigned:
-      exits: [working, pending, cancelled]
-      timed: false
-    working:
-      exits: [completed, failed, pending]
-      timed: true
-    completed:
-      exits: [pending]
-      timed: false
-    failed:
-      exits: [pending]
-      timed: false
-    cancelled:
-      exits: []
-      timed: false
+  # Prefix mappings (prefix -> path)
+  # Values can be: literal path, $ENV_VAR, or ${config.path}
+  # Example mappings:
+  #   home: "$HOME"
+  #   project: "."
+  #   media: "${server.media_dir}"
+  mappings: {}
 
 # Dependency type configuration
 dependencies:
@@ -147,24 +128,3 @@ attachments:
       mime: "text/plain"
       mode: replace
 
-# Phase definitions for work categorization
-phases:
-  # Behavior for unknown phases: allow, warn, reject
-  unknown_phase: warn
-  
-  definitions:
-    - deliver
-    - triage
-    - explore
-    - diagnose
-    - design
-    - plan
-    - implement
-    - test
-    - review
-    - security
-    - doc
-    - integrate
-    - deploy
-    - monitor
-    - optimize

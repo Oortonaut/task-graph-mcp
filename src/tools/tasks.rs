@@ -11,6 +11,7 @@ use crate::format::{
     OutputFormat, format_scan_result_markdown, format_task_markdown, format_tasks_markdown,
     markdown_to_json,
 };
+use crate::prompts::PromptContext;
 use crate::types::{ScanResult, TaskTreeInput, parse_priority};
 use anyhow::Result;
 use rmcp::model::Tool;
@@ -663,7 +664,7 @@ pub fn update(
     phases_config: &PhasesConfig,
     deps_config: &DependenciesConfig,
     auto_advance: &AutoAdvanceConfig,
-    transition_prompts: &crate::prompts::PromptsConfig,
+    workflows: &crate::config::workflows::WorkflowsConfig,
     args: Value,
 ) -> Result<Value> {
     let worker_id =
@@ -834,13 +835,21 @@ pub fn update(
             task.phase.as_deref(),
         ) {
             Ok((old_status, old_phase)) => {
-                // Get prompts for this transition
-                crate::prompts::get_transition_prompts(
+                // Create context for template expansion
+                let ctx = PromptContext::new(
+                    &task.status,
+                    task.phase.as_deref(),
+                    states_config,
+                    phases_config,
+                );
+                // Get prompts for this transition with template expansion
+                crate::prompts::get_transition_prompts_with_context(
                     old_status.as_deref().unwrap_or(""),
                     old_phase.as_deref(),
                     &task.status,
                     task.phase.as_deref(),
-                    transition_prompts,
+                    workflows,
+                    &ctx,
                 )
             }
             Err(_) => vec![], // Worker not found or other error - skip prompts

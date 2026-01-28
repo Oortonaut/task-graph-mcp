@@ -1,94 +1,112 @@
 //! Transition prompts system.
 //!
 //! Loads and delivers prompts when tasks transition between states/phases.
-//! Prompts are markdown files with naming convention:
-//! - `enter~{status}.md` - entering a status (any phase)
-//! - `exit~{status}.md` - exiting a status (any phase)
-//! - `enter%{phase}.md` - entering a phase (any status)
-//! - `exit%{phase}.md` - exiting a phase (any status)
-//! - `enter~{status}%{phase}.md` - entering specific status+phase combo
-//! - `exit~{status}%{phase}.md` - exiting specific status+phase combo
+//! Prompts are defined in `workflows.yaml` with the following structure:
 //!
-//! Files are loaded from layered directories (user overrides project overrides defaults):
-//! 1. ~/.task-graph/prompts/
-//! 2. .task-graph/prompts/
-//! 3. [install]/defaults/prompts/
+//! - State prompts: `states.<state>.prompts.enter` / `states.<state>.prompts.exit`
+//! - Phase prompts: `phases.<phase>.prompts.enter` / `phases.<phase>.prompts.exit`
+//! - Combo prompts: `combos.<state>+<phase>.enter` / `combos.<state>+<phase>.exit`
+//!
+//! Trigger naming convention:
+//! - `enter~{status}` - entering a status (any phase)
+//! - `exit~{status}` - exiting a status (any phase)
+//! - `enter%{phase}` - entering a phase (any status)
+//! - `exit%{phase}` - exiting a phase (any status)
+//! - `enter~{status}%{phase}` - entering specific status+phase combo
+//! - `exit~{status}%{phase}` - exiting specific status+phase combo
+//!
+//! Template variables are expanded in prompts:
+//! - `{{valid_exits}}` - valid states to transition to from current state
+//! - `{{current_phase}}` - current phase if set
+//! - `{{valid_phases}}` - list of valid phases that can be set
+//! - `{{current_status}}` - current status name
 
-use std::path::PathBuf;
+use crate::config::workflows::WorkflowsConfig;
+use crate::config::{PhasesConfig, StatesConfig};
 
-/// Default prompts embedded at compile time.
-pub mod defaults {
-    pub const ENTER_WORKING: &str = include_str!("../../config/prompts/enter~working.md");
-}
-
-/// Configuration for prompt directories.
+/// Context for expanding template variables in prompts.
 #[derive(Debug, Clone)]
-pub struct PromptsConfig {
-    /// User-level prompts directory (~/.task-graph/prompts/)
-    pub user_dir: Option<PathBuf>,
-    /// Project-level prompts directory (.task-graph/prompts/)
-    pub project_dir: Option<PathBuf>,
+pub struct PromptContext<'a> {
+    /// Current status of the task
+    pub status: &'a str,
+    /// Current phase of the task (if any)
+    pub phase: Option<&'a str>,
+    /// States configuration for looking up valid transitions
+    pub states_config: &'a StatesConfig,
+    /// Phases configuration for listing valid phases
+    pub phases_config: &'a PhasesConfig,
 }
 
-impl PromptsConfig {
-    /// Create a new PromptsConfig with the given base directories.
-    pub fn new(user_home: Option<PathBuf>, project_root: Option<PathBuf>) -> Self {
+impl<'a> PromptContext<'a> {
+    /// Create a new prompt context.
+    pub fn new(
+        status: &'a str,
+        phase: Option<&'a str>,
+        states_config: &'a StatesConfig,
+        phases_config: &'a PhasesConfig,
+    ) -> Self {
         Self {
-            user_dir: user_home.map(|h| h.join(".task-graph").join("prompts")),
-            project_dir: project_root.map(|p| p.join(".task-graph").join("prompts")),
+            status,
+            phase,
+            states_config,
+            phases_config,
         }
     }
 }
 
-impl Default for PromptsConfig {
-    fn default() -> Self {
-        Self {
-            user_dir: std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .ok()
-                .map(|h| PathBuf::from(h).join(".task-graph").join("prompts")),
-            project_dir: Some(PathBuf::from(".task-graph/prompts")),
-        }
-    }
-}
-
-/// Load a prompt file by trigger name.
+/// Load a prompt by trigger name from WorkflowsConfig.
 ///
-/// Checks directories in order: user, project, then embedded defaults.
-/// Returns None if no prompt file exists for this trigger.
-pub fn load_prompt(trigger: &str, config: &PromptsConfig) -> Option<String> {
-    let filename = format!("{}.md", trigger);
-
-    // Check user directory first
-    if let Some(ref user_dir) = config.user_dir {
-        let path = user_dir.join(&filename);
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                return Some(content);
-            }
-        }
-    }
-
-    // Check project directory
-    if let Some(ref project_dir) = config.project_dir {
-        let path = project_dir.join(&filename);
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                return Some(content);
-            }
-        }
-    }
-
-    // Check embedded defaults
-    load_embedded_prompt(trigger)
+/// Returns None if no prompt exists for this trigger.
+pub fn load_prompt(trigger: &str, workflows: &WorkflowsConfig) -> Option<String> {
+    workflows.get_prompt(trigger).map(|s| s.to_string())
 }
 
-/// Load an embedded default prompt.
-fn load_embedded_prompt(trigger: &str) -> Option<String> {
-    match trigger {
-        "enter~working" => Some(defaults::ENTER_WORKING.to_string()),
-        _ => None,
+/// Expand template variables in a prompt string.
+///
+/// Supported variables:
+/// - `{{valid_exits}}` - markdown list of valid exit states
+/// - `{{current_phase}}` - current phase or "(none)" if not set
+/// - `{{valid_phases}}` - comma-separated list of valid phases
+/// - `{{current_status}}` - current status name
+pub fn expand_prompt(content: &str, ctx: &PromptContext) -> String {
+    let mut result = content.to_string();
+
+    // Expand {{current_status}}
+    result = result.replace("{{current_status}}", ctx.status);
+
+    // Expand {{valid_exits}}
+    if result.contains("{{valid_exits}}") {
+        let exits = ctx.states_config.get_exits(ctx.status);
+        let exits_md = if exits.is_empty() {
+            "- _(no transitions available - terminal state)_".to_string()
+        } else {
+            exits
+                .iter()
+                .map(|s| format!("- `{}`", s))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        result = result.replace("{{valid_exits}}", &exits_md);
     }
+
+    // Expand {{current_phase}}
+    if result.contains("{{current_phase}}") {
+        let phase_str = ctx
+            .phase
+            .map(|p| format!("`{}`", p))
+            .unwrap_or_else(|| "_(none)_".to_string());
+        result = result.replace("{{current_phase}}", &phase_str);
+    }
+
+    // Expand {{valid_phases}}
+    if result.contains("{{valid_phases}}") {
+        let mut phases: Vec<&str> = ctx.phases_config.phase_names();
+        phases.sort();
+        let phases_str = phases.join(", ");
+        result = result.replace("{{valid_phases}}", &phases_str);
+    }
+
+    result
 }
 
 /// Get the list of triggers that should fire for a state transition.
@@ -153,43 +171,41 @@ pub fn get_transition_triggers(
 /// Get all prompts that should be delivered for a state transition.
 ///
 /// Returns a vector of prompt strings (caller concatenates as needed).
+/// This version does NOT expand template variables - use `get_transition_prompts_with_context` for that.
 pub fn get_transition_prompts(
     old_status: &str,
     old_phase: Option<&str>,
     new_status: &str,
     new_phase: Option<&str>,
-    config: &PromptsConfig,
+    workflows: &WorkflowsConfig,
 ) -> Vec<String> {
     get_transition_triggers(old_status, old_phase, new_status, new_phase)
         .iter()
-        .filter_map(|trigger| load_prompt(trigger, config))
+        .filter_map(|trigger| load_prompt(trigger, workflows))
         .collect()
 }
 
-/// List all available prompt files across all directories.
-pub fn list_available_prompts(config: &PromptsConfig) -> Vec<String> {
-    let mut prompts = Vec::new();
+/// Get all prompts that should be delivered for a state transition, with template expansion.
+///
+/// Returns a vector of prompt strings with template variables expanded.
+pub fn get_transition_prompts_with_context(
+    old_status: &str,
+    old_phase: Option<&str>,
+    new_status: &str,
+    new_phase: Option<&str>,
+    workflows: &WorkflowsConfig,
+    ctx: &PromptContext,
+) -> Vec<String> {
+    get_transition_triggers(old_status, old_phase, new_status, new_phase)
+        .iter()
+        .filter_map(|trigger| load_prompt(trigger, workflows))
+        .map(|content| expand_prompt(&content, ctx))
+        .collect()
+}
 
-    // Embedded defaults
-    prompts.push("enter~working".to_string());
-
-    // Scan directories
-    for dir in [&config.user_dir, &config.project_dir].into_iter().flatten() {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.path().file_stem() {
-                    if let Some(name_str) = name.to_str() {
-                        if !prompts.contains(&name_str.to_string()) {
-                            prompts.push(name_str.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    prompts.sort();
-    prompts
+/// List all available prompt triggers from the workflows config.
+pub fn list_available_prompts(workflows: &WorkflowsConfig) -> Vec<String> {
+    workflows.list_prompt_triggers()
 }
 
 #[cfg(test)]
@@ -237,19 +253,13 @@ mod tests {
     #[test]
     fn test_triggers_enter_phase_from_none() {
         let triggers = get_transition_triggers("working", None, "working", Some("diagnose"));
-        assert_eq!(
-            triggers,
-            vec!["enter%diagnose", "enter~working%diagnose"]
-        );
+        assert_eq!(triggers, vec!["enter%diagnose", "enter~working%diagnose"]);
     }
 
     #[test]
     fn test_triggers_exit_phase_to_none() {
         let triggers = get_transition_triggers("working", Some("diagnose"), "working", None);
-        assert_eq!(
-            triggers,
-            vec!["exit~working%diagnose", "exit%diagnose"]
-        );
+        assert_eq!(triggers, vec!["exit~working%diagnose", "exit%diagnose"]);
     }
 
     #[test]
@@ -257,5 +267,101 @@ mod tests {
         let triggers =
             get_transition_triggers("working", Some("diagnose"), "working", Some("diagnose"));
         assert!(triggers.is_empty());
+    }
+
+    #[test]
+    fn test_expand_prompt_valid_exits() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config);
+
+        let template = "From {{current_status}} you can go to:\n{{valid_exits}}";
+        let result = expand_prompt(template, &ctx);
+
+        assert!(result.contains("From working you can go to:"));
+        assert!(result.contains("`completed`"));
+        assert!(result.contains("`failed`"));
+        assert!(result.contains("`pending`"));
+    }
+
+    #[test]
+    fn test_expand_prompt_current_phase() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+
+        // With a phase
+        let ctx = PromptContext::new("working", Some("implement"), &states_config, &phases_config);
+        let template = "Phase: {{current_phase}}";
+        let result = expand_prompt(template, &ctx);
+        assert_eq!(result, "Phase: `implement`");
+
+        // Without a phase
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config);
+        let result = expand_prompt(template, &ctx);
+        assert_eq!(result, "Phase: _(none)_");
+    }
+
+    #[test]
+    fn test_expand_prompt_valid_phases() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config);
+
+        let template = "Phases: {{valid_phases}}";
+        let result = expand_prompt(template, &ctx);
+
+        // Should contain various default phases
+        assert!(result.contains("implement"));
+        assert!(result.contains("test"));
+        assert!(result.contains("review"));
+    }
+
+    #[test]
+    fn test_expand_prompt_terminal_state() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let ctx = PromptContext::new("cancelled", None, &states_config, &phases_config);
+
+        let template = "Exits: {{valid_exits}}";
+        let result = expand_prompt(template, &ctx);
+
+        // Cancelled is a terminal state (no exits)
+        assert!(result.contains("no transitions available"));
+    }
+
+    #[test]
+    fn test_load_prompt_from_workflows() {
+        let workflows = WorkflowsConfig::default();
+
+        // Should find enter~working
+        let prompt = load_prompt("enter~working", &workflows);
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("actively working"));
+
+        // Should find enter%implement
+        let prompt = load_prompt("enter%implement", &workflows);
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("Implementation"));
+    }
+
+    #[test]
+    fn test_get_transition_prompts() {
+        let workflows = WorkflowsConfig::default();
+
+        let prompts = get_transition_prompts("pending", None, "working", None, &workflows);
+
+        // Should have at least the enter~working prompt
+        assert!(!prompts.is_empty());
+        assert!(prompts.iter().any(|p| p.contains("actively working")));
+    }
+
+    #[test]
+    fn test_list_available_prompts() {
+        let workflows = WorkflowsConfig::default();
+        let prompts = list_available_prompts(&workflows);
+
+        assert!(prompts.contains(&"enter~working".to_string()));
+        assert!(prompts.contains(&"exit~working".to_string()));
+        assert!(prompts.contains(&"enter%implement".to_string()));
     }
 }

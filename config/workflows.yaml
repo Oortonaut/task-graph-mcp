@@ -1,0 +1,128 @@
+# Unified workflow configuration for states, phases, and prompts
+
+settings:
+  initial_state: pending
+  disconnect_state: pending
+  blocking_states: [pending, assigned, working]
+  unknown_phase: warn
+
+states:
+  pending:
+    exits: [assigned, working, cancelled]
+    timed: false
+
+  assigned:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        A task has been assigned to you. Review and claim when ready.
+
+  working:
+    exits: [completed, failed, pending]
+    timed: true
+    prompts:
+      enter: |
+        You are now actively working on this task. Keep your thinking updated regularly using the `thinking` tool to show progress and allow coordination with other agents.
+
+        ## Valid Next States
+
+        From `{{current_status}}` you can transition to:
+        {{valid_exits}}
+
+        Use `update(status="completed")` when done, `update(status="failed")` if blocked, or `update(status="pending")` to release without completing.
+
+        ## Phase
+
+        Current phase: {{current_phase}}
+
+        Valid phases: {{valid_phases}}
+
+        Set a phase with `update(phase="implement")` to categorize the type of work you're doing.
+      exit: |
+        Before leaving working state:
+        - [ ] Unmark any files you marked
+        - [ ] Attach results or notes
+        - [ ] Log costs with `log_metrics()`
+
+  completed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: |
+        Task completed. Results should be attached.
+
+  failed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: |
+        Task failed. Please document:
+        - What was attempted
+        - What blocked progress
+        - Suggested next steps
+
+  cancelled:
+    exits: []
+    timed: false
+
+phases:
+  explore:
+    prompts:
+      exit: |
+        Capture exploration findings before moving on.
+        Attach discoveries to parent task for sibling agents.
+
+  implement:
+    prompts:
+      enter: |
+        Implementation phase. Mark files before editing.
+
+  review:
+    prompts:
+      enter: |
+        ## Code Review Checklist
+        - [ ] Tests pass
+        - [ ] No new warnings
+        - [ ] Documentation updated
+
+  test:
+    prompts:
+      enter: |
+        Testing phase. Verify the implementation works correctly.
+
+  security:
+    prompts:
+      enter: |
+        ## Security Review
+        - [ ] Input validation
+        - [ ] Auth/authz checks
+        - [ ] No secrets in code
+
+  # Phases without prompts
+  deliver: {}
+  triage: {}
+  diagnose: {}
+  design: {}
+  plan: {}
+  doc: {}
+  integrate: {}
+  deploy: {}
+  monitor: {}
+  optimize: {}
+
+# State+Phase specific prompts
+combos:
+  working+implement:
+    enter: |
+      You're implementing. Focus on:
+      - Follow existing patterns
+      - Write tests alongside code
+      - Keep commits atomic
+
+  working+review:
+    enter: |
+      Code review in progress:
+      - Check for correctness
+      - Look for edge cases
+      - Verify test coverage

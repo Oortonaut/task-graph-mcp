@@ -21,7 +21,7 @@ use std::sync::Arc;
 use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode, migrate};
 use task_graph_mcp::config::{
     AttachmentsConfig, AutoAdvanceConfig, Config, ConfigLoader, DependenciesConfig, PhasesConfig,
-    Prompts, ServerPaths, StatesConfig, UiMode,
+    Prompts, ServerPaths, StatesConfig, UiMode, workflows::WorkflowsConfig,
 };
 use task_graph_mcp::dashboard;
 use task_graph_mcp::db::Database;
@@ -53,8 +53,9 @@ impl TaskGraphServer {
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
-        transition_prompts: task_graph_mcp::prompts::PromptsConfig,
+        workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
+        path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
     ) -> Self {
         Self {
             tool_handler: Arc::new(ToolHandler::new(
@@ -68,11 +69,12 @@ impl TaskGraphServer {
                 Arc::clone(&deps_config),
                 Arc::clone(&auto_advance),
                 Arc::clone(&attachments_config),
-                transition_prompts,
+                workflows,
                 default_format,
+                path_mapper,
             )),
             resource_handler: Arc::new(
-                ResourceHandler::new(db, states_config, deps_config).with_skills_dir(skills_dir),
+                ResourceHandler::new(db, states_config, phases_config, deps_config).with_skills_dir(skills_dir),
             ),
             prompts,
         }
@@ -317,10 +319,12 @@ async fn main() -> Result<()> {
         Some(Command::Serve) | None => {
             // Load prompts using the loader (before consuming it)
             let prompts = loader.load_prompts();
+            // Load workflows configuration (contains states, phases, and transition prompts)
+            let workflows = loader.load_workflows();
             // Get the final config
             let config = loader.into_config();
             // Default: run MCP server
-            run_server(config, prompts, config_path_used).await?;
+            run_server(config, prompts, workflows, config_path_used).await?;
         }
     }
 
@@ -328,18 +332,25 @@ async fn main() -> Result<()> {
 }
 
 /// Run the MCP server
-async fn run_server(config: Config, prompts: Prompts, config_path_used: Option<String>) -> Result<()> {
+async fn run_server(config: Config, prompts: Prompts, workflows: WorkflowsConfig, config_path_used: Option<String>) -> Result<()> {
     // Ensure directories exist
     config.ensure_db_dir()?;
     config.ensure_media_dir()?;
     config.ensure_log_dir()?;
 
+    // Derive states and phases config from workflows
+    let states_config: StatesConfig = (&workflows).into();
+    let phases_config: PhasesConfig = (&workflows).into();
+
     // Validate configuration
-    config.states.validate()?;
+    states_config.validate()?;
     config.dependencies.validate()?;
 
-    // Wrap prompts in Arc
+    // Wrap in Arc
     let prompts = Arc::new(prompts);
+    let workflows = Arc::new(workflows);
+    let states_config = Arc::new(states_config);
+    let phases_config = Arc::new(phases_config);
 
     info!(
         "Starting Task Graph MCP Server v{}",
@@ -368,25 +379,30 @@ async fn run_server(config: Config, prompts: Prompts, config_path_used: Option<S
     });
 
     // Create server handler
-    let states_config = Arc::new(config.states.clone());
-    let phases_config = Arc::new(config.phases.clone());
     let deps_config = Arc::new(config.dependencies.clone());
     let auto_advance = Arc::new(config.auto_advance.clone());
     let attachments_config = Arc::new(config.attachments.clone());
-    let transition_prompts = task_graph_mcp::prompts::PromptsConfig::default();
+
+    // Create path mapper from config
+    let path_mapper = Arc::new(
+        task_graph_mcp::paths::PathMapper::from_config(&config.paths, Some(&config))
+            .expect("Failed to create path mapper from config"),
+    );
+
     let server = TaskGraphServer::new(
         Arc::clone(&db),
         config.server.media_dir.clone(),
         config.server.skills_dir.clone(),
         server_paths,
         prompts,
-        states_config,
-        phases_config,
+        Arc::clone(&states_config),
+        Arc::clone(&phases_config),
         deps_config,
         auto_advance,
         attachments_config,
-        transition_prompts,
+        workflows,
         config.server.default_format,
+        path_mapper,
     );
 
     // Start the HTTP dashboard server if UI mode is Web
@@ -394,6 +410,7 @@ async fn run_server(config: Config, prompts: Prompts, config_path_used: Option<S
         let (shutdown_tx, bound_addr) = dashboard::start_server(
             Arc::clone(&db),
             config.server.ui.port,
+            Arc::clone(&states_config),
         ).await?;
         info!("Dashboard available at http://{}", bound_addr);
         Some(shutdown_tx)

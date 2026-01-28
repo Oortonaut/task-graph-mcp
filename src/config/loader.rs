@@ -276,6 +276,47 @@ impl ConfigLoader {
         serde_json::from_value(merged).unwrap_or_default()
     }
 
+    /// Load workflows configuration with tier merging.
+    ///
+    /// Loads from embedded defaults, then project workflows.yaml, then user workflows.yaml.
+    /// Later tiers override earlier ones (objects are deep-merged, prompts are replaced).
+    pub fn load_workflows(&self) -> super::workflows::WorkflowsConfig {
+        let mut workflows_configs: Vec<Value> = Vec::new();
+
+        // Tier 1: Defaults (embedded)
+        if let Ok(default_json) = serde_json::to_value(&super::workflows::WorkflowsConfig::default()) {
+            workflows_configs.push(default_json);
+        }
+
+        // Tier 2: Project workflows
+        if let Some(project_dir) = self.paths.effective_project_dir() {
+            let workflows_file = project_dir.join("workflows.yaml");
+            if workflows_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&workflows_file) {
+                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
+                        workflows_configs.push(yaml_value);
+                    }
+                }
+            }
+        }
+
+        // Tier 3: User workflows
+        if let Some(ref user_dir) = self.paths.user_dir {
+            let workflows_file = user_dir.join("workflows.yaml");
+            if workflows_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&workflows_file) {
+                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
+                        workflows_configs.push(yaml_value);
+                    }
+                }
+            }
+        }
+
+        // Merge and deserialize
+        let merged = deep_merge_all(workflows_configs);
+        serde_json::from_value(merged).unwrap_or_default()
+    }
+
     /// Get the loaded configuration.
     pub fn config(&self) -> &Config {
         &self.config

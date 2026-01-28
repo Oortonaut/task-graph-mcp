@@ -5,9 +5,10 @@
 //! a non-timed state (ownership clears automatically).
 
 use super::{get_bool, get_string, make_tool_with_prompts};
-use crate::config::{AutoAdvanceConfig, DependenciesConfig, Prompts, StatesConfig};
+use crate::config::{AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
+use crate::prompts::PromptContext;
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
@@ -38,9 +39,10 @@ pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> 
 pub fn claim(
     db: &Database,
     states_config: &StatesConfig,
+    phases_config: &PhasesConfig,
     deps_config: &DependenciesConfig,
     auto_advance: &AutoAdvanceConfig,
-    transition_prompts: &crate::prompts::PromptsConfig,
+    workflows: &crate::config::workflows::WorkflowsConfig,
     args: Value,
 ) -> Result<Value> {
     let worker_id =
@@ -79,7 +81,7 @@ pub fn claim(
         auto_advance,
     )?;
 
-    // Get transition prompts for claiming
+    // Get transition prompts for claiming (with template expansion)
     let transition_prompt_list: Vec<String> = {
         match db.update_worker_state(
             &worker_id,
@@ -87,12 +89,20 @@ pub fn claim(
             task.phase.as_deref(),
         ) {
             Ok((old_status, old_phase)) => {
-                crate::prompts::get_transition_prompts(
+                // Create context for template expansion
+                let ctx = PromptContext::new(
+                    &task.status,
+                    task.phase.as_deref(),
+                    states_config,
+                    phases_config,
+                );
+                crate::prompts::get_transition_prompts_with_context(
                     old_status.as_deref().unwrap_or(""),
                     old_phase.as_deref(),
                     &task.status,
                     task.phase.as_deref(),
-                    transition_prompts,
+                    workflows,
+                    &ctx,
                 )
             }
             Err(_) => vec![],

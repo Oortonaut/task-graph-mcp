@@ -22,6 +22,7 @@ mod files;
 mod loader;
 mod merge;
 mod types;
+pub mod workflows;
 
 pub use files::{FileSource, ResolvedFile};
 pub use loader::{ConfigLoader, ConfigPaths, ConfigTier};
