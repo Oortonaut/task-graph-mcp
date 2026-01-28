@@ -2,8 +2,8 @@
 
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{
-    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, Prompts,
-    StatesConfig, TagsConfig, UnknownKeyBehavior,
+    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, GateEnforcement, IdsConfig,
+    PhasesConfig, Prompts, StatesConfig, TagsConfig, UnknownKeyBehavior,
 };
 use crate::db::Database;
 use crate::error::ToolError;
@@ -11,11 +11,13 @@ use crate::format::{
     OutputFormat, format_scan_result_markdown, format_task_markdown, format_tasks_markdown,
     markdown_to_json,
 };
+use crate::gates::evaluate_gates;
 use crate::prompts::PromptContext;
 use crate::types::{ScanResult, TaskTreeInput, parse_priority};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
+use tracing::warn;
 
 pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
     // Generate state enum from config
@@ -863,6 +865,230 @@ pub fn update(
         tag_warnings.extend(tags_config.validate_tags(t)?);
     }
 
+    // Check exit gates for status transitions
+    let mut gate_warnings: Vec<String> = Vec::new();
+    // Track skipped gates for audit logging (separate from warnings for response)
+    let mut skipped_status_gates: Vec<String> = Vec::new();
+    let mut skipped_phase_gates: Vec<String> = Vec::new();
+    if let Some(ref new_status) = status {
+        // Get current task to check if status is actually changing
+        let current_task = db.get_task(&task_id)?.ok_or_else(|| {
+            ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found")
+        })?;
+
+        if &current_task.status != new_status {
+            // Status is changing - check exit gates for the CURRENT status
+            let exit_gates = workflows.get_status_exit_gates(&current_task.status);
+
+            if !exit_gates.is_empty() {
+                // Convert references to owned GateDefinitions for evaluate_gates
+                let gates_owned: Vec<crate::config::GateDefinition> =
+                    exit_gates.iter().map(|g| (*g).clone()).collect();
+                let gate_result = evaluate_gates(db, &task_id, &gates_owned)?;
+
+                match gate_result.status.as_str() {
+                    "fail" => {
+                        // Reject-level gates unsatisfied - cannot proceed
+                        let gate_names: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Reject)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+                        return Err(ToolError::gates_not_satisfied(
+                            &current_task.status,
+                            &gate_names,
+                        )
+                        .into());
+                    }
+                    "warn" => {
+                        // Warn-level gates unsatisfied
+                        let warn_gates: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Warn)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+
+                        if !force {
+                            // Cannot proceed without force flag
+                            return Err(ToolError::new(
+                                crate::error::ErrorCode::GatesNotSatisfied,
+                                format!(
+                                    "Cannot exit '{}' without force=true: unsatisfied gates: {}",
+                                    current_task.status,
+                                    warn_gates.join(", ")
+                                ),
+                            )
+                            .into());
+                        }
+                        // force=true: proceed but include warning and log for audit
+                        warn!(
+                            task_id = %task_id,
+                            agent = %worker_id,
+                            from_status = %current_task.status,
+                            to_status = %new_status,
+                            skipped_gates = ?warn_gates,
+                            "Status transition with skipped warn gates (force=true)"
+                        );
+                        skipped_status_gates = warn_gates.clone();
+                        gate_warnings.push(format!(
+                            "Proceeding despite unsatisfied gates (force=true): {}",
+                            warn_gates.join(", ")
+                        ));
+                    }
+                    "pass" => {
+                        // All gates satisfied - check for allow-level warnings
+                        let allow_gates: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Allow)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+                        if !allow_gates.is_empty() {
+                            gate_warnings.push(format!(
+                                "Optional gates not satisfied: {}",
+                                allow_gates.join(", ")
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Check exit gates for phase transitions
+    if let Some(ref new_phase) = phase {
+        // Get current task to check if phase is actually changing
+        // Note: We may have already fetched the task for status gate checking,
+        // but we fetch again to ensure we have fresh data and to handle cases
+        // where only phase is changing (not status)
+        let current_task = db.get_task(&task_id)?.ok_or_else(|| {
+            ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found")
+        })?;
+
+        // Only check gates if there's a current phase AND it's different from new phase
+        if let Some(ref current_phase) = current_task.phase {
+            if current_phase != new_phase {
+                // Phase is changing - check exit gates for the CURRENT phase
+                let exit_gates = workflows.get_phase_exit_gates(current_phase);
+
+                if !exit_gates.is_empty() {
+                    // Convert references to owned GateDefinitions for evaluate_gates
+                    let gates_owned: Vec<crate::config::GateDefinition> =
+                        exit_gates.iter().map(|g| (*g).clone()).collect();
+                    let gate_result = evaluate_gates(db, &task_id, &gates_owned)?;
+
+                    match gate_result.status.as_str() {
+                        "fail" => {
+                            // Reject-level gates unsatisfied - cannot proceed
+                            let gate_names: Vec<String> = gate_result
+                                .unsatisfied_gates
+                                .iter()
+                                .filter(|g| g.enforcement == GateEnforcement::Reject)
+                                .map(|g| format!("{} ({})", g.gate_type, g.description))
+                                .collect();
+                            return Err(ToolError::new(
+                                crate::error::ErrorCode::GatesNotSatisfied,
+                                format!(
+                                    "Cannot exit phase '{}': unsatisfied gates: {}",
+                                    current_phase,
+                                    gate_names.join(", ")
+                                ),
+                            )
+                            .into());
+                        }
+                        "warn" => {
+                            // Warn-level gates unsatisfied
+                            let warn_gates: Vec<String> = gate_result
+                                .unsatisfied_gates
+                                .iter()
+                                .filter(|g| g.enforcement == GateEnforcement::Warn)
+                                .map(|g| format!("{} ({})", g.gate_type, g.description))
+                                .collect();
+
+                            if !force {
+                                // Cannot proceed without force flag
+                                return Err(ToolError::new(
+                                    crate::error::ErrorCode::GatesNotSatisfied,
+                                    format!(
+                                        "Cannot exit phase '{}' without force=true: unsatisfied gates: {}",
+                                        current_phase,
+                                        warn_gates.join(", ")
+                                    ),
+                                )
+                                .into());
+                            }
+                            // force=true: proceed but include warning and log for audit
+                            warn!(
+                                task_id = %task_id,
+                                agent = %worker_id,
+                                from_phase = %current_phase,
+                                to_phase = %new_phase,
+                                skipped_gates = ?warn_gates,
+                                "Phase transition with skipped warn gates (force=true)"
+                            );
+                            skipped_phase_gates = warn_gates.clone();
+                            gate_warnings.push(format!(
+                                "Proceeding despite unsatisfied phase gates (force=true): {}",
+                                warn_gates.join(", ")
+                            ));
+                        }
+                        "pass" => {
+                            // All gates satisfied - check for allow-level warnings
+                            let allow_gates: Vec<String> = gate_result
+                                .unsatisfied_gates
+                                .iter()
+                                .filter(|g| g.enforcement == GateEnforcement::Allow)
+                                .map(|g| format!("{} ({})", g.gate_type, g.description))
+                                .collect();
+                            if !allow_gates.is_empty() {
+                                gate_warnings.push(format!(
+                                    "Optional phase gates not satisfied: {}",
+                                    allow_gates.join(", ")
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // Build audit reason including any skipped gates
+    let audit_reason = {
+        let mut parts: Vec<String> = Vec::new();
+
+        // Include original reason if provided
+        if let Some(ref r) = reason {
+            parts.push(r.clone());
+        }
+
+        // Include skipped status gates for audit
+        if !skipped_status_gates.is_empty() {
+            parts.push(format!(
+                "Skipped status exit gates (force=true): {}",
+                skipped_status_gates.join(", ")
+            ));
+        }
+
+        // Include skipped phase gates for audit
+        if !skipped_phase_gates.is_empty() {
+            parts.push(format!(
+                "Skipped phase exit gates (force=true): {}",
+                skipped_phase_gates.join(", ")
+            ));
+        }
+
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("; "))
+        }
+    };
+
     // Perform the task update
     let (task, unblocked, auto_advanced) = db.update_task_unified(
         &task_id,
@@ -878,7 +1104,7 @@ pub fn update(
         needed_tags,
         wanted_tags,
         time_estimate_ms,
-        reason,
+        audit_reason,
         force,
         states_config,
         deps_config,
@@ -941,6 +1167,10 @@ pub fn update(
         // Include tag warnings if any
         if !tag_warnings.is_empty() {
             map.insert("tag_warnings".to_string(), json!(tag_warnings));
+        }
+        // Include gate warnings if any
+        if !gate_warnings.is_empty() {
+            map.insert("gate_warnings".to_string(), json!(gate_warnings));
         }
         // Include transition prompts if any
         if !transition_prompt_list.is_empty() {

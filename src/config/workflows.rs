@@ -7,8 +7,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use super::types::{PhasesConfig, StateDefinition, StatesConfig, UnknownKeyBehavior};
+use super::types::{
+    GateDefinition, PhasesConfig, StateDefinition, StatesConfig, UnknownKeyBehavior,
+};
 
 /// Settings for workflow behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +121,20 @@ pub struct ComboPrompts {
 /// Unified workflow configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowsConfig {
+    /// Short identifier for the workflow (e.g., "swarm", "relay", "solo").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// Human-readable description of the workflow's coordination model.
+    /// Should explain when to choose this workflow and how agents coordinate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Path to the source file this workflow was loaded from.
+    /// Not deserialized from YAML - populated by the loader.
+    #[serde(skip)]
+    pub source_file: Option<std::path::PathBuf>,
+
     /// Global workflow settings.
     #[serde(default)]
     pub settings: WorkflowSettings,
@@ -133,16 +150,51 @@ pub struct WorkflowsConfig {
     /// State+phase combination prompts (key format: "state+phase").
     #[serde(default)]
     pub combos: HashMap<String, ComboPrompts>,
+
+    /// Gate definitions for status and phase exits.
+    /// Keys are "status:<name>" or "phase:<name>", values are lists of gate definitions.
+    #[serde(default)]
+    pub gates: HashMap<String, Vec<GateDefinition>>,
+
+    /// Cache of named workflow configs (e.g., "swarm" -> workflow-swarm.yaml).
+    /// Populated at server startup, not serialized.
+    #[serde(skip)]
+    pub named_workflows: HashMap<String, Arc<WorkflowsConfig>>,
+
+    /// Key to look up the default workflow in named_workflows cache.
+    /// If set, workers without a workflow use this instead of the base config.
+    #[serde(skip)]
+    pub default_workflow_key: Option<String>,
 }
 
 impl Default for WorkflowsConfig {
     fn default() -> Self {
         Self {
+            name: None,
+            description: None,
+            source_file: None,
             settings: WorkflowSettings::default(),
             states: default_state_workflows(),
             phases: default_phase_workflows(),
             combos: HashMap::new(),
+            gates: HashMap::new(),
+            named_workflows: HashMap::new(),
+            default_workflow_key: None,
         }
+    }
+}
+
+impl WorkflowsConfig {
+    /// Get a named workflow config, or None if not found.
+    pub fn get_named_workflow(&self, name: &str) -> Option<&Arc<WorkflowsConfig>> {
+        self.named_workflows.get(name)
+    }
+
+    /// Get the default workflow config from the cache, if one is configured.
+    pub fn get_default_workflow(&self) -> Option<&Arc<WorkflowsConfig>> {
+        self.default_workflow_key
+            .as_ref()
+            .and_then(|key| self.named_workflows.get(key))
     }
 }
 
@@ -469,6 +521,24 @@ impl WorkflowsConfig {
 
         triggers.sort();
         triggers
+    }
+
+    /// Get exit gates for a status transition.
+    /// Returns gates defined under "status:<name>" key.
+    pub fn get_status_exit_gates(&self, status: &str) -> Vec<&GateDefinition> {
+        self.gates
+            .get(&format!("status:{}", status))
+            .map(|v| v.iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// Get exit gates for a phase transition.
+    /// Returns gates defined under "phase:<name>" key.
+    pub fn get_phase_exit_gates(&self, phase: &str) -> Vec<&GateDefinition> {
+        self.gates
+            .get(&format!("phase:{}", phase))
+            .map(|v| v.iter().collect())
+            .unwrap_or_default()
     }
 }
 

@@ -191,6 +191,38 @@ pub enum UnknownKeyBehavior {
     Reject,
 }
 
+/// Enforcement level for workflow gates (checklists that must be satisfied before status transitions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GateEnforcement {
+    /// Advisory only, never blocks transitions. Unsatisfied gates are reported but do not prevent status changes.
+    Allow,
+    /// Blocks transition unless force=true (default). Requires explicit override to proceed with unsatisfied gates.
+    #[default]
+    Warn,
+    /// Hard block, cannot be forced. Transition is rejected until gate requirements are satisfied.
+    Reject,
+}
+
+/// Definition of a gate (checklist item) for status or phase exits.
+///
+/// Gates are checked when transitioning out of a status or phase. A gate is satisfied
+/// when the task has an attachment with a matching type (e.g., "gate/tests", "gate/commit").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GateDefinition {
+    /// Attachment type that satisfies this gate (e.g., "gate/tests", "gate/commit").
+    #[serde(rename = "type")]
+    pub gate_type: String,
+
+    /// Enforcement level for this gate.
+    #[serde(default)]
+    pub enforcement: GateEnforcement,
+
+    /// Human-readable description of what this gate requires.
+    #[serde(default)]
+    pub description: String,
+}
+
 /// Definition of a preconfigured attachment key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttachmentKeyDefinition {
@@ -323,6 +355,31 @@ impl AttachmentsConfig {
             AttachmentKeyDefinition {
                 mime: "text/plain".to_string(),
                 mode: "replace".to_string(),
+            },
+        );
+
+        // Gate attachments - for workflow gate satisfaction
+        defs.insert(
+            "gate/tests".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "gate/commit".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
+            },
+        );
+
+        defs.insert(
+            "gate/review".to_string(),
+            AttachmentKeyDefinition {
+                mime: "text/plain".to_string(),
+                mode: "append".to_string(),
             },
         );
 
@@ -530,6 +587,12 @@ pub struct ServerConfig {
     /// UI configuration for the web dashboard.
     #[serde(default)]
     pub ui: UiConfig,
+
+    /// Default workflow name (e.g., "swarm" to use workflow-swarm.yaml).
+    /// If set, this workflow is used as the default for workers that don't specify one.
+    /// The named workflow is also cached under both its name and "default".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_workflow: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -543,6 +606,7 @@ impl Default for ServerConfig {
             skills_dir: default_skills_dir(),
             log_dir: default_log_dir(),
             ui: UiConfig::default(),
+            default_workflow: None,
         }
     }
 }

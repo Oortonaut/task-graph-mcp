@@ -3,14 +3,18 @@
 pub mod agents;
 pub mod attachments;
 pub mod claiming;
+pub mod context;
 pub mod deps;
 pub mod files;
+pub mod gates;
 pub mod query;
 pub mod schema;
 pub mod search;
 pub mod skills;
 pub mod tasks;
 pub mod tracking;
+
+pub use context::ToolContext;
 
 use crate::config::{
     AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, Prompts,
@@ -39,6 +43,7 @@ pub struct ToolHandler {
     pub attachments_config: Arc<AttachmentsConfig>,
     pub tags_config: Arc<TagsConfig>,
     pub ids_config: Arc<IdsConfig>,
+    /// Workflow config with named_workflows cache for per-worker selection
     pub workflows: Arc<WorkflowsConfig>,
     pub default_format: OutputFormat,
     pub path_mapper: Arc<crate::paths::PathMapper>,
@@ -82,6 +87,27 @@ impl ToolHandler {
         }
     }
 
+    /// Get the workflow config for a worker.
+    /// Looks up the worker's workflow name and returns the corresponding config,
+    /// or falls back to the configured default workflow, or the base config.
+    pub fn get_workflow_for_worker(&self, worker_id: &str) -> Arc<WorkflowsConfig> {
+        // Look up worker's workflow name from database
+        if let Ok(Some(worker)) = self.db.get_worker(worker_id) {
+            if let Some(ref workflow_name) = worker.workflow {
+                // Try to get from named_workflows cache
+                if let Some(workflow_config) = self.workflows.get_named_workflow(workflow_name) {
+                    return Arc::clone(workflow_config);
+                }
+            }
+        }
+        // Fall back to configured default workflow, or base config
+        if let Some(default_workflow) = self.workflows.get_default_workflow() {
+            Arc::clone(default_workflow)
+        } else {
+            Arc::clone(&self.workflows)
+        }
+    }
+
     /// Get all available tools.
     pub fn get_tools(&self) -> Vec<Tool> {
         let mut tools = Vec::new();
@@ -119,12 +145,20 @@ impl ToolHandler {
         // Query tools (read-only SQL)
         tools.extend(query::get_tools());
 
+        // Gate checking tools
+        tools.extend(gates::get_tools(&self.prompts));
+
         tools
     }
 
     /// Call a tool by name.
-    /// Call a tool by name.
-    pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<ToolResult> {
+    #[allow(unused_variables)]
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         // Helper to wrap JSON results
         let json = |r: Result<Value>| r.map(ToolResult::Json);
 
@@ -178,17 +212,25 @@ impl ToolHandler {
                 self.default_format,
                 arguments,
             )),
-            "update" => json(tasks::update(
-                &self.db,
-                &self.attachments_config,
-                &self.states_config,
-                &self.phases_config,
-                &self.deps_config,
-                &self.auto_advance,
-                &self.tags_config,
-                &self.workflows,
-                arguments,
-            )),
+            "update" => {
+                // Look up worker's workflow for prompts
+                let worker_id = arguments
+                    .get("worker_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let workflow = self.get_workflow_for_worker(worker_id);
+                json(tasks::update(
+                    &self.db,
+                    &self.attachments_config,
+                    &self.states_config,
+                    &self.phases_config,
+                    &self.deps_config,
+                    &self.auto_advance,
+                    &self.tags_config,
+                    &workflow,
+                    arguments,
+                ))
+            }
             "delete" => json(tasks::delete(&self.db, arguments)),
             "scan" => json(tasks::scan(&self.db, self.default_format, arguments)),
 
@@ -214,15 +256,23 @@ impl ToolHandler {
             "relink" => json(deps::relink(&self.db, &self.deps_config, arguments)),
 
             // Claiming tools
-            "claim" => json(claiming::claim(
-                &self.db,
-                &self.states_config,
-                &self.phases_config,
-                &self.deps_config,
-                &self.auto_advance,
-                &self.workflows,
-                arguments,
-            )),
+            "claim" => {
+                // Look up worker's workflow for prompts
+                let worker_id = arguments
+                    .get("worker_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let workflow = self.get_workflow_for_worker(worker_id);
+                json(claiming::claim(
+                    &self.db,
+                    &self.states_config,
+                    &self.phases_config,
+                    &self.deps_config,
+                    &self.auto_advance,
+                    &workflow,
+                    arguments,
+                ))
+            }
 
             // File coordination tools
             "mark_file" => json(files::mark_file(&self.db, arguments)),
@@ -260,6 +310,13 @@ impl ToolHandler {
 
             // Query tools (read-only SQL)
             "query" => query::query(&self.db, self.default_format, arguments),
+
+            // Gate checking tools
+            "check_gates" => {
+                // Look up worker's workflow for gate definitions
+                // Since check_gates doesn't require worker_id, use base workflow
+                json(gates::check_gates(&self.db, &self.workflows, arguments))
+            }
 
             _ => Err(ToolError::unknown_tool(name).into()),
         }

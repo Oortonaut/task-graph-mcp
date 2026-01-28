@@ -9,6 +9,8 @@ pub mod db;
 pub mod error;
 pub mod export;
 pub mod format;
+pub mod gates;
+pub mod logging;
 pub mod paths;
 pub mod prompts;
 pub mod resources;

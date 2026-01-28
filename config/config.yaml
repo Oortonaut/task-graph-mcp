@@ -127,4 +127,17 @@ attachments:
     context:
       mime: "text/plain"
       mode: replace
+    # Gate attachments - for workflow gate satisfaction
+    gate/tests:
+      mime: "text/plain"
+      mode: append
+      # For attaching test results or explanation of why tests pass/fail
+    gate/commit:
+      mime: "text/plain"
+      mode: append
+      # For attaching commit hash or reason for no commit
+    gate/review:
+      mime: "text/plain"
+      mode: append
+      # For attaching review notes or approval
 

@@ -27,6 +27,7 @@ pub enum ErrorCode {
     TagMismatch,
     NotOwner,
     DependencyNotSatisfied,
+    GatesNotSatisfied,
 
     // Internal errors
     DatabaseError,
@@ -128,6 +129,17 @@ impl ToolError {
         Self::new(
             ErrorCode::DependencyNotSatisfied,
             format!("Task blocked by: {}", blockers.join(", ")),
+        )
+    }
+
+    pub fn gates_not_satisfied(status: &str, gates: &[String]) -> Self {
+        Self::new(
+            ErrorCode::GatesNotSatisfied,
+            format!(
+                "Cannot exit '{}': unsatisfied gates: {}",
+                status,
+                gates.join(", ")
+            ),
         )
     }
 
