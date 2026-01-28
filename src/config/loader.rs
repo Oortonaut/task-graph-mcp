@@ -117,17 +117,17 @@ impl ConfigPaths {
     /// Get the effective project directory (prefers new location, falls back to deprecated).
     pub fn effective_project_dir(&self) -> Option<&Path> {
         // Check new location first
-        if let Some(ref dir) = self.project_dir {
-            if dir.exists() {
-                return Some(dir);
-            }
+        if let Some(ref dir) = self.project_dir
+            && dir.exists()
+        {
+            return Some(dir);
         }
 
         // Fall back to deprecated location
-        if let Some(ref dir) = self.project_dir_deprecated {
-            if dir.exists() {
-                return Some(dir);
-            }
+        if let Some(ref dir) = self.project_dir_deprecated
+            && dir.exists()
+        {
+            return Some(dir);
         }
 
         // If neither exists, prefer new location for creation
@@ -136,10 +136,10 @@ impl ConfigPaths {
 
     /// Check if using deprecated project directory.
     pub fn is_using_deprecated(&self) -> bool {
-        if let Some(ref new_dir) = self.project_dir {
-            if new_dir.exists() {
-                return false;
-            }
+        if let Some(ref new_dir) = self.project_dir
+            && new_dir.exists()
+        {
+            return false;
         }
 
         if let Some(ref dep_dir) = self.project_dir_deprecated {
@@ -205,25 +205,23 @@ impl ConfigLoader {
         let mut project_config_path = None;
         if let Some(project_dir) = paths.effective_project_dir() {
             let config_file = project_dir.join("config.yaml");
-            if config_file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&config_file) {
-                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
-                        configs.push(yaml_value);
-                        project_config_path = Some(config_file);
-                    }
-                }
+            if config_file.exists()
+                && let Ok(content) = std::fs::read_to_string(&config_file)
+                && let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content)
+            {
+                configs.push(yaml_value);
+                project_config_path = Some(config_file);
             }
         }
 
         // Tier 3: User config
         if let Some(ref user_dir) = paths.user_dir {
             let config_file = user_dir.join("config.yaml");
-            if config_file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&config_file) {
-                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
-                        configs.push(yaml_value);
-                    }
-                }
+            if config_file.exists()
+                && let Ok(content) = std::fs::read_to_string(&config_file)
+                && let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content)
+            {
+                configs.push(yaml_value);
             }
         }
 
@@ -266,31 +264,29 @@ impl ConfigLoader {
         let mut prompts_configs: Vec<Value> = Vec::new();
 
         // Tier 1: Defaults (empty)
-        if let Ok(default_json) = serde_json::to_value(&Prompts::default()) {
+        if let Ok(default_json) = serde_json::to_value(Prompts::default()) {
             prompts_configs.push(default_json);
         }
 
         // Tier 2: Project prompts
         if let Some(project_dir) = self.paths.effective_project_dir() {
             let prompts_file = project_dir.join("prompts.yaml");
-            if prompts_file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&prompts_file) {
-                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
-                        prompts_configs.push(yaml_value);
-                    }
-                }
+            if prompts_file.exists()
+                && let Ok(content) = std::fs::read_to_string(&prompts_file)
+                && let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content)
+            {
+                prompts_configs.push(yaml_value);
             }
         }
 
         // Tier 3: User prompts
         if let Some(ref user_dir) = self.paths.user_dir {
             let prompts_file = user_dir.join("prompts.yaml");
-            if prompts_file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&prompts_file) {
-                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
-                        prompts_configs.push(yaml_value);
-                    }
-                }
+            if prompts_file.exists()
+                && let Ok(content) = std::fs::read_to_string(&prompts_file)
+                && let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content)
+            {
+                prompts_configs.push(yaml_value);
             }
         }
 
@@ -307,8 +303,7 @@ impl ConfigLoader {
         let mut workflows_configs: Vec<Value> = Vec::new();
 
         // Tier 1: Defaults (embedded)
-        if let Ok(default_json) =
-            serde_json::to_value(&super::workflows::WorkflowsConfig::default())
+        if let Ok(default_json) = serde_json::to_value(super::workflows::WorkflowsConfig::default())
         {
             workflows_configs.push(default_json);
         }
@@ -316,24 +311,22 @@ impl ConfigLoader {
         // Tier 2: Project workflows
         if let Some(project_dir) = self.paths.effective_project_dir() {
             let workflows_file = project_dir.join("workflows.yaml");
-            if workflows_file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&workflows_file) {
-                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
-                        workflows_configs.push(yaml_value);
-                    }
-                }
+            if workflows_file.exists()
+                && let Ok(content) = std::fs::read_to_string(&workflows_file)
+                && let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content)
+            {
+                workflows_configs.push(yaml_value);
             }
         }
 
         // Tier 3: User workflows
         if let Some(ref user_dir) = self.paths.user_dir {
             let workflows_file = user_dir.join("workflows.yaml");
-            if workflows_file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&workflows_file) {
-                    if let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content) {
-                        workflows_configs.push(yaml_value);
-                    }
-                }
+            if workflows_file.exists()
+                && let Ok(content) = std::fs::read_to_string(&workflows_file)
+                && let Ok(yaml_value) = serde_yaml::from_str::<Value>(&content)
+            {
+                workflows_configs.push(yaml_value);
             }
         }
 
@@ -444,8 +437,7 @@ impl ConfigLoader {
         let mut configs: Vec<Value> = Vec::new();
 
         // Tier 1: Defaults
-        if let Ok(default_json) =
-            serde_json::to_value(&super::workflows::WorkflowsConfig::default())
+        if let Ok(default_json) = serde_json::to_value(super::workflows::WorkflowsConfig::default())
         {
             configs.push(default_json);
         }
@@ -469,40 +461,40 @@ impl ConfigLoader {
         let mut workflows = Vec::new();
 
         // Check user directory
-        if let Some(ref user_dir) = self.paths.user_dir {
-            if let Ok(entries) = std::fs::read_dir(user_dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if let Some(name) = Self::extract_workflow_name(&entry.path()) {
-                        if !workflows.contains(&name) {
-                            workflows.push(name);
-                        }
-                    }
+        if let Some(ref user_dir) = self.paths.user_dir
+            && let Ok(entries) = std::fs::read_dir(user_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = Self::extract_workflow_name(&entry.path())
+                    && !workflows.contains(&name)
+                {
+                    workflows.push(name);
                 }
             }
         }
 
         // Check project directory
-        if let Some(project_dir) = self.paths.effective_project_dir() {
-            if let Ok(entries) = std::fs::read_dir(project_dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if let Some(name) = Self::extract_workflow_name(&entry.path()) {
-                        if !workflows.contains(&name) {
-                            workflows.push(name);
-                        }
-                    }
+        if let Some(project_dir) = self.paths.effective_project_dir()
+            && let Ok(entries) = std::fs::read_dir(project_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = Self::extract_workflow_name(&entry.path())
+                    && !workflows.contains(&name)
+                {
+                    workflows.push(name);
                 }
             }
         }
 
         // Check install directory (built-in workflows)
-        if let Some(ref install_dir) = self.paths.install_dir {
-            if let Ok(entries) = std::fs::read_dir(install_dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if let Some(name) = Self::extract_workflow_name(&entry.path()) {
-                        if !workflows.contains(&name) {
-                            workflows.push(name);
-                        }
-                    }
+        if let Some(ref install_dir) = self.paths.install_dir
+            && let Ok(entries) = std::fs::read_dir(install_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = Self::extract_workflow_name(&entry.path())
+                    && !workflows.contains(&name)
+                {
+                    workflows.push(name);
                 }
             }
         }

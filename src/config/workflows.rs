@@ -73,7 +73,7 @@ pub struct TransitionPrompts {
 }
 
 /// Definition of a single state in the workflow.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StateWorkflow {
     /// Allowed states to transition to from this state.
     #[serde(default)]
@@ -86,16 +86,6 @@ pub struct StateWorkflow {
     /// Prompts for entering/exiting this state.
     #[serde(default)]
     pub prompts: TransitionPrompts,
-}
-
-impl Default for StateWorkflow {
-    fn default() -> Self {
-        Self {
-            exits: Vec::new(),
-            timed: false,
-            prompts: TransitionPrompts::default(),
-        }
-    }
 }
 
 /// Definition of a phase in the workflow.
@@ -574,7 +564,7 @@ impl From<&WorkflowsConfig> for PhasesConfig {
         let definitions: HashSet<String> = workflows.phases.keys().cloned().collect();
 
         PhasesConfig {
-            unknown_phase: workflows.settings.unknown_phase.clone(),
+            unknown_phase: workflows.settings.unknown_phase,
             definitions,
         }
     }

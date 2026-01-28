@@ -969,48 +969,49 @@ pub fn update(
         })?;
 
         // Only check gates if there's a current phase AND it's different from new phase
-        if let Some(ref current_phase) = current_task.phase {
-            if current_phase != new_phase {
-                // Phase is changing - check exit gates for the CURRENT phase
-                let exit_gates = workflows.get_phase_exit_gates(current_phase);
+        if let Some(ref current_phase) = current_task.phase
+            && current_phase != new_phase
+        {
+            // Phase is changing - check exit gates for the CURRENT phase
+            let exit_gates = workflows.get_phase_exit_gates(current_phase);
 
-                if !exit_gates.is_empty() {
-                    // Convert references to owned GateDefinitions for evaluate_gates
-                    let gates_owned: Vec<crate::config::GateDefinition> =
-                        exit_gates.iter().map(|g| (*g).clone()).collect();
-                    let gate_result = evaluate_gates(db, &task_id, &gates_owned)?;
+            if !exit_gates.is_empty() {
+                // Convert references to owned GateDefinitions for evaluate_gates
+                let gates_owned: Vec<crate::config::GateDefinition> =
+                    exit_gates.iter().map(|g| (*g).clone()).collect();
+                let gate_result = evaluate_gates(db, &task_id, &gates_owned)?;
 
-                    match gate_result.status.as_str() {
-                        "fail" => {
-                            // Reject-level gates unsatisfied - cannot proceed
-                            let gate_names: Vec<String> = gate_result
-                                .unsatisfied_gates
-                                .iter()
-                                .filter(|g| g.enforcement == GateEnforcement::Reject)
-                                .map(|g| format!("{} ({})", g.gate_type, g.description))
-                                .collect();
+                match gate_result.status.as_str() {
+                    "fail" => {
+                        // Reject-level gates unsatisfied - cannot proceed
+                        let gate_names: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Reject)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+                        return Err(ToolError::new(
+                            crate::error::ErrorCode::GatesNotSatisfied,
+                            format!(
+                                "Cannot exit phase '{}': unsatisfied gates: {}",
+                                current_phase,
+                                gate_names.join(", ")
+                            ),
+                        )
+                        .into());
+                    }
+                    "warn" => {
+                        // Warn-level gates unsatisfied
+                        let warn_gates: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Warn)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+
+                        if !force {
+                            // Cannot proceed without force flag
                             return Err(ToolError::new(
-                                crate::error::ErrorCode::GatesNotSatisfied,
-                                format!(
-                                    "Cannot exit phase '{}': unsatisfied gates: {}",
-                                    current_phase,
-                                    gate_names.join(", ")
-                                ),
-                            )
-                            .into());
-                        }
-                        "warn" => {
-                            // Warn-level gates unsatisfied
-                            let warn_gates: Vec<String> = gate_result
-                                .unsatisfied_gates
-                                .iter()
-                                .filter(|g| g.enforcement == GateEnforcement::Warn)
-                                .map(|g| format!("{} ({})", g.gate_type, g.description))
-                                .collect();
-
-                            if !force {
-                                // Cannot proceed without force flag
-                                return Err(ToolError::new(
                                     crate::error::ErrorCode::GatesNotSatisfied,
                                     format!(
                                         "Cannot exit phase '{}' without force=true: unsatisfied gates: {}",
@@ -1019,39 +1020,38 @@ pub fn update(
                                     ),
                                 )
                                 .into());
-                            }
-                            // force=true: proceed but include warning and log for audit
-                            warn!(
-                                task_id = %task_id,
-                                agent = %worker_id,
-                                from_phase = %current_phase,
-                                to_phase = %new_phase,
-                                skipped_gates = ?warn_gates,
-                                "Phase transition with skipped warn gates (force=true)"
-                            );
-                            skipped_phase_gates = warn_gates.clone();
+                        }
+                        // force=true: proceed but include warning and log for audit
+                        warn!(
+                            task_id = %task_id,
+                            agent = %worker_id,
+                            from_phase = %current_phase,
+                            to_phase = %new_phase,
+                            skipped_gates = ?warn_gates,
+                            "Phase transition with skipped warn gates (force=true)"
+                        );
+                        skipped_phase_gates = warn_gates.clone();
+                        gate_warnings.push(format!(
+                            "Proceeding despite unsatisfied phase gates (force=true): {}",
+                            warn_gates.join(", ")
+                        ));
+                    }
+                    "pass" => {
+                        // All gates satisfied - check for allow-level warnings
+                        let allow_gates: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Allow)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+                        if !allow_gates.is_empty() {
                             gate_warnings.push(format!(
-                                "Proceeding despite unsatisfied phase gates (force=true): {}",
-                                warn_gates.join(", ")
+                                "Optional phase gates not satisfied: {}",
+                                allow_gates.join(", ")
                             ));
                         }
-                        "pass" => {
-                            // All gates satisfied - check for allow-level warnings
-                            let allow_gates: Vec<String> = gate_result
-                                .unsatisfied_gates
-                                .iter()
-                                .filter(|g| g.enforcement == GateEnforcement::Allow)
-                                .map(|g| format!("{} ({})", g.gate_type, g.description))
-                                .collect();
-                            if !allow_gates.is_empty() {
-                                gate_warnings.push(format!(
-                                    "Optional phase gates not satisfied: {}",
-                                    allow_gates.join(", ")
-                                ));
-                            }
-                        }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
         }

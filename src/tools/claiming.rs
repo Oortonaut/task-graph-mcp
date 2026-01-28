@@ -117,10 +117,10 @@ pub fn claim(
     });
 
     // Add prompts if any
-    if !transition_prompt_list.is_empty() {
-        if let Value::Object(ref mut map) = response {
-            map.insert("prompts".to_string(), json!(transition_prompt_list));
-        }
+    if !transition_prompt_list.is_empty()
+        && let Value::Object(ref mut map) = response
+    {
+        map.insert("prompts".to_string(), json!(transition_prompt_list));
     }
 
     Ok(response)

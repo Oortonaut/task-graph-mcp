@@ -83,10 +83,10 @@ impl ExportArgs {
         }
 
         // Check if output filename ends with .gz
-        if let Some(ref path) = self.output {
-            if path.extension().map_or(false, |ext| ext == "gz") {
-                return true;
-            }
+        if let Some(ref path) = self.output
+            && path.extension().is_some_and(|ext| ext == "gz")
+        {
+            return true;
         }
 
         // Check against threshold if provided

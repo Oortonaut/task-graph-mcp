@@ -69,38 +69,38 @@ impl ConfigLoader {
         // Tier 3: User directory (highest priority for files)
         if let Some(ref user_dir) = self.paths.user_dir {
             let path = user_dir.join(relative_path);
-            if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    return Some(ResolvedFile::from_disk(content, path, FileSource::User));
-                }
+            if path.exists()
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                return Some(ResolvedFile::from_disk(content, path, FileSource::User));
             }
         }
 
         // Tier 2: Project directory (new location)
-        if let Some(ref project_dir) = self.paths.project_dir {
-            if project_dir.exists() {
-                let path = project_dir.join(relative_path);
-                if path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        return Some(ResolvedFile::from_disk(content, path, FileSource::Project));
-                    }
-                }
+        if let Some(ref project_dir) = self.paths.project_dir
+            && project_dir.exists()
+        {
+            let path = project_dir.join(relative_path);
+            if path.exists()
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                return Some(ResolvedFile::from_disk(content, path, FileSource::Project));
             }
         }
 
         // Tier 2b: Project directory (deprecated location)
-        if let Some(ref project_dir) = self.paths.project_dir_deprecated {
-            if project_dir.exists() {
-                let path = project_dir.join(relative_path);
-                if path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        return Some(ResolvedFile::from_disk(
-                            content,
-                            path,
-                            FileSource::ProjectDeprecated,
-                        ));
-                    }
-                }
+        if let Some(ref project_dir) = self.paths.project_dir_deprecated
+            && project_dir.exists()
+        {
+            let path = project_dir.join(relative_path);
+            if path.exists()
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                return Some(ResolvedFile::from_disk(
+                    content,
+                    path,
+                    FileSource::ProjectDeprecated,
+                ));
             }
         }
 
@@ -119,22 +119,22 @@ impl ConfigLoader {
         }
 
         // Tier 2: Project directory (new location)
-        if let Some(ref project_dir) = self.paths.project_dir {
-            if project_dir.exists() {
-                let path = project_dir.join(relative_path);
-                if path.exists() {
-                    return Some(path);
-                }
+        if let Some(ref project_dir) = self.paths.project_dir
+            && project_dir.exists()
+        {
+            let path = project_dir.join(relative_path);
+            if path.exists() {
+                return Some(path);
             }
         }
 
         // Tier 2b: Project directory (deprecated location)
-        if let Some(ref project_dir) = self.paths.project_dir_deprecated {
-            if project_dir.exists() {
-                let path = project_dir.join(relative_path);
-                if path.exists() {
-                    return Some(path);
-                }
+        if let Some(ref project_dir) = self.paths.project_dir_deprecated
+            && project_dir.exists()
+        {
+            let path = project_dir.join(relative_path);
+            if path.exists() {
+                return Some(path);
             }
         }
 
@@ -149,24 +149,26 @@ impl ConfigLoader {
     /// Get the tier where a file would be found.
     pub fn file_tier(&self, relative_path: &str) -> Option<ConfigTier> {
         // Tier 3: User directory
-        if let Some(ref user_dir) = self.paths.user_dir {
-            if user_dir.join(relative_path).exists() {
-                return Some(ConfigTier::User);
-            }
+        if let Some(ref user_dir) = self.paths.user_dir
+            && user_dir.join(relative_path).exists()
+        {
+            return Some(ConfigTier::User);
         }
 
         // Tier 2: Project directory
-        if let Some(ref project_dir) = self.paths.project_dir {
-            if project_dir.exists() && project_dir.join(relative_path).exists() {
-                return Some(ConfigTier::Project);
-            }
+        if let Some(ref project_dir) = self.paths.project_dir
+            && project_dir.exists()
+            && project_dir.join(relative_path).exists()
+        {
+            return Some(ConfigTier::Project);
         }
 
         // Tier 2b: Deprecated project directory
-        if let Some(ref project_dir) = self.paths.project_dir_deprecated {
-            if project_dir.exists() && project_dir.join(relative_path).exists() {
-                return Some(ConfigTier::Project);
-            }
+        if let Some(ref project_dir) = self.paths.project_dir_deprecated
+            && project_dir.exists()
+            && project_dir.join(relative_path).exists()
+        {
+            return Some(ConfigTier::Project);
         }
 
         None
@@ -185,12 +187,12 @@ impl ConfigLoader {
         // Tier 2b: Deprecated project directory
         if let Some(ref project_dir) = self.paths.project_dir_deprecated {
             let dir = project_dir.join(relative_dir);
-            if dir.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    for entry in entries.flatten() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            files.insert(name.to_string(), FileSource::ProjectDeprecated);
-                        }
+            if dir.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&dir)
+            {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        files.insert(name.to_string(), FileSource::ProjectDeprecated);
                     }
                 }
             }
@@ -199,12 +201,12 @@ impl ConfigLoader {
         // Tier 2: Project directory (new location)
         if let Some(ref project_dir) = self.paths.project_dir {
             let dir = project_dir.join(relative_dir);
-            if dir.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    for entry in entries.flatten() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            files.insert(name.to_string(), FileSource::Project);
-                        }
+            if dir.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&dir)
+            {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        files.insert(name.to_string(), FileSource::Project);
                     }
                 }
             }
@@ -213,12 +215,12 @@ impl ConfigLoader {
         // Tier 3: User directory
         if let Some(ref user_dir) = self.paths.user_dir {
             let dir = user_dir.join(relative_dir);
-            if dir.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    for entry in entries.flatten() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            files.insert(name.to_string(), FileSource::User);
-                        }
+            if dir.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&dir)
+            {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        files.insert(name.to_string(), FileSource::User);
                     }
                 }
             }

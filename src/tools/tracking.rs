@@ -211,12 +211,12 @@ pub fn task_history(
         && last_event.end_timestamp.is_none()
     {
         // Include in state filter check
-        if let Some(ref status) = last_event.status {
-            if state_filter.is_none() || state_filter.as_ref().unwrap().contains(status) {
-                *time_per_status.entry(status.clone()).or_insert(0) += current_dur;
-                if let Some(ref agent) = last_event.worker_id {
-                    *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
-                }
+        if let Some(ref status) = last_event.status
+            && (state_filter.is_none() || state_filter.as_ref().unwrap().contains(status))
+        {
+            *time_per_status.entry(status.clone()).or_insert(0) += current_dur;
+            if let Some(ref agent) = last_event.worker_id {
+                *time_per_agent.entry(agent.clone()).or_insert(0) += current_dur;
             }
         }
     }

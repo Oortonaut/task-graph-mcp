@@ -425,7 +425,7 @@ pub struct TagDefinition {
 }
 
 /// Tags configuration with preconfigured tag definitions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TagsConfig {
     /// Behavior for unknown tags (allow, warn, reject).
     #[serde(default)]
@@ -433,15 +433,6 @@ pub struct TagsConfig {
     /// Preconfigured tag definitions.
     #[serde(default)]
     pub definitions: HashMap<String, TagDefinition>,
-}
-
-impl Default for TagsConfig {
-    fn default() -> Self {
-        Self {
-            unknown_tag: UnknownKeyBehavior::default(),
-            definitions: HashMap::new(),
-        }
-    }
 }
 
 impl TagsConfig {

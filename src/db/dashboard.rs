@@ -254,30 +254,28 @@ impl Database {
             let mut param_idx = 1;
 
             // Status filter
-            if let Some(ref status) = query.status {
-                if !status.is_empty() {
+            if let Some(ref status) = query.status
+                && !status.is_empty() {
                     let clause = format!(" AND t.status = ?{}", param_idx);
                     sql.push_str(&clause);
                     count_sql.push_str(&clause);
                     params_vec.push(Box::new(status.clone()));
                     param_idx += 1;
                 }
-            }
 
             // Owner filter
-            if let Some(ref owner) = query.owner {
-                if !owner.is_empty() {
+            if let Some(ref owner) = query.owner
+                && !owner.is_empty() {
                     let clause = format!(" AND t.worker_id = ?{}", param_idx);
                     sql.push_str(&clause);
                     count_sql.push_str(&clause);
                     params_vec.push(Box::new(owner.clone()));
                     param_idx += 1;
                 }
-            }
 
             // Parent filter
-            if let Some(ref parent) = query.parent {
-                if !parent.is_empty() {
+            if let Some(ref parent) = query.parent
+                && !parent.is_empty() {
                     let clause = format!(
                         " AND t.id IN (SELECT to_task_id FROM dependencies WHERE from_task_id = ?{} AND dep_type = 'contains')",
                         param_idx
@@ -287,11 +285,10 @@ impl Database {
                     params_vec.push(Box::new(parent.clone()));
                     param_idx += 1;
                 }
-            }
 
             // Tags filter (comma-separated, any match)
-            if let Some(ref tags) = query.tags {
-                if !tags.is_empty() {
+            if let Some(ref tags) = query.tags
+                && !tags.is_empty() {
                     let tag_list: Vec<&str> = tags.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
                     if !tag_list.is_empty() {
                         let mut tag_conditions = Vec::new();
@@ -305,7 +302,6 @@ impl Database {
                         count_sql.push_str(&clause);
                     }
                 }
-            }
 
             // Sorting
             let order_clause = match (query.sort_by.as_str(), query.sort_order.as_str()) {
@@ -593,34 +589,33 @@ impl Database {
                 let mut param_idx = 1;
 
                 // Status filter
-                if let Some(ref status) = query.status {
-                    if !status.is_empty() {
-                        sql.push_str(&format!(" AND status = ?{}", param_idx));
-                        count_sql.push_str(&format!(" AND status = ?{}", param_idx));
-                        params_vec.push(Box::new(status.clone()));
-                        param_idx += 1;
-                    }
+                if let Some(ref status) = query.status
+                    && !status.is_empty()
+                {
+                    sql.push_str(&format!(" AND status = ?{}", param_idx));
+                    count_sql.push_str(&format!(" AND status = ?{}", param_idx));
+                    params_vec.push(Box::new(status.clone()));
+                    param_idx += 1;
                 }
 
                 // Worker filter
-                if let Some(ref worker) = query.worker {
-                    if !worker.is_empty() {
-                        sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
-                        count_sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
-                        params_vec.push(Box::new(worker.clone()));
-                        param_idx += 1;
-                    }
+                if let Some(ref worker) = query.worker
+                    && !worker.is_empty()
+                {
+                    sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
+                    count_sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
+                    params_vec.push(Box::new(worker.clone()));
+                    param_idx += 1;
                 }
 
                 // Task filter
-                if let Some(ref task) = query.task {
-                    if !task.is_empty() {
-                        sql.push_str(&format!(" AND task_id LIKE '%' || ?{} || '%'", param_idx));
-                        count_sql
-                            .push_str(&format!(" AND task_id LIKE '%' || ?{} || '%'", param_idx));
-                        params_vec.push(Box::new(task.clone()));
-                        let _ = param_idx; // Consumed
-                    }
+                if let Some(ref task) = query.task
+                    && !task.is_empty()
+                {
+                    sql.push_str(&format!(" AND task_id LIKE '%' || ?{} || '%'", param_idx));
+                    count_sql.push_str(&format!(" AND task_id LIKE '%' || ?{} || '%'", param_idx));
+                    params_vec.push(Box::new(task.clone()));
+                    let _ = param_idx; // Consumed
                 }
 
                 sql.push_str(" ORDER BY timestamp DESC");
@@ -676,12 +671,12 @@ impl Database {
                 let param_idx = 1;
 
                 // Worker filter
-                if let Some(ref worker) = query.worker {
-                    if !worker.is_empty() {
-                        sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
-                        count_sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
-                        params_vec.push(Box::new(worker.clone()));
-                    }
+                if let Some(ref worker) = query.worker
+                    && !worker.is_empty()
+                {
+                    sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
+                    count_sql.push_str(&format!(" AND worker_id = ?{}", param_idx));
+                    params_vec.push(Box::new(worker.clone()));
                 }
 
                 // Note: Task filter for file events is not implemented - file events
@@ -836,8 +831,8 @@ impl Database {
                 params![file_path],
             )?;
 
-            if deleted > 0 {
-                if let Some(worker_id) = owner {
+            if deleted > 0
+                && let Some(worker_id) = owner {
                     // Find the claim_id for this file+worker (most recent claim)
                     let claim_id: Option<i64> = tx.query_row(
                         "SELECT MAX(id) FROM claim_sequence
@@ -860,7 +855,6 @@ impl Database {
                         params![file_path, &worker_id, now, claim_id],
                     )?;
                 }
-            }
 
             tx.commit()?;
             Ok(deleted > 0)
@@ -966,14 +960,12 @@ impl Database {
                     } else {
                         format!("{} weeks ago", i)
                     }
+                } else if i == 0 {
+                    "Today".to_string()
+                } else if i == 1 {
+                    "Yesterday".to_string()
                 } else {
-                    if i == 0 {
-                        "Today".to_string()
-                    } else if i == 1 {
-                        "Yesterday".to_string()
-                    } else {
-                        format!("{} days ago", i)
-                    }
+                    format!("{} days ago", i)
                 };
 
                 data_points.push(VelocityDataPoint {

@@ -126,17 +126,16 @@ pub fn get_transition_triggers(
     // === EXITS (specific → general) ===
 
     // Exit combo (if either changed and had a phase)
-    if (status_changed || phase_changed) && old_phase.is_some() {
-        if let Some(op) = old_phase {
-            triggers.push(format!("exit~{}%{}", old_status, op));
-        }
+    if (status_changed || phase_changed)
+        && old_phase.is_some()
+        && let Some(op) = old_phase
+    {
+        triggers.push(format!("exit~{}%{}", old_status, op));
     }
 
     // Exit phase (if phase changed)
-    if phase_changed {
-        if let Some(op) = old_phase {
-            triggers.push(format!("exit%{}", op));
-        }
+    if phase_changed && let Some(op) = old_phase {
+        triggers.push(format!("exit%{}", op));
     }
 
     // Exit status (if status changed)
@@ -152,17 +151,16 @@ pub fn get_transition_triggers(
     }
 
     // Enter phase (if phase changed)
-    if phase_changed {
-        if let Some(np) = new_phase {
-            triggers.push(format!("enter%{}", np));
-        }
+    if phase_changed && let Some(np) = new_phase {
+        triggers.push(format!("enter%{}", np));
     }
 
     // Enter combo (if either changed and has a phase)
-    if (status_changed || phase_changed) && new_phase.is_some() {
-        if let Some(np) = new_phase {
-            triggers.push(format!("enter~{}%{}", new_status, np));
-        }
+    if (status_changed || phase_changed)
+        && new_phase.is_some()
+        && let Some(np) = new_phase
+    {
+        triggers.push(format!("enter~{}%{}", new_status, np));
     }
 
     triggers

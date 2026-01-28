@@ -821,7 +821,7 @@ async fn task_detail_page(
     let owner_html = task
         .worker_id
         .as_deref()
-        .map(|w| html_escape(w))
+        .map(html_escape)
         .unwrap_or_else(|| "-".to_string());
 
     // Title display
@@ -868,10 +868,10 @@ async fn task_detail_page(
     let message = params
         .get("msg")
         .map(|m| {
-            let (class, text) = if m.starts_with("success:") {
-                ("message-success", &m[8..])
-            } else if m.starts_with("error:") {
-                ("message-error", &m[6..])
+            let (class, text) = if let Some(stripped) = m.strip_prefix("success:") {
+                ("message-success", stripped)
+            } else if let Some(stripped) = m.strip_prefix("error:") {
+                ("message-error", stripped)
             } else {
                 ("message-success", m.as_str())
             };
@@ -1134,7 +1134,7 @@ async fn api_tasks_list(
         let owner_display = task
             .worker_id
             .as_deref()
-            .map(|w| html_escape(w))
+            .map(html_escape)
             .unwrap_or_else(|| "-".to_string());
 
         html.push_str(&format!(
@@ -1585,7 +1585,7 @@ async fn metrics_page() -> Html<&'static str> {
 
 /// File marks stats API endpoint for htmx - returns HTML fragment with stats.
 async fn api_file_marks_stats(State(state): State<DashboardServer>) -> Html<String> {
-    let stats = state.db().get_file_marks_stats().unwrap_or_else(|_| {
+    let stats = state.db().get_file_marks_stats().unwrap_or({
         crate::db::dashboard::FileMarksStats {
             total_marks: 0,
             unique_agents: 0,
@@ -1779,7 +1779,7 @@ fn format_duration(ms: i64) -> String {
 
 /// Metrics overview API endpoint for htmx - returns HTML fragment with key stats.
 async fn api_metrics_overview(State(state): State<DashboardServer>) -> Html<String> {
-    let overview = state.db().get_metrics_overview().unwrap_or_else(|_| {
+    let overview = state.db().get_metrics_overview().unwrap_or({
         crate::db::dashboard::MetricsOverview {
             total_tasks: 0,
             completed_tasks: 0,
@@ -1849,17 +1849,13 @@ async fn api_metrics_distribution(State(state): State<DashboardServer>) -> Html<
     ];
 
     for status in &statuses {
-        if let Some(&count) = distribution.get(*status) {
-            if count > 0 {
-                bar_html.push_str(&format!(
-                    r#"<div class="status-segment {}" style="flex-grow: {};" title="{}: {}">{}</div>"#,
-                    status,
-                    count,
-                    status,
-                    count,
-                    count
-                ));
-            }
+        if let Some(&count) = distribution.get(*status)
+            && count > 0
+        {
+            bar_html.push_str(&format!(
+                r#"<div class="status-segment {}" style="flex-grow: {};" title="{}: {}">{}</div>"#,
+                status, count, status, count, count
+            ));
         }
     }
 
@@ -1869,17 +1865,17 @@ async fn api_metrics_distribution(State(state): State<DashboardServer>) -> Html<
     let mut legend_html = String::from(r#"<div class="status-legend">"#);
 
     for status in &statuses {
-        if let Some(&count) = distribution.get(*status) {
-            if count > 0 {
-                let percentage = (count as f64 / total as f64) * 100.0;
-                legend_html.push_str(&format!(
+        if let Some(&count) = distribution.get(*status)
+            && count > 0
+        {
+            let percentage = (count as f64 / total as f64) * 100.0;
+            legend_html.push_str(&format!(
                     r#"<div class="legend-item"><span class="legend-dot {}"></span>{}: {} ({:.1}%)</div>"#,
                     status,
                     status,
                     count,
                     percentage
                 ));
-            }
         }
     }
 
@@ -2069,7 +2065,7 @@ async fn api_metrics_custom(State(state): State<DashboardServer>) -> Html<String
     let custom = state
         .db()
         .get_custom_metrics()
-        .unwrap_or_else(|_| crate::db::dashboard::CustomMetricsAggregate { metrics: [0; 8] });
+        .unwrap_or(crate::db::dashboard::CustomMetricsAggregate { metrics: [0; 8] });
 
     // Check if all metrics are zero
     let has_data = custom.metrics.iter().any(|&m| m != 0);
@@ -2250,7 +2246,7 @@ async fn api_graph_mermaid(
 
 /// Graph stats API endpoint - returns HTML fragment with graph statistics.
 async fn api_graph_stats(State(state): State<DashboardServer>) -> Html<String> {
-    let stats = state.db().get_dependency_graph_stats().unwrap_or_else(|_| {
+    let stats = state.db().get_dependency_graph_stats().unwrap_or({
         crate::db::dashboard::DependencyGraphStats {
             total_tasks: 0,
             total_deps: 0,
@@ -2335,13 +2331,13 @@ async fn api_sql_execute(
 
     for keyword in &forbidden {
         let pattern = format!(r"\b{}\s+", keyword);
-        if let Ok(re) = regex_lite::Regex::new(&pattern) {
-            if re.is_match(&normalized) {
-                return Html(format!(
-                    r#"<div class="error-message">{} statements are not allowed.</div>"#,
-                    keyword
-                ));
-            }
+        if let Ok(re) = regex_lite::Regex::new(&pattern)
+            && re.is_match(&normalized)
+        {
+            return Html(format!(
+                r#"<div class="error-message">{} statements are not allowed.</div>"#,
+                keyword
+            ));
         }
     }
 

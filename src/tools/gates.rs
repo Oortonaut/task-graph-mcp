@@ -80,7 +80,7 @@ pub fn check_gates(db: &Database, workflows: &WorkflowsConfig, args: Value) -> R
     let gates: Vec<Value> = result
         .unsatisfied_gates
         .iter()
-        .map(|g| gate_result_to_json(g))
+        .map(gate_result_to_json)
         .collect();
 
     Ok(json!({

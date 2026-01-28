@@ -49,7 +49,7 @@ pub struct ImportArgs {
 impl ImportArgs {
     /// Check if this is a gzipped file based on extension
     pub fn is_gzipped(&self) -> bool {
-        self.file.extension().map_or(false, |ext| ext == "gz")
+        self.file.extension().is_some_and(|ext| ext == "gz")
     }
 
     /// Describe the import mode for logging

@@ -1763,10 +1763,10 @@ fn create_tree_recursive(
         let initial_status = &states_config.initial;
 
         // Check phase validity
-        if let Some(ref phase) = input.phase {
-            if let Some(warning) = phases_config.check_phase(phase)? {
-                phase_warnings.push(format!("Task '{}': {}", task_id, warning));
-            }
+        if let Some(ref phase) = input.phase
+            && let Some(warning) = phases_config.check_phase(phase)?
+        {
+            phase_warnings.push(format!("Task '{}': {}", task_id, warning));
         }
 
         let needed_tags = input.needed_tags.clone().unwrap_or_default();

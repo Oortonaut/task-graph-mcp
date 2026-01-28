@@ -352,13 +352,13 @@ async fn main() -> Result<()> {
     // Handle subcommands
     match cli.command {
         Some(Command::Export(args)) => {
-            run_export(&config, args)?;
+            run_export(config, args)?;
         }
         Some(Command::Import(args)) => {
-            run_import(&config, args)?;
+            run_import(config, args)?;
         }
         Some(Command::Diff(args)) => {
-            run_diff(&config, args)?;
+            run_diff(config, args)?;
         }
         Some(Command::Migrate(args)) => {
             // Run migration command
@@ -423,10 +423,10 @@ fn load_workflows_with_cache(loader: &ConfigLoader) -> WorkflowsConfig {
     }
 
     // If default workflow was set, store the key for lookup
-    if let Some(ref name) = default_workflow_name {
-        if workflows.named_workflows.contains_key(name) {
-            workflows.default_workflow_key = Some(name.clone());
-        }
+    if let Some(ref name) = default_workflow_name
+        && workflows.named_workflows.contains_key(name)
+    {
+        workflows.default_workflow_key = Some(name.clone());
     }
 
     if !workflows.named_workflows.is_empty() {

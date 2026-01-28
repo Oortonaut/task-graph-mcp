@@ -403,10 +403,8 @@ pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
         for fp in &file_paths {
             if is_in_media_dir(fp, media_dir) {
                 let path = Path::new(fp);
-                if path.exists() {
-                    if std::fs::remove_file(path).is_ok() {
-                        files_deleted += 1;
-                    }
+                if path.exists() && std::fs::remove_file(path).is_ok() {
+                    files_deleted += 1;
                 }
             }
         }

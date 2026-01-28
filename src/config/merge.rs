@@ -52,9 +52,7 @@ pub fn deep_merge(base: Value, overlay: Value) -> Value {
 ///
 /// Equivalent to folding `deep_merge` over the list.
 pub fn deep_merge_all(values: impl IntoIterator<Item = Value>) -> Value {
-    values
-        .into_iter()
-        .fold(Value::Null, |acc, val| deep_merge(acc, val))
+    values.into_iter().fold(Value::Null, deep_merge)
 }
 
 #[cfg(test)]

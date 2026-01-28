@@ -92,12 +92,12 @@ impl ToolHandler {
     /// or falls back to the configured default workflow, or the base config.
     pub fn get_workflow_for_worker(&self, worker_id: &str) -> Arc<WorkflowsConfig> {
         // Look up worker's workflow name from database
-        if let Ok(Some(worker)) = self.db.get_worker(worker_id) {
-            if let Some(ref workflow_name) = worker.workflow {
-                // Try to get from named_workflows cache
-                if let Some(workflow_config) = self.workflows.get_named_workflow(workflow_name) {
-                    return Arc::clone(workflow_config);
-                }
+        if let Ok(Some(worker)) = self.db.get_worker(worker_id)
+            && let Some(ref workflow_name) = worker.workflow
+        {
+            // Try to get from named_workflows cache
+            if let Some(workflow_config) = self.workflows.get_named_workflow(workflow_name) {
+                return Arc::clone(workflow_config);
             }
         }
         // Fall back to configured default workflow, or base config
