@@ -406,14 +406,13 @@ async fn run_server(config: Config, prompts: Prompts, workflows: WorkflowsConfig
     );
 
     // Start the HTTP dashboard server if UI mode is Web
-    let _dashboard_shutdown = if config.server.ui.mode == UiMode::Web {
-        let (shutdown_tx, bound_addr) = dashboard::start_server(
+    // This never fails - if the port is in use, it retries in the background
+    let _dashboard_handle = if config.server.ui.mode == UiMode::Web {
+        Some(dashboard::start_server_with_retry(
             Arc::clone(&db),
-            config.server.ui.port,
+            &config.server.ui,
             Arc::clone(&states_config),
-        ).await?;
-        info!("Dashboard available at http://{}", bound_addr);
-        Some(shutdown_tx)
+        ))
     } else {
         None
     };

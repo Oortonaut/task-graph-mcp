@@ -32,6 +32,22 @@ pub struct UiConfig {
     /// Port for the web dashboard (default: 31994).
     #[serde(default = "default_ui_port")]
     pub port: u16,
+
+    /// Initial retry delay in milliseconds when dashboard fails to start (default: 15000).
+    #[serde(default = "default_retry_initial_ms")]
+    pub retry_initial_ms: u64,
+
+    /// Jitter range in milliseconds for retry delay (default: 5000, meaning ±5s).
+    #[serde(default = "default_retry_jitter_ms")]
+    pub retry_jitter_ms: u64,
+
+    /// Maximum retry interval in milliseconds (default: 240000 = 4 minutes).
+    #[serde(default = "default_retry_max_ms")]
+    pub retry_max_ms: u64,
+
+    /// Exponential backoff multiplier (default: 2.0).
+    #[serde(default = "default_retry_multiplier")]
+    pub retry_multiplier: f64,
 }
 
 impl Default for UiConfig {
@@ -39,12 +55,32 @@ impl Default for UiConfig {
         Self {
             mode: UiMode::default(),
             port: default_ui_port(),
+            retry_initial_ms: default_retry_initial_ms(),
+            retry_jitter_ms: default_retry_jitter_ms(),
+            retry_max_ms: default_retry_max_ms(),
+            retry_multiplier: default_retry_multiplier(),
         }
     }
 }
 
 fn default_ui_port() -> u16 {
     DEFAULT_UI_PORT
+}
+
+fn default_retry_initial_ms() -> u64 {
+    15_000 // 15 seconds
+}
+
+fn default_retry_jitter_ms() -> u64 {
+    5_000 // ±5 seconds
+}
+
+fn default_retry_max_ms() -> u64 {
+    240_000 // 4 minutes
+}
+
+fn default_retry_multiplier() -> f64 {
+    2.0
 }
 
 /// Auto-advance configuration for automatically transitioning tasks when dependencies are satisfied.
@@ -343,6 +379,10 @@ fn default_log_dir() -> PathBuf {
     PathBuf::from("task-graph/logs")
 }
 
+fn default_paths_root() -> String {
+    ".".to_string()
+}
+
 fn default_claim_limit() -> i32 {
     5
 }
@@ -354,15 +394,31 @@ fn default_stale_timeout() -> i64 {
 /// Path handling configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathsConfig {
+    /// Root directory for sandboxing (default: ".")
+    #[serde(default = "default_paths_root")]
+    pub root: String,
+
     /// Style for representing file paths.
     #[serde(default)]
     pub style: PathStyle,
+
+    /// Auto-map single-letter Windows drives (default: false)
+    #[serde(default)]
+    pub map_windows_drives: bool,
+
+    /// Prefix mappings (prefix -> path)
+    /// Values can be: literal path, $ENV_VAR, or ${config.path}
+    #[serde(default)]
+    pub mappings: HashMap<String, String>,
 }
 
 impl Default for PathsConfig {
     fn default() -> Self {
         Self {
+            root: default_paths_root(),
             style: PathStyle::Relative,
+            map_windows_drives: false,
+            mappings: HashMap::new(),
         }
     }
 }
