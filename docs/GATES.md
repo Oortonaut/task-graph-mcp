@@ -17,6 +17,8 @@ Gates are checklists that must be satisfied before exiting a status or phase. Th
 - [Attachment Conventions](#attachment-conventions)
 - [Example Workflow](#example-workflow)
 - [Integration with Status Transitions](#integration-with-status-transitions)
+- [Choosing and Configuring Gates](#choosing-and-configuring-gates)
+- [Best Practices](#best-practices)
 
 ---
 
@@ -508,6 +510,227 @@ update(task="X", status="completed", force=true);
 
 ---
 
+## Choosing and Configuring Gates
+
+This section provides guidance on when to use gates, how to choose enforcement levels, and patterns for different workflow topologies.
+
+### When to Use Gates
+
+**Use gates when:**
+- You need audit trails for process compliance (e.g., "tests must be attached before shipping")
+- Handoffs between agents require explicit artifacts (e.g., design spec → implementation)
+- You want to prevent accidental status changes without required documentation
+- Quality checkpoints should be enforced consistently across all agents
+
+**Don't use gates when:**
+- Simple tasks don't need documentation overhead
+- Dependencies between tasks already enforce ordering (use `blocks`/`follows` instead)
+- The requirement is about *doing* something rather than *documenting* something (use subtasks instead)
+- You want to track progress within a task (use `thinking()` or phase transitions)
+
+### Choosing Enforcement Levels
+
+| Enforcement | Choose When | Example |
+|-------------|-------------|---------|
+| **reject** | Skipping would cause real problems (data loss, broken builds, compliance violations) | Tests must pass before merge |
+| **warn** | Important but occasionally has valid exceptions | Commit hash (not all changes need commits) |
+| **allow** | Nice-to-have reminders, tracking what was/wasn't done | Cost logging |
+
+**Decision flowchart:**
+
+```
+Is this requirement truly mandatory?
+├─ Yes → Could an experienced agent ever legitimately skip it?
+│        ├─ No → Use `reject`
+│        └─ Yes → Use `warn`
+└─ No → Is it useful to track when it's skipped?
+         ├─ Yes → Use `allow`
+         └─ No → Don't create a gate
+```
+
+### Gates by Workflow Topology
+
+Different workflow patterns benefit from different gate configurations:
+
+#### Solo Workflow
+Single agent, minimal coordination. Gates primarily serve as self-discipline reminders.
+
+```yaml
+gates:
+  status:working:
+    - type: "gate/commit"
+      enforcement: warn  # Agent can skip with explanation
+      description: "Attach commit hash or note why no commit"
+    - type: "gate/tests"
+      enforcement: warn  # Allow skipping for non-code tasks
+      description: "Attach test results if applicable"
+```
+
+**Rationale:** Solo workers have full context; use `warn` to allow judgment calls.
+
+#### Swarm Workflow
+Parallel generalists, fine-grained tasks, high throughput.
+
+```yaml
+gates:
+  status:working:
+    - type: "gate/summary"
+      enforcement: warn
+      description: "Brief summary for other agents"
+  # Minimal gates - swarm prioritizes throughput
+```
+
+**Rationale:** Keep gates lightweight. Swarm tasks are atomic; heavy gates slow down the swarm. Use `allow` or minimal `warn` gates.
+
+#### Relay Workflow
+Specialists hand off through phases. Gates ensure proper handoff artifacts.
+
+```yaml
+gates:
+  phase:design:
+    - type: "gate/spec"
+      enforcement: reject  # Implementer cannot proceed without spec
+      description: "Design specification for handoff to implementer"
+
+  phase:implement:
+    - type: "gate/commit"
+      enforcement: reject
+      description: "Commit hash for reviewer"
+    - type: "gate/impl-notes"
+      enforcement: warn
+      description: "Implementation notes explaining decisions"
+
+  phase:review:
+    - type: "gate/approval"
+      enforcement: reject
+      description: "Explicit approval or rejection with notes"
+```
+
+**Rationale:** Relay depends on clean handoffs. Use `reject` for artifacts the next specialist needs to do their job.
+
+#### Hierarchical Workflow
+Lead coordinates workers; mixed push/pull.
+
+```yaml
+gates:
+  status:working:
+    - type: "gate/results"
+      enforcement: warn
+      description: "Attach results for lead visibility"
+
+  # Lead tasks have different requirements
+  status:assigned:  # Before worker claims
+    - type: "gate/spec"
+      enforcement: warn
+      description: "Lead should provide task specification"
+```
+
+**Rationale:** Workers report up to leads; leads provide specs down to workers. Gates enforce communication in both directions.
+
+### Gate Granularity
+
+**Too many gates:**
+```yaml
+# Anti-pattern: gate overload
+gates:
+  status:working:
+    - type: "gate/tests"
+    - type: "gate/commit"
+    - type: "gate/docs"
+    - type: "gate/review"
+    - type: "gate/coverage"
+    - type: "gate/lint"
+    - type: "gate/security"
+    - type: "gate/performance"
+```
+This creates friction and encourages agents to write meaningless content just to satisfy gates.
+
+**Right-sized gates:**
+```yaml
+# Better: meaningful checkpoints
+gates:
+  status:working:
+    - type: "gate/tests"
+      enforcement: warn
+      description: "Test results or explanation"
+    - type: "gate/commit"
+      enforcement: warn
+      description: "Commit hash if code changed"
+```
+
+**Rule of thumb:** 1-3 gates per status/phase exit. If you need more, consider whether some should be subtasks instead.
+
+### Status vs Phase Gates
+
+| Use Status Gates | Use Phase Gates |
+|------------------|-----------------|
+| Requirements for *completing* work | Requirements for *transitioning* between types of work |
+| Applies regardless of what kind of work | Specific to the type of work done |
+| `status:working` → `completed` | `phase:implement` → `review` |
+
+**Example:** Both can work together:
+
+```yaml
+gates:
+  # Always need test results when completing
+  status:working:
+    - type: "gate/tests"
+      enforcement: warn
+
+  # Additional requirement when leaving implementation phase
+  phase:implement:
+    - type: "gate/commit"
+      enforcement: warn
+```
+
+### Common Anti-Patterns
+
+**1. Gates that don't match enforcement level:**
+```yaml
+# Bad: trivial requirement with hard block
+- type: "gate/cost"
+  enforcement: reject  # Cost logging shouldn't block completion
+```
+
+**2. Vague descriptions:**
+```yaml
+# Bad: what does "done" mean?
+- type: "gate/done"
+  description: "Must be done"
+
+# Good: specific and actionable
+- type: "gate/tests"
+  description: "Run `cargo test` and attach output showing all tests pass"
+```
+
+**3. Redundant gates:**
+```yaml
+# Bad: gate duplicates dependency
+gates:
+  phase:implement:
+    - type: "gate/design-approved"  # Just use a 'blocks' dependency instead
+
+# Better: use task dependencies for ordering, gates for artifacts
+dependencies:
+  - from: design-task
+    to: implement-task
+    type: blocks
+```
+
+**4. Gates without escape hatches:**
+```yaml
+# Risky: no way to handle edge cases
+- type: "gate/tests"
+  enforcement: reject  # What about doc-only changes?
+
+# Better: allow judgment
+- type: "gate/tests"
+  enforcement: warn
+  description: "Attach test results, or explain why tests don't apply"
+```
+
+---
+
 ## Best Practices
 
 1. **Start with warn, escalate to reject**: Begin with `warn` enforcement to understand your team's patterns, then escalate critical gates to `reject`.
@@ -528,6 +751,7 @@ update(task="X", status="completed", force=true);
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | 2026-01-28 | Added "Choosing and Configuring Gates" guidance |
 | 1.0 | 2026-01-28 | Initial gates documentation |
 
 ---
