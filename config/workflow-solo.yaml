@@ -1,0 +1,234 @@
+# ============================================================================
+# SOLO WORKFLOW TOPOLOGY
+# ============================================================================
+#
+# PURPOSE:
+#   The solo topology is designed for a single agent working independently on
+#   a task list without external coordination. This is the simplest workflow
+#   model and serves as a baseline for individual productivity.
+#
+# WHEN TO USE:
+#   - Single developer/agent working alone on a project
+#   - Prototyping or exploring a new codebase
+#   - Personal task management without team coordination
+#   - Batch processing tasks that don't require parallelism
+#   - Establishing baseline metrics before scaling to multi-agent workflows
+#
+# KEY CHARACTERISTICS:
+#   - One agent handles all work end-to-end
+#   - Phases tracked as task field (explore -> design -> implement -> test)
+#   - Large, self-contained tasks with minimal inter-task dependencies
+#   - Agent autonomously claims (pulls) tasks when ready
+#   - Coarse granularity: tasks represent substantial chunks of work
+#
+# CONFIGURATION HIGHLIGHTS:
+#   - phase_model: field    - Progress tracked via task.phase field
+#   - coordination: pull    - Agent decides what to work on next
+#   - granularity: coarse   - Larger tasks for deep focus work
+#   - default_deps: loose   - Minimal blocking dependencies between tasks
+#   - Skips 'assigned' state since there's no coordinator to assign work
+#
+# TRADEOFFS:
+#   + Simple mental model, no coordination overhead
+#   + Deep focus on individual tasks
+#   + Good for complex tasks requiring sustained context
+#   - No parallelism (single agent bottleneck)
+#   - No external review or collaboration
+#   - All knowledge siloed in one agent's context
+#
+# ============================================================================
+
+name: solo
+description: Single agent working alone with coarse-grained, independent tasks
+
+# Override base settings for solo work
+settings:
+  initial_state: pending
+  disconnect_state: pending
+  blocking_states: [pending, assigned, working]
+  unknown_phase: warn
+
+# Solo-specific state prompts
+states:
+  pending:
+    exits: [working, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        Task available. Review and begin when ready.
+
+  # Solo worker skips 'assigned' - directly claims work
+  working:
+    exits: [completed, failed, pending]
+    timed: true
+    prompts:
+      enter: |
+        You are now working on this task. As a solo worker:
+
+        - Focus deeply on one task at a time
+        - Work through phases sequentially: explore -> design -> implement -> test -> review
+        - Keep detailed notes for future context (you may return to this later)
+        - Attach intermediate results so you can resume if interrupted
+
+        ## Current State
+
+        From `{{current_status}}` you can transition to:
+        {{valid_exits}}
+
+        Current phase: {{current_phase}}
+        Valid phases: {{valid_phases}}
+
+        ## Solo Work Patterns
+
+        1. **Phase progression**: Use `update(phase="implement")` to track which phase you're in
+        2. **Self-review**: Before completing, review your own work critically
+        3. **Documentation**: Attach notes explaining decisions for your future self
+
+      exit: |
+        Before completing this task:
+        - [ ] Attach summary of what was done
+        - [ ] Note any follow-up work needed
+        - [ ] Log costs with `log_metrics()`
+
+  completed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: |
+        Task completed. Results should be attached.
+        Consider: What follow-up tasks should be created?
+
+  failed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: |
+        Task blocked. Document:
+        - What was attempted
+        - What blocked progress
+        - Resources needed to unblock
+
+        Set to `pending` when ready to retry.
+
+  cancelled:
+    exits: []
+    timed: false
+
+# Phase prompts optimized for solo workflow
+phases:
+  explore:
+    prompts:
+      enter: |
+        ## Exploration Phase
+
+        Investigate the problem space before committing to a solution.
+
+        - Read relevant code and documentation
+        - Understand existing patterns
+        - Identify constraints and edge cases
+        - Attach findings as notes
+
+      exit: |
+        Capture exploration findings before moving on.
+        Create a note summarizing what you learned.
+
+  design:
+    prompts:
+      enter: |
+        ## Design Phase
+
+        Plan your approach before implementing.
+
+        - Outline the solution structure
+        - Consider alternatives and tradeoffs
+        - Identify potential risks
+        - Break into implementation steps if needed
+
+  implement:
+    prompts:
+      enter: |
+        ## Implementation Phase
+
+        Build the solution.
+
+        - Follow existing patterns in the codebase
+        - Write tests as you go
+        - Keep commits small and focused
+        - Mark files you're editing with `mark_file`
+
+  test:
+    prompts:
+      enter: |
+        ## Testing Phase
+
+        Verify the implementation works correctly.
+
+        - Run existing tests to ensure no regressions
+        - Add tests for new functionality
+        - Test edge cases and error conditions
+        - Document test coverage
+
+  review:
+    prompts:
+      enter: |
+        ## Self-Review Phase
+
+        Review your own work with fresh eyes.
+
+        - [ ] Does the code match the design?
+        - [ ] Are there any obvious bugs or edge cases?
+        - [ ] Is the code readable and maintainable?
+        - [ ] Are tests comprehensive?
+        - [ ] Is documentation updated?
+
+  doc:
+    prompts:
+      enter: |
+        ## Documentation Phase
+
+        Document what was built.
+
+        - Update README if needed
+        - Add code comments for complex logic
+        - Update API documentation
+        - Create examples if applicable
+
+  # Phases without specific prompts for solo work
+  deliver: {}
+  triage: {}
+  diagnose: {}
+  plan: {}
+  integrate: {}
+  deploy: {}
+  monitor: {}
+  optimize: {}
+  security:
+    prompts:
+      enter: |
+        ## Security Review
+
+        - [ ] Input validation
+        - [ ] Auth/authz checks
+        - [ ] No secrets in code
+        - [ ] Dependency vulnerabilities checked
+
+# State+Phase combinations for solo work
+combos:
+  working+explore:
+    enter: |
+      Solo exploration. Take time to understand the problem fully.
+      Attach notes as you discover important context.
+
+  working+implement:
+    enter: |
+      Solo implementation. You have full context - execute efficiently.
+      - Follow existing patterns
+      - Write tests alongside code
+      - Keep commits atomic
+
+  working+review:
+    enter: |
+      Self-review. Switch mental modes - pretend you're reviewing someone else's code.
+      - Look for bugs
+      - Check edge cases
+      - Verify test coverage

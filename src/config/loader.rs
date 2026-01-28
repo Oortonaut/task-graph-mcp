@@ -38,6 +38,8 @@ impl std::fmt::Display for ConfigTier {
 pub struct ConfigPaths {
     /// Embedded defaults directory (not a real path, but conceptual)
     pub defaults_dir: Option<PathBuf>,
+    /// Install/package config directory (e.g., $CWD/config/ for built-in workflows)
+    pub install_dir: Option<PathBuf>,
     /// Project-level config directory
     pub project_dir: Option<PathBuf>,
     /// Deprecated project-level config directory (.task-graph)
@@ -70,8 +72,15 @@ impl ConfigPaths {
         // Deprecated project dir: $CWD/.task-graph
         let project_dir_deprecated = Some(PathBuf::from(".task-graph"));
 
+        // Install dir: TASK_GRAPH_INSTALL_DIR or $CWD/config (for built-in workflows)
+        let install_dir = std::env::var("TASK_GRAPH_INSTALL_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(PathBuf::from("config")));
+
         Self {
             defaults_dir: None, // Defaults are embedded, not on disk
+            install_dir,
             project_dir,
             project_dir_deprecated,
             user_dir,
@@ -79,9 +88,26 @@ impl ConfigPaths {
     }
 
     /// Create paths with explicit directories.
+    /// Does not include install_dir (use with_all_dirs for full control).
     pub fn with_dirs(project_dir: Option<PathBuf>, user_dir: Option<PathBuf>) -> Self {
         Self {
             defaults_dir: None,
+            install_dir: None, // Not included for test isolation
+            project_dir,
+            project_dir_deprecated: Some(PathBuf::from(".task-graph")),
+            user_dir,
+        }
+    }
+
+    /// Create paths with all directories explicitly specified.
+    pub fn with_all_dirs(
+        install_dir: Option<PathBuf>,
+        project_dir: Option<PathBuf>,
+        user_dir: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            defaults_dir: None,
+            install_dir,
             project_dir,
             project_dir_deprecated: Some(PathBuf::from(".task-graph")),
             user_dir,
@@ -368,6 +394,133 @@ impl ConfigLoader {
 
         // Use config default
         self.config.server.skills_dir.clone()
+    }
+
+    /// Load a named workflow file (workflow-{name}.yaml).
+    ///
+    /// Searches in order: user directory, project directory, install directory.
+    /// User overrides project, project overrides install defaults.
+    /// Returns the merged workflow config (defaults + named workflow).
+    pub fn load_workflow_by_name(&self, name: &str) -> Result<super::workflows::WorkflowsConfig> {
+        let filename = format!("workflow-{}.yaml", name);
+
+        // Check user directory first (highest priority)
+        if let Some(ref user_dir) = self.paths.user_dir {
+            let workflow_file = user_dir.join(&filename);
+            if workflow_file.exists() {
+                return self.load_workflow_from_path(&workflow_file);
+            }
+        }
+
+        // Check project directory second
+        if let Some(project_dir) = self.paths.effective_project_dir() {
+            let workflow_file = project_dir.join(&filename);
+            if workflow_file.exists() {
+                return self.load_workflow_from_path(&workflow_file);
+            }
+        }
+
+        // Fall back to install directory (built-in defaults)
+        if let Some(ref install_dir) = self.paths.install_dir {
+            let workflow_file = install_dir.join(&filename);
+            if workflow_file.exists() {
+                return self.load_workflow_from_path(&workflow_file);
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "Workflow '{}' not found. Searched for '{}' in user, project, and install directories.",
+            name,
+            filename
+        ))
+    }
+
+    /// Load workflow from a specific path, merging with defaults.
+    fn load_workflow_from_path(&self, path: &Path) -> Result<super::workflows::WorkflowsConfig> {
+        let content = std::fs::read_to_string(path)?;
+        let yaml_value: Value = serde_yaml::from_str(&content)?;
+
+        // Start with defaults and merge the named workflow on top
+        let mut configs: Vec<Value> = Vec::new();
+
+        // Tier 1: Defaults
+        if let Ok(default_json) =
+            serde_json::to_value(&super::workflows::WorkflowsConfig::default())
+        {
+            configs.push(default_json);
+        }
+
+        // Tier 2: The named workflow file
+        configs.push(yaml_value);
+
+        let merged = deep_merge_all(configs);
+        let mut workflow: super::workflows::WorkflowsConfig = serde_json::from_value(merged)?;
+
+        // Populate source_file (not serialized, so must be set after deserialization)
+        workflow.source_file = Some(path.to_path_buf());
+
+        Ok(workflow)
+    }
+
+    /// List available named workflows.
+    ///
+    /// Returns workflow names (e.g., "solo", "swarm") found in user, project, and install directories.
+    pub fn list_workflows(&self) -> Vec<String> {
+        let mut workflows = Vec::new();
+
+        // Check user directory
+        if let Some(ref user_dir) = self.paths.user_dir {
+            if let Ok(entries) = std::fs::read_dir(user_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if let Some(name) = Self::extract_workflow_name(&entry.path()) {
+                        if !workflows.contains(&name) {
+                            workflows.push(name);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check project directory
+        if let Some(project_dir) = self.paths.effective_project_dir() {
+            if let Ok(entries) = std::fs::read_dir(project_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if let Some(name) = Self::extract_workflow_name(&entry.path()) {
+                        if !workflows.contains(&name) {
+                            workflows.push(name);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check install directory (built-in workflows)
+        if let Some(ref install_dir) = self.paths.install_dir {
+            if let Ok(entries) = std::fs::read_dir(install_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if let Some(name) = Self::extract_workflow_name(&entry.path()) {
+                        if !workflows.contains(&name) {
+                            workflows.push(name);
+                        }
+                    }
+                }
+            }
+        }
+
+        workflows.sort();
+        workflows
+    }
+
+    /// Extract workflow name from a path like "workflow-swarm.yaml" -> "swarm".
+    fn extract_workflow_name(path: &Path) -> Option<String> {
+        let filename = path.file_name()?.to_str()?;
+        if filename.starts_with("workflow-") && filename.ends_with(".yaml") {
+            let name = filename.strip_prefix("workflow-")?.strip_suffix(".yaml")?;
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+        None
     }
 }
 

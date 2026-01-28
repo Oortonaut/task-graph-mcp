@@ -55,6 +55,9 @@ pub struct Worker {
     /// Last phase the worker transitioned to (for prompts/dashboard)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_phase: Option<String>,
+    /// Named workflow this worker is using (e.g., "swarm" for workflow-swarm.yaml)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<String>,
 }
 
 /// Worker info with additional runtime details for list_workers.
@@ -76,6 +79,9 @@ pub struct WorkerInfo {
     /// Last phase the worker transitioned to (for prompts/dashboard)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_phase: Option<String>,
+    /// Named workflow this worker is using (e.g., "swarm" for workflow-swarm.yaml)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<String>,
 }
 
 /// Task priority as an integer (higher = more important).

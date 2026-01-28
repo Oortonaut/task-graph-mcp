@@ -6,7 +6,9 @@ pub mod files;
 pub mod skills;
 pub mod stats;
 pub mod tasks;
+pub mod workflows;
 
+use crate::config::workflows::WorkflowsConfig;
 use crate::config::{DependenciesConfig, PhasesConfig, StatesConfig, TagsConfig};
 use crate::db::Database;
 use anyhow::Result;
@@ -21,6 +23,7 @@ pub struct ResourceHandler {
     pub phases_config: Arc<PhasesConfig>,
     pub deps_config: Arc<DependenciesConfig>,
     pub tags_config: Arc<TagsConfig>,
+    pub workflows_config: Arc<WorkflowsConfig>,
     /// Directory for skill overrides (e.g., `.task-graph/skills/`)
     pub skills_dir: Option<std::path::PathBuf>,
 }
@@ -32,6 +35,7 @@ impl ResourceHandler {
         phases_config: Arc<PhasesConfig>,
         deps_config: Arc<DependenciesConfig>,
         tags_config: Arc<TagsConfig>,
+        workflows_config: Arc<WorkflowsConfig>,
     ) -> Self {
         Self {
             db,
@@ -39,6 +43,7 @@ impl ResourceHandler {
             phases_config,
             deps_config,
             tags_config,
+            workflows_config,
             skills_dir: None,
         }
     }
@@ -185,6 +190,29 @@ impl ResourceHandler {
                 },
                 None,
             ),
+            // Workflow resources
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "workflows://list".into(),
+                    name: "Available Workflows".into(),
+                    title: None,
+                    description: Some("List all available workflow topologies with descriptions".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "workflows://{name}".into(),
+                    name: "Workflow Details".into(),
+                    title: None,
+                    description: Some("Get detailed information about a specific workflow (states, phases, settings)".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
         ]
     }
 
@@ -205,6 +233,8 @@ impl ResourceHandler {
             self.read_skills_resource(uri).await
         } else if uri.starts_with("config://") {
             self.read_config_resource(uri).await
+        } else if uri.starts_with("workflows://") {
+            self.read_workflows_resource(uri).await
         } else {
             Err(anyhow::anyhow!("Unknown resource URI: {}", uri))
         }
@@ -285,6 +315,15 @@ impl ResourceHandler {
             "dependencies" => config::get_dependencies_config(&self.deps_config),
             "tags" => config::get_tags_config(&self.tags_config),
             _ => Err(anyhow::anyhow!("Unknown config resource: {}", path)),
+        }
+    }
+
+    async fn read_workflows_resource(&self, uri: &str) -> Result<Value> {
+        let path = uri.strip_prefix("workflows://").unwrap_or("");
+
+        match path {
+            "list" => workflows::list_workflows(&self.workflows_config),
+            name => workflows::get_workflow(&self.workflows_config, name),
         }
     }
 }

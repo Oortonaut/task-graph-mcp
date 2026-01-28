@@ -37,8 +37,9 @@ use task_graph_mcp::error::ToolError;
 use task_graph_mcp::export::diff::{diff_snapshot_vs_database, diff_snapshots};
 use task_graph_mcp::export::{CURRENT_SCHEMA_VERSION, Snapshot};
 use task_graph_mcp::format::OutputFormat;
+use task_graph_mcp::logging::{LogLevelFilter, Logger};
 use task_graph_mcp::resources::ResourceHandler;
-use task_graph_mcp::tools::ToolHandler;
+use task_graph_mcp::tools::{ToolContext, ToolHandler};
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
@@ -48,6 +49,8 @@ struct TaskGraphServer {
     tool_handler: Arc<ToolHandler>,
     resource_handler: Arc<ResourceHandler>,
     prompts: Arc<Prompts>,
+    /// Atomic level filter for logging (client can adjust via logging/setLevel).
+    level_filter: Arc<LogLevelFilter>,
 }
 
 impl TaskGraphServer {
@@ -68,6 +71,7 @@ impl TaskGraphServer {
         workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
         path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
+        level_filter: Arc<LogLevelFilter>,
     ) -> Self {
         Self {
             tool_handler: Arc::new(ToolHandler::new(
@@ -83,15 +87,23 @@ impl TaskGraphServer {
                 Arc::clone(&attachments_config),
                 Arc::clone(&tags_config),
                 ids_config,
-                workflows,
+                Arc::clone(&workflows),
                 default_format,
                 path_mapper,
             )),
             resource_handler: Arc::new(
-                ResourceHandler::new(db, states_config, phases_config, deps_config, tags_config)
-                    .with_skills_dir(skills_dir),
+                ResourceHandler::new(
+                    db,
+                    states_config,
+                    phases_config,
+                    deps_config,
+                    tags_config,
+                    workflows,
+                )
+                .with_skills_dir(skills_dir),
             ),
             prompts,
+            level_filter,
         }
     }
 }
@@ -122,10 +134,21 @@ impl ServerHandler for TaskGraphServer {
                     subscribe: None,
                     list_changed: None,
                 }),
+                logging: Some(Default::default()),
                 ..Default::default()
             },
             instructions: Some(instructions),
         }
+    }
+
+    async fn set_level(
+        &self,
+        request: rmcp::model::SetLevelRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<(), ErrorData> {
+        self.level_filter.set(request.level);
+        tracing::info!(level = ?request.level, "Logging level updated via MCP");
+        Ok(())
     }
 
     async fn list_tools(
@@ -143,10 +166,21 @@ impl ServerHandler for TaskGraphServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        // Create logger for this request
+        let logger = Logger::new()
+            .with_peer(context.peer.clone())
+            .with_level_filter(Arc::clone(&self.level_filter))
+            .with_name(format!("tool:{}", request.name));
+        let tool_ctx = ToolContext::new(logger);
+
         let args = Value::Object(request.arguments.unwrap_or_default());
-        match self.tool_handler.call_tool(&request.name, args).await {
+        match self
+            .tool_handler
+            .call_tool(&request.name, args, &tool_ctx)
+            .await
+        {
             Ok(result) => Ok(CallToolResult {
                 content: vec![Content::text(result.into_string())],
                 is_error: None,
@@ -334,7 +368,8 @@ async fn main() -> Result<()> {
             // Load prompts using the loader (before consuming it)
             let prompts = loader.load_prompts();
             // Load workflows configuration (contains states, phases, and transition prompts)
-            let workflows = loader.load_workflows();
+            // Also pre-loads named workflow configs (workflow-*.yaml) for per-worker selection
+            let workflows = load_workflows_with_cache(&loader);
             // Get the final config
             let config = loader.into_config();
             // Default: run MCP server
@@ -343,6 +378,65 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Load workflows config and pre-load named workflow configs into cache.
+/// If default_workflow is configured, that workflow becomes the base config.
+fn load_workflows_with_cache(loader: &ConfigLoader) -> WorkflowsConfig {
+    let default_workflow_name = loader.config().server.default_workflow.clone();
+
+    // If a default workflow is configured, load it as the base
+    let mut workflows = if let Some(ref name) = default_workflow_name {
+        match loader.load_workflow_by_name(name) {
+            Ok(workflow_config) => {
+                info!("Using '{}' as default workflow", name);
+                workflow_config
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to load default workflow '{}': {}. Using built-in defaults.",
+                    name,
+                    e
+                );
+                loader.load_workflows()
+            }
+        }
+    } else {
+        loader.load_workflows()
+    };
+
+    // List all available named workflows and load them into cache
+    let workflow_names = loader.list_workflows();
+
+    for name in workflow_names {
+        match loader.load_workflow_by_name(&name) {
+            Ok(workflow_config) => {
+                info!("Loaded workflow '{}' for per-worker selection", name);
+                workflows
+                    .named_workflows
+                    .insert(name, Arc::new(workflow_config));
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load workflow '{}': {}", name, e);
+            }
+        }
+    }
+
+    // If default workflow was set, store the key for lookup
+    if let Some(ref name) = default_workflow_name {
+        if workflows.named_workflows.contains_key(name) {
+            workflows.default_workflow_key = Some(name.clone());
+        }
+    }
+
+    if !workflows.named_workflows.is_empty() {
+        info!(
+            "Workflow cache: {} named workflows available",
+            workflows.named_workflows.len()
+        );
+    }
+
+    workflows
 }
 
 /// Run the MCP server
@@ -410,6 +504,9 @@ async fn run_server(
             .map_err(|e| anyhow::anyhow!("Failed to create path mapper from config: {}", e))?,
     );
 
+    // Create level filter for unified logging (defaults to Debug - logs everything)
+    let level_filter = Arc::new(LogLevelFilter::default());
+
     let server = TaskGraphServer::new(
         Arc::clone(&db),
         config.server.media_dir.clone(),
@@ -426,6 +523,7 @@ async fn run_server(
         workflows,
         config.server.default_format,
         path_mapper,
+        level_filter,
     );
 
     // Start the HTTP dashboard server if UI mode is Web

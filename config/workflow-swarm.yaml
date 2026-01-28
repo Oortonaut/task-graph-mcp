@@ -1,0 +1,278 @@
+# =============================================================================
+# SWARM TOPOLOGY WORKFLOW CONFIGURATION
+# =============================================================================
+#
+# OVERVIEW
+# --------
+# The swarm topology enables maximum parallel throughput by deploying multiple
+# generalist agents working independently on fine-grained, atomic tasks. Unlike
+# hierarchical or relay topologies, there is no lead/coordinator - agents self-
+# organize using a pull-based coordination model.
+#
+# WHEN TO USE SWARM
+# -----------------
+# Choose swarm topology when:
+#   - You have many small, independent tasks (decomposed in advance)
+#   - Tasks have minimal interdependencies
+#   - Fast throughput matters more than careful sequencing
+#   - Work can be parallelized across generalist agents
+#   - You want to maximize resource utilization
+#
+# Avoid swarm topology when:
+#   - Tasks require deep sequential reasoning
+#   - Work involves tightly coupled components needing coordination
+#   - You need specialist expertise for different phases
+#   - Task granularity is coarse (use solo or hierarchical instead)
+#
+# COORDINATION PROTOCOL
+# ---------------------
+# Swarm agents coordinate through three mechanisms:
+#
+#   1. TASK CLAIMING (Pull Model)
+#      - Agents call list_tasks(ready=true) to find available work
+#      - Claim ONE task at a time with claim()
+#      - Complete quickly, release, and repeat
+#      - No central assignment - agents self-select work
+#
+#   2. FILE MARKING (Conflict Prevention)
+#      - Before editing: mark_file(agent, file) to signal intent
+#      - Check mark_updates() to see if others are working on same files
+#      - Wait or coordinate if conflicts detected
+#      - Release with unmark_file() when done
+#
+#   3. THINKING BROADCASTS (Visibility)
+#      - Call thinking() frequently to show progress
+#      - Other agents monitor to avoid conflicting work
+#      - Creates real-time visibility into swarm activity
+#
+# KEY CONFIGURATION POINTS
+# ------------------------
+#   - phase_model: field      - Phases are optional task properties
+#   - coordination: pull      - Workers claim tasks autonomously
+#   - granularity: fine       - Small atomic tasks for parallelism
+#   - default_deps: loose     - Minimal blocking between tasks
+#   - agents: generalists     - Any worker can claim any task
+#
+# THROUGHPUT OPTIMIZATION
+# -----------------------
+# Swarm throughput scales with:
+#   - Number of independent tasks available
+#   - Task atomicity (smaller = faster cycles)
+#   - Minimal file conflicts between agents
+#   - Quick claim-work-complete cycles
+#
+# =============================================================================
+# Parallel generalists working on fine-grained atomic tasks
+
+name: swarm
+description: Parallel generalists with fine-grained tasks for maximum throughput
+
+settings:
+  initial_state: pending
+  disconnect_state: pending
+  blocking_states: [pending, assigned, working]
+  unknown_phase: warn
+
+states:
+  pending:
+    exits: [assigned, working, cancelled]
+    timed: false
+
+  assigned:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        A task has been assigned to you. Review and claim when ready.
+
+  working:
+    exits: [completed, failed, pending]
+    timed: true
+    prompts:
+      enter: |
+        ## Swarm Worker Active
+
+        You are now working on this task. In a swarm topology, tasks are small and atomic.
+
+        ### Coordination Protocol
+
+        **Before editing any shared file:**
+        1. Call `mark_updates(agent=your_id)` to check for recent file activity
+        2. Use `mark_file(agent=your_id, file=path)` to signal intent
+        3. If another agent has marked the file, coordinate or wait
+
+        **During work:**
+        - Call `thinking(agent=your_id, thought="...")` frequently for visibility
+        - Keep updates short but regular (every few minutes of work)
+        - Other agents monitor thinking() to understand swarm activity
+
+        **Task discipline:**
+        - Claim ONE task at a time
+        - Complete quickly, then release
+        - Prefer smaller tasks for faster throughput
+        - Don't hold tasks while waiting on dependencies
+
+        ### Valid Next States
+
+        From `{{current_status}}` you can transition to:
+        {{valid_exits}}
+
+        Use `update(status="completed")` when done, `update(status="failed")` if blocked, or `update(status="pending")` to release without completing.
+
+        ### Phase (Optional)
+
+        Current phase: {{current_phase}}
+
+        Phases are optional in swarm topology. Use if helpful for categorization.
+        Valid phases: {{valid_phases}}
+      exit: |
+        Before leaving working state:
+        - [ ] Call `unmark_file()` for any files you marked
+        - [ ] Attach brief results or notes
+        - [ ] Log costs with `log_metrics()`
+        - [ ] Ensure no dangling work - task should be atomic
+
+  completed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: |
+        Task completed. In swarm topology:
+        - Pick up next available task with `list_tasks(ready=true, agent=your_id)`
+        - Claim quickly to maintain throughput
+        - Results should be attached for other agents to reference
+
+  failed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: |
+        Task failed. Document briefly:
+        - What was attempted
+        - What blocked progress
+        - Is this blocked by another task? Use `link(from=blocker, to=this, type="blocks")`
+
+        Release the task so another agent can attempt or dependencies can be resolved.
+
+  cancelled:
+    exits: []
+    timed: false
+
+phases:
+  explore:
+    prompts:
+      enter: |
+        Quick exploration. Time-box to avoid blocking others.
+      exit: |
+        Attach findings to task for other swarm agents.
+
+  implement:
+    prompts:
+      enter: |
+        Implementation phase. In swarm:
+        - Check mark_updates() before touching shared files
+        - Keep changes small and focused
+        - One logical change per task
+
+  review:
+    prompts:
+      enter: |
+        Quick review. Check:
+        - [ ] Core functionality works
+        - [ ] No obvious regressions
+        Detailed review can be a separate task.
+
+  test:
+    prompts:
+      enter: |
+        Testing. Keep tests atomic like the implementation.
+
+  security: {}
+  deliver: {}
+  triage: {}
+  diagnose: {}
+  design: {}
+  plan: {}
+  doc: {}
+  integrate: {}
+  deploy: {}
+  monitor: {}
+  optimize: {}
+
+# State+Phase specific prompts
+combos:
+  working+implement:
+    enter: |
+      ## Swarm Implementation
+
+      File coordination is critical:
+      1. `mark_updates(agent=your_id)` - Check recent activity
+      2. `mark_file(agent=your_id, file=path)` - Claim file before editing
+      3. Edit quickly and atomically
+      4. `unmark_file(agent=your_id, file=path)` - Release when done
+
+      Keep `thinking()` updated so other agents see your progress.
+
+  working+explore:
+    enter: |
+      ## Swarm Exploration
+
+      Time-box exploration. In a swarm:
+      - Quick reconnaissance, not deep research
+      - Attach findings immediately
+      - Create follow-up tasks for deep dives
+
+# Swarm-specific prompts for common operations
+swarm_prompts:
+  claim_guidance: |
+    ## Claiming Tasks in Swarm
+
+    1. Find available work: `list_tasks(ready=true, agent=your_id)`
+    2. Pick ONE task - don't hoard
+    3. Claim it: `claim(worker_id=your_id, task=task_id)`
+    4. Work quickly and atomically
+    5. Complete and repeat
+
+    Throughput comes from fast cycles, not batching.
+
+  file_coordination: |
+    ## File Coordination Protocol
+
+    Swarm agents may touch the same files. Coordinate via marks:
+
+    **Check first:**
+    ```
+    mark_updates(agent=your_id)  # See recent mark activity
+    list_marks(files=["path/to/file"])  # Who has this file?
+    ```
+
+    **Signal intent:**
+    ```
+    mark_file(agent=your_id, file="path/to/file", reason="adding function X")
+    ```
+
+    **If conflict detected:**
+    - Wait for other agent to unmark
+    - Or coordinate via task attachments
+    - Or split the work differently
+
+    **Release when done:**
+    ```
+    unmark_file(agent=your_id, file="path/to/file")
+    ```
+
+  visibility: |
+    ## Swarm Visibility
+
+    Use `thinking()` liberally for coordination:
+
+    ```
+    thinking(agent=your_id, thought="Reading config files to understand structure")
+    thinking(agent=your_id, thought="About to modify src/utils.rs")
+    thinking(agent=your_id, thought="Tests passing, preparing to complete")
+    ```
+
+    Other agents monitor these to:
+    - Avoid conflicting work
+    - Understand swarm activity
+    - Identify collaboration opportunities

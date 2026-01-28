@@ -45,6 +45,10 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "config_path": {
                     "type": "string",
                     "description": "Override config file path (same as TASK_GRAPH_CONFIG_PATH env var). Note: Can only be set before server starts."
+                },
+                "workflow": {
+                    "type": "string",
+                    "description": "Named workflow to use (e.g., 'swarm' for workflow-swarm.yaml). If not specified, uses default workflows.yaml."
                 }
             }),
             vec![],
@@ -129,6 +133,7 @@ pub fn connect(
     let worker_id = get_string(&args, "worker_id");
     let tags = get_string_array(&args, "tags").unwrap_or_default();
     let force = get_bool(&args, "force").unwrap_or(false);
+    let workflow = get_string(&args, "workflow");
 
     // Validate tags if provided
     let tag_warnings = tags_config.validate_tags(&tags)?;
@@ -180,7 +185,7 @@ pub fn connect(
         }
     }
 
-    let worker = db.register_worker(worker_id, tags, force, ids_config)?;
+    let worker = db.register_worker(worker_id, tags, force, ids_config, workflow)?;
 
     // Build config summary for the response
     let timed_states: Vec<&str> = states_config
@@ -203,6 +208,7 @@ pub fn connect(
         "tags": worker.tags,
         "max_claims": worker.max_claims,
         "registered_at": worker.registered_at,
+        "workflow": worker.workflow,
         "paths": {
             "db_path": server_paths.db_path.to_string_lossy(),
             "media_dir": server_paths.media_dir.to_string_lossy(),

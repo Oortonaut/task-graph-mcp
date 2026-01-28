@@ -1602,6 +1602,7 @@ mod tests {
             vec!["rust".to_string(), "test".to_string()],
             false,
             &IdsConfig::default(),
+            None,
         )
         .unwrap();
 
