@@ -1,4 +1,18 @@
 //! Database layer for the Task Graph MCP Server.
+//!
+//! # Crash Safety
+//!
+//! This module uses mutex recovery to prevent cascading failures. If a thread
+//! panics while holding the database mutex, subsequent operations will recover
+//! the connection rather than panicking on poison errors.
+//!
+//! ## Known TODO items for improved robustness:
+//!
+//! - `src/db/tasks.rs:612,659` - `current_owner.unwrap()` could panic on inconsistent state
+//! - `src/tools/tasks.rs:650` - `serde_json::to_value().unwrap()` could panic
+//! - `src/tools/tracking.rs:34,215,338` - various unwraps on date/option handling
+//! - `src/tools/attachments.rs:247,250` - `content.unwrap()` assumes content is Some
+//! - `src/db/migrations.rs:323,556` - `expect()` on migration path validation
 
 pub mod agents;
 pub mod attachments;
@@ -68,26 +82,33 @@ impl Database {
 
     /// Run database migrations.
     fn run_migrations(&self) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        // Recover from poisoned mutex to prevent cascading failures
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         embedded::migrations::runner().run(&mut *conn)?;
         Ok(())
     }
 
     /// Execute a function with exclusive access to the connection.
+    ///
+    /// Recovers from poisoned mutex to prevent cascading failures if another
+    /// thread panicked while holding the lock.
     pub fn with_conn<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&Connection) -> Result<T>,
     {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         f(&conn)
     }
 
     /// Execute a function with mutable access to the connection (for transactions).
+    ///
+    /// Recovers from poisoned mutex to prevent cascading failures if another
+    /// thread panicked while holding the lock.
     pub fn with_conn_mut<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&mut Connection) -> Result<T>,
     {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         f(&mut conn)
     }
 }

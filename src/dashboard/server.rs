@@ -2436,13 +2436,16 @@ pub async fn start_server(
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     tokio::spawn(async move {
-        axum::serve(listener, app)
+        if let Err(e) = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
                 info!("Dashboard server shutting down");
             })
             .await
-            .expect("Dashboard server error");
+        {
+            // Log error but don't crash - the main MCP server continues
+            tracing::error!("Dashboard server error: {}", e);
+        }
     });
 
     Ok((shutdown_tx, bound_addr))

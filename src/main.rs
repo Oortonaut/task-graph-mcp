@@ -386,7 +386,7 @@ async fn run_server(config: Config, prompts: Prompts, workflows: WorkflowsConfig
     // Create path mapper from config
     let path_mapper = Arc::new(
         task_graph_mcp::paths::PathMapper::from_config(&config.paths, Some(&config))
-            .expect("Failed to create path mapper from config"),
+            .map_err(|e| anyhow::anyhow!("Failed to create path mapper from config: {}", e))?,
     );
 
     let server = TaskGraphServer::new(
