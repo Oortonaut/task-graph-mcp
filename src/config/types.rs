@@ -274,6 +274,102 @@ impl AttachmentsConfig {
     }
 }
 
+/// Definition of a preconfigured tag.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagDefinition {
+    /// Category for grouping (e.g., "language", "domain", "type").
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Human-readable description.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Tags configuration with preconfigured tag definitions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagsConfig {
+    /// Behavior for unknown tags (allow, warn, reject).
+    #[serde(default)]
+    pub unknown_tag: UnknownKeyBehavior,
+    /// Preconfigured tag definitions.
+    #[serde(default)]
+    pub definitions: HashMap<String, TagDefinition>,
+}
+
+impl Default for TagsConfig {
+    fn default() -> Self {
+        Self {
+            unknown_tag: UnknownKeyBehavior::default(),
+            definitions: HashMap::new(),
+        }
+    }
+}
+
+impl TagsConfig {
+    /// Check if a tag is a known/defined tag.
+    pub fn is_known_tag(&self, tag: &str) -> bool {
+        self.definitions.contains_key(tag)
+    }
+
+    /// Get all defined tag names.
+    pub fn tag_names(&self) -> Vec<&str> {
+        self.definitions.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get all tags in a specific category.
+    pub fn tags_in_category(&self, category: &str) -> Vec<&str> {
+        self.definitions
+            .iter()
+            .filter(|(_, def)| def.category.as_deref() == Some(category))
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
+    /// Get all unique categories.
+    pub fn categories(&self) -> Vec<&str> {
+        let mut cats: Vec<&str> = self
+            .definitions
+            .values()
+            .filter_map(|def| def.category.as_deref())
+            .collect();
+        cats.sort();
+        cats.dedup();
+        cats
+    }
+
+    /// Validate a single tag, returning Ok(None) if valid, Ok(Some(warning)) for warn mode, or Err for reject.
+    pub fn validate_tag(&self, tag: &str) -> Result<Option<String>> {
+        if self.is_known_tag(tag) {
+            return Ok(None);
+        }
+
+        match self.unknown_tag {
+            UnknownKeyBehavior::Allow => Ok(None),
+            UnknownKeyBehavior::Warn => Ok(Some(format!(
+                "Unknown tag '{}'. Known tags: {:?}",
+                tag,
+                self.tag_names()
+            ))),
+            UnknownKeyBehavior::Reject => Err(anyhow!(
+                "Unknown tag '{}'. Configure in tags.definitions or set unknown_tag to 'allow' or 'warn'. Known tags: {:?}",
+                tag,
+                self.tag_names()
+            )),
+        }
+    }
+
+    /// Validate multiple tags, collecting warnings and stopping on first reject.
+    pub fn validate_tags(&self, tags: &[String]) -> Result<Vec<String>> {
+        let mut warnings = Vec::new();
+        for tag in tags {
+            if let Some(warning) = self.validate_tag(tag)? {
+                warnings.push(warning);
+            }
+        }
+        Ok(warnings)
+    }
+}
+
 /// Server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -297,6 +393,9 @@ pub struct Config {
 
     #[serde(default)]
     pub phases: PhasesConfig,
+
+    #[serde(default)]
+    pub tags: TagsConfig,
 }
 
 /// Paths configured for the server, returned by connect.
@@ -847,7 +946,6 @@ impl StatesConfig {
     }
 }
 
-
 /// Phase configuration for categorizing type of work.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhasesConfig {
@@ -871,21 +969,21 @@ impl Default for PhasesConfig {
 
 fn default_phases() -> HashSet<String> {
     [
-        "deliver",    // Top-level deliverable
-        "triage",     // Initial assessment and prioritization
-        "explore",    // Research and discovery
-        "diagnose",   // Debugging and troubleshooting
-        "design",     // Architecture and design
-        "plan",       // Planning and specification
-        "implement",  // Implementation/coding
-        "test",       // Testing and validation
-        "review",     // Code review
-        "security",   // Security review/audit
-        "doc",        // Documentation
-        "integrate",  // Integration work
-        "deploy",     // Release to staging/production
-        "monitor",    // Observability and metrics
-        "optimize",   // Performance tuning
+        "deliver",   // Top-level deliverable
+        "triage",    // Initial assessment and prioritization
+        "explore",   // Research and discovery
+        "diagnose",  // Debugging and troubleshooting
+        "design",    // Architecture and design
+        "plan",      // Planning and specification
+        "implement", // Implementation/coding
+        "test",      // Testing and validation
+        "review",    // Code review
+        "security",  // Security review/audit
+        "doc",       // Documentation
+        "integrate", // Integration work
+        "deploy",    // Release to staging/production
+        "monitor",   // Observability and metrics
+        "optimize",  // Performance tuning
     ]
     .iter()
     .map(|s| s.to_string())
@@ -937,7 +1035,7 @@ impl Config {
     }
 
     /// Load configuration from default locations or return defaults.
-    /// 
+    ///
     /// **Deprecated**: Use `ConfigLoader::load()` instead for proper tier merging.
     pub fn load_or_default() -> Self {
         // Try TASK_GRAPH_CONFIG_PATH environment variable first
@@ -1033,7 +1131,7 @@ impl Prompts {
     }
 
     /// Load prompts from default location or return defaults.
-    /// 
+    ///
     /// **Deprecated**: Use `ConfigLoader` for proper tier merging.
     pub fn load_or_default() -> Self {
         // Try task-graph/prompts.yaml (new location)

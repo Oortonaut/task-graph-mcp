@@ -12,8 +12,8 @@
 //!
 //! Rebuilds FTS indexes after import.
 
-use crate::export::{Snapshot, CURRENT_SCHEMA_VERSION};
-use anyhow::{anyhow, Context, Result};
+use crate::export::{CURRENT_SCHEMA_VERSION, Snapshot};
+use anyhow::{Context, Result, anyhow};
 use rusqlite::params;
 use serde_json::Value;
 
@@ -202,7 +202,11 @@ impl Database {
     /// # Returns
     /// * `Ok(ImportResult)` - Import statistics
     /// * `Err` - If import fails
-    pub fn import_snapshot(&self, snapshot: &Snapshot, options: &ImportOptions) -> Result<ImportResult> {
+    pub fn import_snapshot(
+        &self,
+        snapshot: &Snapshot,
+        options: &ImportOptions,
+    ) -> Result<ImportResult> {
         // Validate schema version
         if snapshot.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(anyhow!(
@@ -247,7 +251,9 @@ impl Database {
                         let count = import_table(&tx, table_name, rows)?;
                         (count, 0)
                     };
-                    result.rows_imported.insert(table_name.to_string(), imported);
+                    result
+                        .rows_imported
+                        .insert(table_name.to_string(), imported);
                     if skipped > 0 {
                         result.rows_skipped.insert(table_name.to_string(), skipped);
                     }
@@ -288,8 +294,7 @@ impl Database {
             result.would_succeed = false;
             result.failure_reason = Some(format!(
                 "Schema version mismatch: snapshot is v{}, database is v{}. Migration required.",
-                snapshot.schema_version,
-                CURRENT_SCHEMA_VERSION
+                snapshot.schema_version, CURRENT_SCHEMA_VERSION
             ));
             return result;
         }
@@ -359,7 +364,9 @@ impl Database {
             for table_name in IMPORT_ORDER {
                 if let Some(rows) = snapshot.tables.get(*table_name) {
                     let (would_insert, would_skip) = preview_merge_table(conn, table_name, rows)?;
-                    result.would_insert.insert(table_name.to_string(), would_insert);
+                    result
+                        .would_insert
+                        .insert(table_name.to_string(), would_insert);
                     if would_skip > 0 {
                         result.would_skip.insert(table_name.to_string(), would_skip);
                     }
@@ -376,11 +383,10 @@ impl Database {
         self.with_conn(|conn| {
             let mut counts = std::collections::BTreeMap::new();
             for table in IMPORT_ORDER {
-                let count: i64 = conn.query_row(
-                    &format!("SELECT COUNT(*) FROM {}", table),
-                    [],
-                    |row| row.get(0),
-                )?;
+                let count: i64 =
+                    conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                        row.get(0)
+                    })?;
                 counts.insert(table.to_string(), count as usize);
             }
             Ok(counts)
@@ -433,11 +439,10 @@ impl Database {
             // Delete in reverse order to respect foreign key constraints
             // (children first, then parents)
             for table_name in IMPORT_ORDER.iter().rev() {
-                let count: i64 = tx.query_row(
-                    &format!("SELECT COUNT(*) FROM {}", table_name),
-                    [],
-                    |row| row.get(0),
-                )?;
+                let count: i64 =
+                    tx.query_row(&format!("SELECT COUNT(*) FROM {}", table_name), [], |row| {
+                        row.get(0)
+                    })?;
 
                 if count > 0 {
                     tx.execute(&format!("DELETE FROM {}", table_name), [])?;
@@ -498,11 +503,7 @@ impl Database {
 }
 
 /// Import rows into a specific table.
-fn import_table(
-    conn: &rusqlite::Connection,
-    table_name: &str,
-    rows: &[Value],
-) -> Result<usize> {
+fn import_table(conn: &rusqlite::Connection, table_name: &str, rows: &[Value]) -> Result<usize> {
     if rows.is_empty() {
         return Ok(0);
     }
@@ -593,12 +594,17 @@ fn preview_merge_tasks(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(u
 }
 
 /// Preview merge for dependencies - count how many would be inserted vs skipped.
-fn preview_merge_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+fn preview_merge_dependencies(
+    conn: &rusqlite::Connection,
+    rows: &[Value],
+) -> Result<(usize, usize)> {
     let mut would_insert = 0;
     let mut would_skip = 0;
 
     for row in rows {
-        let obj = row.as_object().context("Dependency row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("Dependency row must be an object")?;
         let from_id = get_string(obj, "from_task_id")?;
         let to_id = get_string(obj, "to_task_id")?;
         let dep_type = get_string(obj, "dep_type")?;
@@ -622,12 +628,17 @@ fn preview_merge_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Re
 }
 
 /// Preview merge for attachments - count how many would be inserted vs skipped.
-fn preview_merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+fn preview_merge_attachments(
+    conn: &rusqlite::Connection,
+    rows: &[Value],
+) -> Result<(usize, usize)> {
     let mut would_insert = 0;
     let mut would_skip = 0;
 
     for row in rows {
-        let obj = row.as_object().context("Attachment row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("Attachment row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
         let attachment_type = get_string(obj, "attachment_type")?;
         let sequence = get_i32(obj, "sequence")?;
@@ -679,12 +690,17 @@ fn preview_merge_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Resul
 }
 
 /// Preview merge for task_needed_tags - count how many would be inserted vs skipped.
-fn preview_merge_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+fn preview_merge_task_needed_tags(
+    conn: &rusqlite::Connection,
+    rows: &[Value],
+) -> Result<(usize, usize)> {
     let mut would_insert = 0;
     let mut would_skip = 0;
 
     for row in rows {
-        let obj = row.as_object().context("TaskNeededTag row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("TaskNeededTag row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
         let tag = get_string(obj, "tag")?;
 
@@ -707,12 +723,17 @@ fn preview_merge_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -
 }
 
 /// Preview merge for task_wanted_tags - count how many would be inserted vs skipped.
-fn preview_merge_task_wanted_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
+fn preview_merge_task_wanted_tags(
+    conn: &rusqlite::Connection,
+    rows: &[Value],
+) -> Result<(usize, usize)> {
     let mut would_insert = 0;
     let mut would_skip = 0;
 
     for row in rows {
-        let obj = row.as_object().context("TaskWantedTag row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("TaskWantedTag row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
         let tag = get_string(obj, "tag")?;
 
@@ -828,7 +849,9 @@ fn merge_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(us
     let mut skipped = 0;
 
     for row in rows {
-        let obj = row.as_object().context("Dependency row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("Dependency row must be an object")?;
         let from_id = get_string(obj, "from_task_id")?;
         let to_id = get_string(obj, "to_task_id")?;
         let dep_type = get_string(obj, "dep_type")?;
@@ -865,7 +888,9 @@ fn merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usi
     let mut skipped = 0;
 
     for row in rows {
-        let obj = row.as_object().context("Attachment row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("Attachment row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
         let attachment_type = get_string(obj, "attachment_type")?;
         let sequence = get_i32(obj, "sequence")?;
@@ -902,9 +927,7 @@ fn merge_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usi
 
 /// Merge task_tags - skip if exact match exists.
 fn merge_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
-    let mut insert_stmt = conn.prepare(
-        "INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)",
-    )?;
+    let mut insert_stmt = conn.prepare("INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)")?;
 
     let mut imported = 0;
     let mut skipped = 0;
@@ -937,15 +960,16 @@ fn merge_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize
 
 /// Merge task_needed_tags - skip if exact match exists.
 fn merge_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
-    let mut insert_stmt = conn.prepare(
-        "INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)",
-    )?;
+    let mut insert_stmt =
+        conn.prepare("INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)")?;
 
     let mut imported = 0;
     let mut skipped = 0;
 
     for row in rows {
-        let obj = row.as_object().context("TaskNeededTag row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("TaskNeededTag row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
         let tag = get_string(obj, "tag")?;
 
@@ -972,15 +996,16 @@ fn merge_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result
 
 /// Merge task_wanted_tags - skip if exact match exists.
 fn merge_task_wanted_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<(usize, usize)> {
-    let mut insert_stmt = conn.prepare(
-        "INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)",
-    )?;
+    let mut insert_stmt =
+        conn.prepare("INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)")?;
 
     let mut imported = 0;
     let mut skipped = 0;
 
     for row in rows {
-        let obj = row.as_object().context("TaskWantedTag row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("TaskWantedTag row must be an object")?;
         let task_id = get_string(obj, "task_id")?;
         let tag = get_string(obj, "tag")?;
 
@@ -1090,7 +1115,9 @@ fn import_dependencies(conn: &rusqlite::Connection, rows: &[Value]) -> Result<us
 
     let mut count = 0;
     for row in rows {
-        let obj = row.as_object().context("Dependency row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("Dependency row must be an object")?;
 
         stmt.execute(params![
             get_string(obj, "from_task_id")?,
@@ -1112,7 +1139,9 @@ fn import_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usi
 
     let mut count = 0;
     for row in rows {
-        let obj = row.as_object().context("Attachment row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("Attachment row must be an object")?;
 
         stmt.execute(params![
             get_string(obj, "task_id")?,
@@ -1132,9 +1161,7 @@ fn import_attachments(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usi
 
 /// Import task_tags table.
 fn import_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
-    let mut stmt = conn.prepare(
-        "INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)",
-    )?;
+    let mut stmt = conn.prepare("INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)")?;
 
     let mut count = 0;
     for row in rows {
@@ -1152,13 +1179,13 @@ fn import_task_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize
 
 /// Import task_needed_tags table.
 fn import_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
-    let mut stmt = conn.prepare(
-        "INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)",
-    )?;
+    let mut stmt = conn.prepare("INSERT INTO task_needed_tags (task_id, tag) VALUES (?1, ?2)")?;
 
     let mut count = 0;
     for row in rows {
-        let obj = row.as_object().context("TaskNeededTag row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("TaskNeededTag row must be an object")?;
 
         stmt.execute(params![
             get_string(obj, "task_id")?,
@@ -1172,13 +1199,13 @@ fn import_task_needed_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Resul
 
 /// Import task_wanted_tags table.
 fn import_task_wanted_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
-    let mut stmt = conn.prepare(
-        "INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)",
-    )?;
+    let mut stmt = conn.prepare("INSERT INTO task_wanted_tags (task_id, tag) VALUES (?1, ?2)")?;
 
     let mut count = 0;
     for row in rows {
-        let obj = row.as_object().context("TaskWantedTag row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("TaskWantedTag row must be an object")?;
 
         stmt.execute(params![
             get_string(obj, "task_id")?,
@@ -1199,7 +1226,9 @@ fn import_task_sequence(conn: &rusqlite::Connection, rows: &[Value]) -> Result<u
 
     let mut count = 0;
     for row in rows {
-        let obj = row.as_object().context("TaskSequenceEvent row must be an object")?;
+        let obj = row
+            .as_object()
+            .context("TaskSequenceEvent row must be an object")?;
 
         stmt.execute(params![
             get_i64(obj, "id")?,
@@ -1249,13 +1278,8 @@ fn get_i64(obj: &serde_json::Map<String, Value>, key: &str) -> Result<i64> {
 
 /// Get an optional i64 value from a JSON object.
 fn get_opt_i64(obj: &serde_json::Map<String, Value>, key: &str) -> Option<i64> {
-    obj.get(key).and_then(|v| {
-        if v.is_null() {
-            None
-        } else {
-            v.as_i64()
-        }
-    })
+    obj.get(key)
+        .and_then(|v| if v.is_null() { None } else { v.as_i64() })
 }
 
 /// Get an i64 value with a default of 0.
@@ -1286,13 +1310,7 @@ fn get_opt_i32(obj: &serde_json::Map<String, Value>, key: &str) -> Option<i32> {
 /// Get an f64 value with a default of 0.0.
 fn get_f64_or_default(obj: &serde_json::Map<String, Value>, key: &str) -> f64 {
     obj.get(key)
-        .and_then(|v| {
-            if v.is_null() {
-                None
-            } else {
-                v.as_f64()
-            }
-        })
+        .and_then(|v| if v.is_null() { None } else { v.as_f64() })
         .unwrap_or(0.0)
 }
 
@@ -1475,6 +1493,7 @@ mod tests {
             None,
             None,
             None,
+            None, // tags
             &StatesConfig::default(),
         )
         .unwrap();
@@ -1493,19 +1512,21 @@ mod tests {
 
         // Create existing task
         use crate::config::StatesConfig;
-        let existing_id = db.create_task(
-            None,
-            "Existing task".to_string(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            &StatesConfig::default(),
-        )
-        .unwrap();
+        let existing_id = db
+            .create_task(
+                None,
+                "Existing task".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // tags
+                &StatesConfig::default(),
+            )
+            .unwrap();
 
         // Verify task exists
         let task = db.get_task(&existing_id.id).unwrap();
@@ -1577,7 +1598,8 @@ mod tests {
             Some("test-worker".to_string()),
             vec!["rust".to_string(), "test".to_string()],
             false,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Verify worker exists
         let workers = db.list_workers().unwrap();
@@ -1596,6 +1618,7 @@ mod tests {
             None,
             None,
             None,
+            None, // tags
             &StatesConfig::default(),
         )
         .unwrap();
@@ -1619,38 +1642,47 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
 
         // Create tasks with dependencies and tags
-        use crate::config::{StatesConfig, DependenciesConfig};
-        let task_a = db.create_task(
-            None,
-            None, // phase
-            "Task A".to_string(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(vec!["rust".to_string(), "test".to_string()]), // tags
-            &StatesConfig::default(),
-        )
-        .unwrap();
+        use crate::config::{DependenciesConfig, StatesConfig};
+        let task_a = db
+            .create_task(
+                None,
+                "Task A".to_string(),
+                None,
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(vec!["rust".to_string(), "test".to_string()]), // tags
+                &StatesConfig::default(),
+            )
+            .unwrap();
 
-        let task_b = db.create_task(
-            None,
-            "Task B".to_string(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            &StatesConfig::default(),
-        )
-        .unwrap();
+        let task_b = db
+            .create_task(
+                None,
+                "Task B".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // tags
+                &StatesConfig::default(),
+            )
+            .unwrap();
 
         // Add dependency
-        db.add_dependency(&task_a.id, &task_b.id, "blocks", &DependenciesConfig::default()).unwrap();
+        db.add_dependency(
+            &task_a.id,
+            &task_b.id,
+            "blocks",
+            &DependenciesConfig::default(),
+        )
+        .unwrap();
 
         // Clear all project data
         let deleted = db.clear_project_data().unwrap();
@@ -1663,15 +1695,15 @@ mod tests {
         // Verify tables are empty
         db.with_conn(|conn| {
             for table in IMPORT_ORDER {
-                let count: i64 = conn.query_row(
-                    &format!("SELECT COUNT(*) FROM {}", table),
-                    [],
-                    |row| row.get(0),
-                )?;
+                let count: i64 =
+                    conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                        row.get(0)
+                    })?;
                 assert_eq!(count, 0, "Table {} should be empty", table);
             }
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 
     #[test]
@@ -1684,7 +1716,12 @@ mod tests {
         let result = db.import_snapshot(&snapshot, &options);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Schema version mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Schema version mismatch")
+        );
     }
 
     #[test]
@@ -1929,7 +1966,8 @@ mod tests {
         db.with_conn(|conn| {
             conn.execute("DELETE FROM tasks_fts", [])?;
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
 
         // Search should now find nothing
         let results = db.search_tasks("Manual", None, false, None).unwrap();
@@ -1983,7 +2021,7 @@ mod tests {
             None,
             None,
             None,
-            None,
+            None, // tags
             &StatesConfig::default(),
         )
         .unwrap();
@@ -2083,26 +2121,51 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
 
         // Create tasks and dependency
-        use crate::config::{StatesConfig, DependenciesConfig};
+        use crate::config::{DependenciesConfig, StatesConfig};
         db.create_task(
             Some("task-a".to_string()),
             "Task A".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
         db.create_task(
             Some("task-b".to_string()),
             "Task B".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
         db.create_task(
             Some("task-c".to_string()),
             "Task C".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
-        db.add_dependency("task-a", "task-b", "blocks", &DependenciesConfig::default()).unwrap();
+        )
+        .unwrap();
+        db.add_dependency("task-a", "task-b", "blocks", &DependenciesConfig::default())
+            .unwrap();
 
         // Create snapshot with existing and new dependencies
         let mut snapshot = Snapshot::new();
@@ -2140,25 +2203,31 @@ mod tests {
         db.create_task(
             Some("task-1".to_string()),
             "Task 1".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Snapshot with state history
         let mut snapshot = Snapshot::new();
         snapshot.tables.insert(
             "task_sequence".to_string(),
-            vec![
-                json!({
-                    "id": 999,
-                    "task_id": "task-1",
-                    "worker_id": null,
-                    "event": "pending",
-                    "reason": "Imported history",
-                    "timestamp": 1700000000000_i64,
-                    "end_timestamp": null
-                }),
-            ],
+            vec![json!({
+                "id": 999,
+                "task_id": "task-1",
+                "worker_id": null,
+                "event": "pending",
+                "reason": "Imported history",
+                "timestamp": 1700000000000_i64,
+                "end_timestamp": null
+            })],
         );
 
         // Import in merge mode
@@ -2185,9 +2254,11 @@ mod tests {
             None,
             None,
             None,
-            Some(vec!["existing-tag".to_string()]),
+            None,
+            Some(vec!["existing-tag".to_string()]), // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Snapshot with existing and new tags
         let mut snapshot = Snapshot::new();
@@ -2222,7 +2293,7 @@ mod tests {
     fn test_preview_fresh_mode_empty_db() {
         let db = Database::open_in_memory().unwrap();
         let mut snapshot = Snapshot::new();
-        
+
         // Add a task to the snapshot
         snapshot.tables.insert(
             "tasks".to_string(),
@@ -2280,9 +2351,17 @@ mod tests {
         db.create_task(
             None,
             "Existing task".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let snapshot = Snapshot::new();
         let options = ImportOptions::fresh();
@@ -2304,15 +2383,31 @@ mod tests {
         db.create_task(
             Some("existing-1".to_string()),
             "Existing 1".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
         db.create_task(
             Some("existing-2".to_string()),
             "Existing 2".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Create snapshot with different task
         let mut snapshot = Snapshot::new();
@@ -2374,9 +2469,17 @@ mod tests {
         db.create_task(
             Some("existing-task".to_string()),
             "Existing Task".to_string(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // tags
             &StatesConfig::default(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Create snapshot with existing and new tasks
         let mut snapshot = Snapshot::new();
@@ -2475,7 +2578,12 @@ mod tests {
 
         assert!(!preview.would_succeed);
         assert!(preview.failure_reason.is_some());
-        assert!(preview.failure_reason.unwrap().contains("Schema version mismatch"));
+        assert!(
+            preview
+                .failure_reason
+                .unwrap()
+                .contains("Schema version mismatch")
+        );
     }
 
     #[test]

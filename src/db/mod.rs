@@ -18,6 +18,8 @@ pub mod agents;
 pub mod attachments;
 pub mod dashboard;
 pub mod deps;
+pub mod export;
+pub mod import;
 pub mod locks;
 pub mod schema;
 pub mod search;

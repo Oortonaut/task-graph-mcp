@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metrics - Task Graph Dashboard</title>
+    <!-- htmx for dynamic updates -->
+    <script src="https://unpkg.com/htmx.org@2.0.0"></script>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eaeaea;
+            --text-secondary: #a0a0a0;
+            --accent: #e94560;
+            --accent-hover: #ff6b6b;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --info: #60a5fa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Navigation */
+        nav {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--bg-tertiary);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        nav .logo {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        nav .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s ease;
+        }
+
+        nav a:hover,
+        nav a.active {
+            color: var(--text-primary);
+            background-color: var(--bg-tertiary);
+        }
+
+        nav a.active {
+            border-bottom: 2px solid var(--accent);
+        }
+
+        /* Main content */
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        h3 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        /* Grid layout */
+        .grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .grid-stats {
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        /* Stats */
+        .stat {
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .stat-value.money {
+            color: var(--success);
+        }
+
+        .stat-value.time {
+            color: var(--info);
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-top: 0.25rem;
+        }
+
+        /* Status distribution (simple bar chart) */
+        .status-bar {
+            display: flex;
+            height: 2rem;
+            border-radius: 0.25rem;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .status-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #000;
+            font-size: 0.75rem;
+            font-weight: 600;
+            min-width: 2rem;
+            transition: flex-grow 0.3s ease;
+        }
+
+        .status-segment.pending { background-color: var(--text-secondary); }
+        .status-segment.assigned { background-color: #a78bfa; }
+        .status-segment.working { background-color: var(--info); }
+        .status-segment.completed { background-color: var(--success); }
+        .status-segment.failed { background-color: var(--accent); }
+        .status-segment.cancelled { background-color: var(--warning); }
+
+        /* Status legend */
+        .status-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .legend-dot {
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 50%;
+        }
+
+        .legend-dot.pending { background-color: var(--text-secondary); }
+        .legend-dot.assigned { background-color: #a78bfa; }
+        .legend-dot.working { background-color: var(--info); }
+        .legend-dot.completed { background-color: var(--success); }
+        .legend-dot.failed { background-color: var(--accent); }
+        .legend-dot.cancelled { background-color: var(--warning); }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+        }
+
+        tr:hover td {
+            background-color: var(--bg-tertiary);
+        }
+
+        td.number {
+            font-family: monospace;
+            text-align: right;
+        }
+
+        td.time {
+            color: var(--info);
+        }
+
+        td.cost {
+            color: var(--success);
+        }
+
+        /* Velocity chart (simple horizontal bars) */
+        .velocity-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .velocity-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .velocity-label {
+            width: 80px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+
+        .velocity-bar-container {
+            flex: 1;
+            height: 1.5rem;
+            background-color: var(--bg-primary);
+            border-radius: 0.25rem;
+            overflow: hidden;
+        }
+
+        .velocity-bar {
+            height: 100%;
+            background-color: var(--success);
+            border-radius: 0.25rem;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #000;
+        }
+
+        .velocity-value {
+            width: 40px;
+            text-align: right;
+            font-size: 0.875rem;
+            color: var(--text-primary);
+        }
+
+        /* Time tracking */
+        .time-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        .time-stat:last-child {
+            border-bottom: none;
+        }
+
+        .time-stat-label {
+            color: var(--text-secondary);
+        }
+
+        .time-stat-value {
+            font-family: monospace;
+            color: var(--info);
+        }
+
+        /* Loading indicator */
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 200ms ease-in;
+        }
+
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator {
+            opacity: 1;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid var(--text-secondary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        /* Auto-refresh indicator */
+        .refresh-indicator {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .refresh-indicator .dot {
+            display: inline-block;
+            width: 0.5rem;
+            height: 0.5rem;
+            background-color: var(--success);
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Period selector */
+        .period-selector {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .period-btn {
+            padding: 0.25rem 0.75rem;
+            border: 1px solid var(--bg-tertiary);
+            background-color: var(--bg-secondary);
+            color: var(--text-secondary);
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s ease;
+        }
+
+        .period-btn:hover,
+        .period-btn.active {
+            background-color: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        /* Metrics row */
+        .metrics-row {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .metric-box {
+            flex: 1;
+            min-width: 100px;
+            padding: 0.75rem;
+            background-color: var(--bg-primary);
+            border-radius: 0.375rem;
+            text-align: center;
+        }
+
+        .metric-box .value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .metric-box .label {
+            font-size: 0.6875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-top: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">Task Graph</a>
+        <div class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/workers">Workers</a>
+            <a href="/tasks">Tasks</a>
+            <a href="/metrics" class="active">Metrics</a>
+        </div>
+    </nav>
+
+    <main>
+        <h1>Project Metrics</h1>
+
+        <!-- Overview Stats -->
+        <div id="metrics-overview"
+             hx-get="/api/metrics/overview"
+             hx-trigger="load, every 30s"
+             hx-swap="innerHTML">
+            <div class="grid grid-stats">
+                <div class="card stat">
+                    <div class="stat-value">--</div>
+                    <div class="stat-label">Total Tasks</div>
+                </div>
+                <div class="card stat">
+                    <div class="stat-value money">$--</div>
+                    <div class="stat-label">Total Cost</div>
+                </div>
+                <div class="card stat">
+                    <div class="stat-value time">--</div>
+                    <div class="stat-label">Total Time</div>
+                </div>
+                <div class="card stat">
+                    <div class="stat-value">--</div>
+                    <div class="stat-label">Completed</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-2" style="margin-top: 1.5rem;">
+            <!-- Task Distribution -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Task Distribution</h2>
+                    <span class="htmx-indicator"><span class="spinner"></span></span>
+                </div>
+                <div id="task-distribution"
+                     hx-get="/api/metrics/distribution"
+                     hx-trigger="load, every 30s"
+                     hx-swap="innerHTML">
+                    <div class="empty-state">Loading distribution...</div>
+                </div>
+            </div>
+
+            <!-- Velocity (Completed per period) -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Velocity</h2>
+                    <div class="period-selector">
+                        <button class="period-btn active" onclick="setVelocityPeriod('day')">Day</button>
+                        <button class="period-btn" onclick="setVelocityPeriod('week')">Week</button>
+                    </div>
+                </div>
+                <div id="velocity-chart"
+                     hx-get="/api/metrics/velocity?period=day"
+                     hx-trigger="load"
+                     hx-swap="innerHTML">
+                    <div class="empty-state">Loading velocity...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-2" style="margin-top: 1rem;">
+            <!-- Time in Status -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Average Time in Status</h2>
+                    <span class="htmx-indicator"><span class="spinner"></span></span>
+                </div>
+                <div id="time-in-status"
+                     hx-get="/api/metrics/time-in-status"
+                     hx-trigger="load, every 30s"
+                     hx-swap="innerHTML">
+                    <div class="empty-state">Loading time stats...</div>
+                </div>
+            </div>
+
+            <!-- Cost by Agent -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Cost by Agent</h2>
+                    <span class="htmx-indicator"><span class="spinner"></span></span>
+                </div>
+                <div id="cost-by-agent"
+                     hx-get="/api/metrics/cost-by-agent"
+                     hx-trigger="load, every 30s"
+                     hx-swap="innerHTML">
+                    <div class="empty-state">Loading cost data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom Metrics -->
+        <div class="card" style="margin-top: 1rem;">
+            <div class="card-header">
+                <h2 class="card-title">Custom Metrics</h2>
+                <span class="htmx-indicator"><span class="spinner"></span></span>
+            </div>
+            <div id="custom-metrics"
+                 hx-get="/api/metrics/custom"
+                 hx-trigger="load, every 30s"
+                 hx-swap="innerHTML">
+                <div class="empty-state">Loading metrics...</div>
+            </div>
+        </div>
+    </main>
+
+    <div class="refresh-indicator">
+        <span class="dot"></span>
+        Auto-refresh: 30s
+    </div>
+
+    <script>
+        // Set velocity period and reload chart
+        function setVelocityPeriod(period) {
+            // Update button states
+            document.querySelectorAll('.period-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Update htmx target URL and trigger reload
+            const velocityChart = document.getElementById('velocity-chart');
+            velocityChart.setAttribute('hx-get', '/api/metrics/velocity?period=' + period);
+            htmx.trigger(velocityChart, 'load');
+        }
+
+        // Format duration in milliseconds to human readable
+        function formatDuration(ms) {
+            if (ms < 1000) return ms + 'ms';
+            const seconds = Math.floor(ms / 1000);
+            if (seconds < 60) return seconds + 's';
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return minutes + 'm ' + (seconds % 60) + 's';
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return hours + 'h ' + (minutes % 60) + 'm';
+            const days = Math.floor(hours / 24);
+            return days + 'd ' + (hours % 24) + 'h';
+        }
+    </script>
+</body>
+</html>

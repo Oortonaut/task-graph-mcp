@@ -3,7 +3,9 @@
 //! These tests verify the core database operations using an in-memory SQLite database.
 //! Tests are organized by module and functionality.
 
-use task_graph_mcp::config::{AutoAdvanceConfig, DependenciesConfig, PhasesConfig, StatesConfig};
+use task_graph_mcp::config::{
+    AutoAdvanceConfig, DependenciesConfig, PhasesConfig, StatesConfig, TagsConfig,
+};
 use task_graph_mcp::db::Database;
 use task_graph_mcp::types::PRIORITY_DEFAULT;
 
@@ -30,6 +32,11 @@ fn default_auto_advance() -> AutoAdvanceConfig {
 /// Helper to create a default PhasesConfig for testing.
 fn default_phases_config() -> PhasesConfig {
     PhasesConfig::default()
+}
+
+/// Helper to create a default TagsConfig for testing.
+fn default_tags_config() -> TagsConfig {
+    TagsConfig::default()
 }
 
 mod agent_tests {
@@ -278,7 +285,7 @@ mod task_tests {
                 None,                    // id
                 "Test Task".to_string(), // description
                 None,                    // parent_id
-                None, // phase
+                None,                    // phase
                 None,                    // priority
                 None,                    // points
                 None,                    // time_estimate
@@ -306,7 +313,7 @@ mod task_tests {
                 None,                                  // id
                 "Full Task - Description".to_string(), // description
                 None,                                  // parent_id
-                None, // phase
+                None,                                  // phase
                 Some(8),
                 Some(5),
                 Some(3600000),
@@ -757,6 +764,7 @@ mod task_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let phases_config = default_phases_config();
+        let tags_config = default_tags_config();
 
         // Call the tool-level create function with needed_tags and wanted_tags
         let args = json!({
@@ -765,7 +773,8 @@ mod task_tests {
             "wanted_tags": ["testing", "senior"]
         });
 
-        let result = create(&db, &states_config, &phases_config, args).expect("create should succeed");
+        let result = create(&db, &states_config, &phases_config, &tags_config, args)
+            .expect("create should succeed");
 
         // Extract the task ID from the result
         let task_id = result
@@ -1506,7 +1515,10 @@ mod task_claiming_tests {
             history.len()
         );
 
-        let states: Vec<&str> = history.iter().map(|e| e.status.as_deref().unwrap_or("")).collect();
+        let states: Vec<&str> = history
+            .iter()
+            .map(|e| e.status.as_deref().unwrap_or(""))
+            .collect();
         assert!(
             states.contains(&"pending"),
             "History should contain 'pending'"
@@ -1580,7 +1592,10 @@ mod task_claiming_tests {
         // Verify no additional history was recorded (status didn't change)
         let history = db.get_task_state_history(&task.id).unwrap();
         // Should have: pending (initial), working (from claim) - but NOT another working
-        let working_count = history.iter().filter(|e| e.status.as_deref() == Some("working")).count();
+        let working_count = history
+            .iter()
+            .filter(|e| e.status.as_deref() == Some("working"))
+            .count();
         assert_eq!(
             working_count, 1,
             "Should only have one working entry, not duplicates"
@@ -1675,7 +1690,10 @@ mod task_claiming_tests {
             history.len()
         );
 
-        let states: Vec<&str> = history.iter().map(|e| e.status.as_deref().unwrap_or("")).collect();
+        let states: Vec<&str> = history
+            .iter()
+            .map(|e| e.status.as_deref().unwrap_or(""))
+            .collect();
         assert!(
             states.contains(&"failed"),
             "History should contain 'failed'"
@@ -3281,7 +3299,10 @@ mod state_transition_tests {
 
         // Verify state history includes the reopen transition
         let history = db.get_task_state_history(&task.id).unwrap();
-        let states: Vec<&str> = history.iter().map(|e| e.status.as_deref().unwrap_or("")).collect();
+        let states: Vec<&str> = history
+            .iter()
+            .map(|e| e.status.as_deref().unwrap_or(""))
+            .collect();
         assert!(
             states.contains(&"pending")
                 && states.contains(&"working")
@@ -3293,10 +3314,7 @@ mod state_transition_tests {
         // The last transition should be back to pending
         let last_event = history.last().unwrap();
         assert_eq!(last_event.status.as_deref().unwrap(), "pending");
-        assert_eq!(
-            last_event.reason.as_deref(),
-            Some("Task needs rework")
-        );
+        assert_eq!(last_event.reason.as_deref(), Some("Task needs rework"));
     }
 }
 
@@ -3863,7 +3881,10 @@ mod attachment_tests {
             .get_attachments_filtered(&task.id, None, Some("text/"))
             .unwrap();
         assert_eq!(text_attachments.len(), 2);
-        let types: Vec<&str> = text_attachments.iter().map(|a| a.attachment_type.as_str()).collect();
+        let types: Vec<&str> = text_attachments
+            .iter()
+            .map(|a| a.attachment_type.as_str())
+            .collect();
         assert!(types.contains(&"readme-txt"));
         assert!(types.contains(&"notes-md"));
     }

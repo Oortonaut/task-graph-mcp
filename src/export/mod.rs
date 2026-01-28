@@ -39,7 +39,7 @@ pub const EXCLUDED_TABLES: &[&str] = &[
 ];
 
 /// A structured export snapshot of the task-graph database.
-/// 
+///
 /// This is a flexible format that can load exports created by either
 /// the Database::export_tables (strongly-typed) or any JSON conforming
 /// to the export spec. The `tables` field uses generic JSON values
@@ -213,6 +213,9 @@ mod tests {
             get_table_primary_key("dependencies"),
             &["from_task_id", "to_task_id", "dep_type"]
         );
-        assert_eq!(get_table_primary_key("attachments"), &["task_id", "attachment_type", "sequence"]);
+        assert_eq!(
+            get_table_primary_key("attachments"),
+            &["task_id", "attachment_type", "sequence"]
+        );
     }
 }

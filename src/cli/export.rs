@@ -18,7 +18,7 @@ pub struct ExportArgs {
     pub gzip: bool,
 
     /// Comma-separated list of tables to export
-    /// 
+    ///
     /// Available tables: tasks, dependencies, attachments, task_tags,
     /// task_needed_tags, task_wanted_tags, task_sequence
     #[arg(long, value_name = "LIST", value_delimiter = ',')]
@@ -33,7 +33,7 @@ pub struct ExportArgs {
     pub exclude_deleted: bool,
 
     /// Automatically compress if output exceeds this size
-    /// 
+    ///
     /// Accepts human-readable sizes: 100KB, 1MB, etc.
     /// If the uncompressed output exceeds this threshold, the output
     /// will be gzip compressed (and .gz appended to filename if needed).
@@ -99,13 +99,16 @@ impl ExportArgs {
 }
 
 /// Parse a human-readable size string into bytes
-/// 
+///
 /// Supports: B, KB, MB, GB (case-insensitive)
 fn parse_size(s: &str) -> Option<u64> {
     let s = s.trim().to_uppercase();
-    
+
     if let Some(num) = s.strip_suffix("GB") {
-        num.trim().parse::<u64>().ok().map(|n| n * 1024 * 1024 * 1024)
+        num.trim()
+            .parse::<u64>()
+            .ok()
+            .map(|n| n * 1024 * 1024 * 1024)
     } else if let Some(num) = s.strip_suffix("MB") {
         num.trim().parse::<u64>().ok().map(|n| n * 1024 * 1024)
     } else if let Some(num) = s.strip_suffix("KB") {
@@ -143,7 +146,7 @@ mod tests {
             exclude_deleted: false,
             compress_threshold: None,
         };
-        
+
         let tables = args.tables_to_export().unwrap();
         assert!(!tables.contains(&"task_sequence".to_string()));
         assert!(tables.contains(&"tasks".to_string()));
@@ -182,7 +185,7 @@ mod tests {
             exclude_deleted: false,
             compress_threshold: Some("100KB".to_string()),
         };
-        assert!(!args.should_compress(Some(50 * 1024)));  // Under threshold
+        assert!(!args.should_compress(Some(50 * 1024))); // Under threshold
         assert!(args.should_compress(Some(150 * 1024))); // Over threshold
     }
 }

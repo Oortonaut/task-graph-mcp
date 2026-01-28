@@ -39,9 +39,8 @@ use crate::types::{
 };
 use anyhow::Result;
 
-
-use super::tasks::parse_task_row;
 use super::Database;
+use super::tasks::parse_task_row;
 
 /// Options for controlling export behavior.
 #[derive(Debug, Clone, Default)]
@@ -66,9 +65,8 @@ impl Database {
     pub fn export_tables(&self, options: &ExportOptions) -> Result<ExportTables> {
         let tables_to_export = options.tables.as_ref();
 
-        let should_export = |table: &str| -> bool {
-            tables_to_export.is_none_or(|t| t.iter().any(|s| s == table))
-        };
+        let should_export =
+            |table: &str| -> bool { tables_to_export.is_none_or(|t| t.iter().any(|s| s == table)) };
 
         let mut export = ExportTables::default();
 
@@ -197,8 +195,8 @@ impl Database {
     /// Export all task needed tags ordered by task_id, tag.
     fn export_task_needed_tags(&self) -> Result<Vec<TaskNeededTagRow>> {
         self.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT task_id, tag FROM task_needed_tags ORDER BY task_id, tag")?;
+            let mut stmt =
+                conn.prepare("SELECT task_id, tag FROM task_needed_tags ORDER BY task_id, tag")?;
 
             let tags = stmt
                 .query_map([], |row| {
@@ -217,8 +215,8 @@ impl Database {
     /// Export all task wanted tags ordered by task_id, tag.
     fn export_task_wanted_tags(&self) -> Result<Vec<TaskWantedTagRow>> {
         self.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT task_id, tag FROM task_wanted_tags ORDER BY task_id, tag")?;
+            let mut stmt =
+                conn.prepare("SELECT task_id, tag FROM task_wanted_tags ORDER BY task_id, tag")?;
 
             let tags = stmt
                 .query_map([], |row| {
@@ -456,7 +454,8 @@ mod tests {
 
         // Add dependencies in non-sorted order
         db.add_dependency("c", "a", "blocks", &deps_config).unwrap();
-        db.add_dependency("a", "b", "follows", &deps_config).unwrap();
+        db.add_dependency("a", "b", "follows", &deps_config)
+            .unwrap();
         db.add_dependency("a", "b", "blocks", &deps_config).unwrap();
 
         let options = ExportOptions::default();
@@ -506,7 +505,8 @@ mod tests {
             None,
             None,
             None,
-            Some(vec!["zebra".to_string(), "apple".to_string()]),
+            None,                                                 // wanted_tags
+            Some(vec!["zebra".to_string(), "apple".to_string()]), // tags
             &states_config,
         )
         .unwrap();
@@ -519,7 +519,8 @@ mod tests {
             None,
             None,
             None,
-            Some(vec!["mango".to_string()]),
+            None,                            // wanted_tags
+            Some(vec!["mango".to_string()]), // tags
             &states_config,
         )
         .unwrap();

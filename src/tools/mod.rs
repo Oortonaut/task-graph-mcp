@@ -14,7 +14,7 @@ pub mod tracking;
 
 use crate::config::{
     AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, ServerPaths,
-    StatesConfig, workflows::WorkflowsConfig,
+    StatesConfig, TagsConfig, workflows::WorkflowsConfig,
 };
 use crate::db::Database;
 use crate::error::ToolError;
@@ -37,6 +37,7 @@ pub struct ToolHandler {
     pub deps_config: Arc<DependenciesConfig>,
     pub auto_advance: Arc<AutoAdvanceConfig>,
     pub attachments_config: Arc<AttachmentsConfig>,
+    pub tags_config: Arc<TagsConfig>,
     pub workflows: Arc<WorkflowsConfig>,
     pub default_format: OutputFormat,
     pub path_mapper: Arc<crate::paths::PathMapper>,
@@ -55,6 +56,7 @@ impl ToolHandler {
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
+        tags_config: Arc<TagsConfig>,
         workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
         path_mapper: Arc<crate::paths::PathMapper>,
@@ -70,6 +72,7 @@ impl ToolHandler {
             deps_config,
             auto_advance,
             attachments_config,
+            tags_config,
             workflows,
             default_format,
             path_mapper,
@@ -130,6 +133,7 @@ impl ToolHandler {
                 &self.states_config,
                 &self.phases_config,
                 &self.deps_config,
+                &self.tags_config,
                 arguments,
             )),
             "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
@@ -150,12 +154,14 @@ impl ToolHandler {
                 &self.db,
                 &self.states_config,
                 &self.phases_config,
+                &self.tags_config,
                 arguments,
             )),
             "create_tree" => json(tasks::create_tree(
                 &self.db,
                 &self.states_config,
                 &self.phases_config,
+                &self.tags_config,
                 arguments,
             )),
             "get" => json(tasks::get(&self.db, self.default_format, arguments)),
@@ -173,6 +179,7 @@ impl ToolHandler {
                 &self.phases_config,
                 &self.deps_config,
                 &self.auto_advance,
+                &self.tags_config,
                 &self.workflows,
                 arguments,
             )),
@@ -212,9 +219,9 @@ impl ToolHandler {
             )),
 
             // File coordination tools
-            "mark_file" => json(files::mark_file(&self.db, &self.path_mapper, arguments)),
-            "unmark_file" => json(files::unmark_file(&self.db, &self.path_mapper, arguments)),
-            "list_marks" => json(files::list_marks(&self.db, &self.path_mapper, self.default_format, arguments)),
+            "mark_file" => json(files::mark_file(&self.db, arguments)),
+            "unmark_file" => json(files::unmark_file(&self.db, arguments)),
+            "list_marks" => json(files::list_marks(&self.db, self.default_format, arguments)),
             "mark_updates" => {
                 json(files::mark_updates_async(std::sync::Arc::clone(&self.db), arguments).await)
             }

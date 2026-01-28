@@ -5,24 +5,24 @@
 
 use axum::{
     Router,
-    routing::{get, post},
+    extract::{Form, Path, Query, State},
     response::{Html, IntoResponse, Json, Redirect},
-    extract::{Query, State, Path, Form},
+    routing::{get, post},
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{oneshot, watch};
 use std::time::Duration;
+use tokio::sync::{oneshot, watch};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-use crate::db::Database;
-use crate::db::now_ms;
-use crate::db::dashboard::{TaskListQuery, ActivityListQuery};
-use crate::config::{StatesConfig, UiConfig};
-use tracing::warn;
 use super::templates;
+use crate::config::{StatesConfig, UiConfig};
+use crate::db::Database;
+use crate::db::dashboard::{ActivityListQuery, TaskListQuery};
+use crate::db::now_ms;
+use tracing::warn;
 
 /// Dashboard server state shared across handlers.
 #[derive(Clone)]
@@ -38,7 +38,11 @@ pub struct DashboardServer {
 impl DashboardServer {
     /// Create a new dashboard server instance.
     pub fn new(db: Arc<Database>, port: u16, states_config: Arc<StatesConfig>) -> Self {
-        Self { db, port, states_config }
+        Self {
+            db,
+            port,
+            states_config,
+        }
     }
 
     /// Get the database reference.
@@ -77,13 +81,14 @@ async fn workers_page() -> Html<&'static str> {
 /// Stats API endpoint for htmx - returns HTML fragment.
 async fn api_stats(State(state): State<DashboardServer>) -> Html<String> {
     // Query task counts from database
-    let (total, working, completed): (i64, i64, i64) = 
+    let (total, working, completed): (i64, i64, i64) =
         state.db().get_task_stats().unwrap_or_default();
-    
+
     // Query worker count from database
     let worker_count: i64 = state.db().get_active_worker_count().unwrap_or_default();
-    
-    Html(format!(r#"
+
+    Html(format!(
+        r#"
         <div class="grid grid-stats">
             <div class="card stat">
                 <div class="stat-value">{}</div>
@@ -102,19 +107,23 @@ async fn api_stats(State(state): State<DashboardServer>) -> Html<String> {
                 <div class="stat-label">Completed</div>
             </div>
         </div>
-    "#, total, worker_count, working, completed))
+    "#,
+        total, worker_count, working, completed
+    ))
 }
 
 /// Recent tasks API endpoint for htmx - returns HTML fragment.
 async fn api_recent_tasks(State(state): State<DashboardServer>) -> Html<String> {
     let tasks = state.db().get_recent_tasks(5).unwrap_or_default();
-    
+
     if tasks.is_empty() {
         return Html(r#"<div class="empty-state">No tasks found</div>"#.to_string());
     }
-    
-    let mut html = String::from("<table><thead><tr><th>Task</th><th>Status</th><th>Priority</th></tr></thead><tbody>");
-    
+
+    let mut html = String::from(
+        "<table><thead><tr><th>Task</th><th>Status</th><th>Priority</th></tr></thead><tbody>",
+    );
+
     for task in tasks {
         let badge_class = match task.status.as_str() {
             "completed" => "badge-success",
@@ -123,11 +132,13 @@ async fn api_recent_tasks(State(state): State<DashboardServer>) -> Html<String> 
             "pending" => "badge-pending",
             _ => "badge-warning",
         };
-        
-        let title = task.title.as_deref()
+
+        let title = task
+            .title
+            .as_deref()
             .filter(|t| !t.is_empty())
             .unwrap_or(&task.id);
-        
+
         html.push_str(&format!(
             r#"<tr><td>{}</td><td><span class="badge {}">{}</span></td><td>{}</td></tr>"#,
             html_escape(title),
@@ -136,7 +147,7 @@ async fn api_recent_tasks(State(state): State<DashboardServer>) -> Html<String> 
             task.priority
         ));
     }
-    
+
     html.push_str("</tbody></table>");
     Html(html)
 }
@@ -144,13 +155,15 @@ async fn api_recent_tasks(State(state): State<DashboardServer>) -> Html<String> 
 /// Active workers API endpoint for htmx - returns HTML fragment.
 async fn api_active_workers(State(state): State<DashboardServer>) -> Html<String> {
     let workers = state.db().get_active_workers().unwrap_or_default();
-    
+
     if workers.is_empty() {
         return Html(r#"<div class="empty-state">No active workers</div>"#.to_string());
     }
-    
-    let mut html = String::from("<table><thead><tr><th>Worker</th><th>Status</th><th>Claims</th></tr></thead><tbody>");
-    
+
+    let mut html = String::from(
+        "<table><thead><tr><th>Worker</th><th>Status</th><th>Claims</th></tr></thead><tbody>",
+    );
+
     for worker in workers {
         html.push_str(&format!(
             r#"<tr><td><div class="worker-status"><span class="status-dot online"></span>{}</div></td><td>{}</td><td>{}</td></tr>"#,
@@ -159,7 +172,7 @@ async fn api_active_workers(State(state): State<DashboardServer>) -> Html<String
             worker.claim_count
         ));
     }
-    
+
     html.push_str("</tbody></table>");
     Html(html)
 }
@@ -173,7 +186,10 @@ fn format_time_ago(ms_ago: i64) -> (String, &'static str) {
         (format!("{}m ago", seconds / 60), "recent")
     } else if seconds < 86400 {
         let hours = seconds / 3600;
-        (format!("{}h ago", hours), if hours < 2 { "recent" } else { "stale" })
+        (
+            format!("{}h ago", hours),
+            if hours < 2 { "recent" } else { "stale" },
+        )
     } else {
         (format!("{}d ago", seconds / 86400), "old")
     };
@@ -183,13 +199,14 @@ fn format_time_ago(ms_ago: i64) -> (String, &'static str) {
 /// Workers list API endpoint for htmx - returns HTML fragment with full worker details.
 async fn api_workers_list(State(state): State<DashboardServer>) -> Html<String> {
     let workers = state.db().list_workers_info().unwrap_or_default();
-    
+
     if workers.is_empty() {
         return Html(r#"<div class="empty-state">No workers registered</div>"#.to_string());
     }
-    
+
     let now = now_ms();
-    let mut html = String::from(r#"<table>
+    let mut html = String::from(
+        r#"<table>
         <thead>
             <tr>
                 <th></th>
@@ -200,8 +217,9 @@ async fn api_workers_list(State(state): State<DashboardServer>) -> Html<String> 
                 <th>Claims</th>
             </tr>
         </thead>
-        <tbody>"#);
-    
+        <tbody>"#,
+    );
+
     for worker in &workers {
         // Determine worker status based on heartbeat
         let heartbeat_age = now - worker.last_heartbeat;
@@ -212,23 +230,25 @@ async fn api_workers_list(State(state): State<DashboardServer>) -> Html<String> 
         } else {
             "offline"
         };
-        
+
         // Format heartbeat time
         let (heartbeat_text, heartbeat_class) = format_time_ago(heartbeat_age);
-        
+
         // Format registered time
         let registered_age = now - worker.registered_at;
         let (registered_text, _) = format_time_ago(registered_age);
-        
+
         // Format tags
-        let tags_html: String = worker.tags.iter()
+        let tags_html: String = worker
+            .tags
+            .iter()
             .map(|t| format!(r#"<span class="tag">{}</span>"#, html_escape(t)))
             .collect();
-        
+
         // Escape worker ID for use in HTML attribute
         let worker_id_escaped = html_escape(&worker.id);
         let worker_id_attr = worker.id.replace('"', "&quot;").replace('\'', "&#39;");
-        
+
         html.push_str(&format!(
             r#"<tr class="expandable-row" onclick="toggleWorkerDetail('{worker_id_attr}')">
                 <td><span id="expand-icon-{worker_id_attr}" class="expand-icon">&#9654;</span></td>
@@ -258,7 +278,7 @@ async fn api_workers_list(State(state): State<DashboardServer>) -> Html<String> 
             claim_count = worker.claim_count,
         ));
     }
-    
+
     html.push_str("</tbody></table>");
     Html(html)
 }
@@ -269,20 +289,27 @@ async fn api_worker_details(
     axum::extract::Path(worker_id): axum::extract::Path<String>,
 ) -> Html<String> {
     let mut html = String::new();
-    
+
     // Get claimed tasks
-    let tasks = state.db().get_worker_claimed_tasks(&worker_id).unwrap_or_default();
-    
+    let tasks = state
+        .db()
+        .get_worker_claimed_tasks(&worker_id)
+        .unwrap_or_default();
+
     html.push_str(r#"<div class="detail-section"><h3>Claimed Tasks</h3>"#);
     if tasks.is_empty() {
         html.push_str(r#"<div class="empty-state">No claimed tasks</div>"#);
     } else {
         html.push_str(r#"<ul class="detail-list">"#);
         for task in tasks {
-            let title = task.title.as_deref()
+            let title = task
+                .title
+                .as_deref()
                 .filter(|t| !t.is_empty())
                 .unwrap_or(&task.id);
-            let thought = task.current_thought.as_deref()
+            let thought = task
+                .current_thought
+                .as_deref()
                 .map(|t| format!(r#" - <em>{}</em>"#, html_escape(t)))
                 .unwrap_or_default();
             html.push_str(&format!(
@@ -294,17 +321,22 @@ async fn api_worker_details(
         html.push_str("</ul>");
     }
     html.push_str("</div>");
-    
+
     // Get file marks
-    let file_locks = state.db().get_file_locks(None, Some(&worker_id), None).unwrap_or_default();
-    
+    let file_locks = state
+        .db()
+        .get_file_locks(None, Some(&worker_id), None)
+        .unwrap_or_default();
+
     html.push_str(r#"<div class="detail-section"><h3>File Marks</h3>"#);
     if file_locks.is_empty() {
         html.push_str(r#"<div class="empty-state">No file marks</div>"#);
     } else {
         html.push_str(r#"<ul class="detail-list">"#);
         for (file_path, lock) in file_locks {
-            let reason = lock.reason.as_deref()
+            let reason = lock
+                .reason
+                .as_deref()
                 .map(|r| format!(r#" - {}"#, html_escape(r)))
                 .unwrap_or_default();
             html.push_str(&format!(
@@ -316,7 +348,7 @@ async fn api_worker_details(
         html.push_str("</ul>");
     }
     html.push_str("</div>");
-    
+
     // Add disconnect button
     let worker_id_attr = worker_id.replace('"', "&quot;").replace('\'', "&#39;");
     html.push_str(&format!(
@@ -337,7 +369,7 @@ async fn api_worker_details(
         </div>",
         worker_id = worker_id_attr,
     ));
-    
+
     Html(html)
 }
 
@@ -354,7 +386,7 @@ async fn api_worker_disconnect(
     Form(form): Form<DisconnectForm>,
 ) -> Html<String> {
     let final_status = form.final_status.as_deref().unwrap_or("pending");
-    
+
     match state.db().unregister_worker(&worker_id, final_status) {
         Ok(summary) => {
             // Return updated workers list
@@ -367,16 +399,14 @@ async fn api_worker_disconnect(
                     final_status
                 ));
             }
-            
+
             // Re-render the workers list (simplified - redirect to refresh)
             api_workers_list(State(state)).await
         }
-        Err(e) => {
-            Html(format!(
-                r#"<div class="empty-state" style="color: var(--accent);">Error disconnecting worker: {}</div>"#,
-                html_escape(&e.to_string())
-            ))
-        }
+        Err(e) => Html(format!(
+            r#"<div class="empty-state" style="color: var(--accent);">Error disconnecting worker: {}</div>"#,
+            html_escape(&e.to_string())
+        )),
     }
 }
 
@@ -385,25 +415,25 @@ async fn api_workers_cleanup(State(state): State<DashboardServer>) -> Html<Strin
     // Default timeout: 5 minutes (300 seconds)
     let timeout_seconds = 300;
     let final_status = "pending";
-    
-    match state.db().cleanup_stale_workers(timeout_seconds, final_status) {
+
+    match state
+        .db()
+        .cleanup_stale_workers(timeout_seconds, final_status)
+    {
         Ok(summary) => {
             if summary.workers_evicted == 0 {
                 Html(r#"<span class="badge badge-info">No stale workers</span>"#.to_string())
             } else {
                 Html(format!(
                     r#"<span class="badge badge-success">{} evicted, {} tasks released</span>"#,
-                    summary.workers_evicted,
-                    summary.tasks_released
+                    summary.workers_evicted, summary.tasks_released
                 ))
             }
         }
-        Err(e) => {
-            Html(format!(
-                r#"<span class="badge badge-error">Error: {}</span>"#,
-                html_escape(&e.to_string())
-            ))
-        }
+        Err(e) => Html(format!(
+            r#"<span class="badge badge-error">Error: {}</span>"#,
+            html_escape(&e.to_string())
+        )),
     }
 }
 
@@ -430,17 +460,20 @@ struct ActivityListParams {
 
 /// Activity stats API endpoint for htmx - returns HTML fragment.
 async fn api_activity_stats(State(state): State<DashboardServer>) -> Html<String> {
-    let stats = state.db().get_activity_stats().unwrap_or_else(|_| {
-        crate::db::dashboard::ActivityStats {
-            total_events_24h: 0,
-            transitions_24h: 0,
-            file_events_24h: 0,
-            active_workers: 0,
-            events_by_status: std::collections::HashMap::new(),
-        }
-    });
-    
-    Html(format!(r#"
+    let stats =
+        state
+            .db()
+            .get_activity_stats()
+            .unwrap_or_else(|_| crate::db::dashboard::ActivityStats {
+                total_events_24h: 0,
+                transitions_24h: 0,
+                file_events_24h: 0,
+                active_workers: 0,
+                events_by_status: std::collections::HashMap::new(),
+            });
+
+    Html(format!(
+        r#"
         <div class="stats-row">
             <div class="stat-card">
                 <div class="stat-value">{}</div>
@@ -459,7 +492,9 @@ async fn api_activity_stats(State(state): State<DashboardServer>) -> Html<String
                 <div class="stat-label">Active Workers</div>
             </div>
         </div>
-    "#, stats.total_events_24h, stats.transitions_24h, stats.file_events_24h, stats.active_workers))
+    "#,
+        stats.total_events_24h, stats.transitions_24h, stats.file_events_24h, stats.active_workers
+    ))
 }
 
 /// Activity list API endpoint for htmx - returns HTML fragment.
@@ -475,19 +510,23 @@ async fn api_activity_list(
         page: params.page.unwrap_or(1).max(1),
         limit: params.limit.unwrap_or(50).clamp(10, 100),
     };
-    
+
     let result = match state.db().query_activity(&query) {
         Ok(r) => r,
-        Err(_) => return Html(r#"<div class="empty-state">Error loading activity</div>"#.to_string()),
+        Err(_) => {
+            return Html(r#"<div class="empty-state">Error loading activity</div>"#.to_string());
+        }
     };
-    
+
     if result.events.is_empty() {
-        return Html(r#"<div class="empty-state">No activity matches the current filters</div>"#.to_string());
+        return Html(
+            r#"<div class="empty-state">No activity matches the current filters</div>"#.to_string(),
+        );
     }
-    
+
     let now = now_ms();
     let mut html = String::from(r#"<div class="activity-feed">"#);
-    
+
     for event in &result.events {
         let (event_icon, event_class, event_label) = match event.event_type {
             crate::db::dashboard::ActivityEventType::TaskTransition => {
@@ -510,7 +549,7 @@ async fn api_activity_list(
                 ("&#128275;", "event-type-release", "released")
             }
         };
-        
+
         // Build description
         let description = match event.event_type {
             crate::db::dashboard::ActivityEventType::TaskTransition => {
@@ -540,7 +579,7 @@ async fn api_activity_list(
             crate::db::dashboard::ActivityEventType::FileClaim => {
                 let file_path = event.file_path.as_deref().unwrap_or("unknown");
                 let file_short = if file_path.len() > 40 {
-                    format!("...{}", &file_path[file_path.len()-37..])
+                    format!("...{}", &file_path[file_path.len() - 37..])
                 } else {
                     file_path.to_string()
                 };
@@ -552,7 +591,7 @@ async fn api_activity_list(
             crate::db::dashboard::ActivityEventType::FileRelease => {
                 let file_path = event.file_path.as_deref().unwrap_or("unknown");
                 let file_short = if file_path.len() > 40 {
-                    format!("...{}", &file_path[file_path.len()-37..])
+                    format!("...{}", &file_path[file_path.len() - 37..])
                 } else {
                     file_path.to_string()
                 };
@@ -562,7 +601,7 @@ async fn api_activity_list(
                 )
             }
         };
-        
+
         // Worker info
         let worker_html = match &event.worker_id {
             Some(worker) => format!(
@@ -571,7 +610,7 @@ async fn api_activity_list(
             ),
             None => String::new(),
         };
-        
+
         // Reason if available
         let reason_html = match &event.reason {
             Some(reason) if !reason.is_empty() => format!(
@@ -580,10 +619,10 @@ async fn api_activity_list(
             ),
             _ => String::new(),
         };
-        
+
         // Time ago
         let time_ago = format_time_ago(now - event.timestamp);
-        
+
         html.push_str(&format!(
             r#"<div class="activity-item">
                 <span class="event-type {event_class}">
@@ -606,14 +645,14 @@ async fn api_activity_list(
             time_text = time_ago.0,
         ));
     }
-    
+
     html.push_str("</div>");
-    
+
     // Pagination
     if result.total_pages > 1 {
         let start = ((result.page - 1) * result.limit + 1) as i64;
         let end = (start - 1 + result.events.len() as i64).min(result.total);
-        
+
         html.push_str(&format!(
             r#"<div class="pagination">
                 <div class="pagination-info">
@@ -636,11 +675,19 @@ async fn api_activity_list(
             total_pages = result.total_pages,
             first_disabled = if result.page <= 1 { "disabled" } else { "" },
             prev_disabled = if result.page <= 1 { "disabled" } else { "" },
-            next_disabled = if result.page >= result.total_pages { "disabled" } else { "" },
-            last_disabled = if result.page >= result.total_pages { "disabled" } else { "" },
+            next_disabled = if result.page >= result.total_pages {
+                "disabled"
+            } else {
+                ""
+            },
+            last_disabled = if result.page >= result.total_pages {
+                "disabled"
+            } else {
+                ""
+            },
         ));
     }
-    
+
     Html(html)
 }
 
@@ -662,7 +709,10 @@ fn format_timestamp(ms: Option<i64>) -> String {
             let day_of_year = days % 365;
             let month = (day_of_year / 30).min(11) + 1;
             let day = (day_of_year % 30) + 1;
-            format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hours, minutes, seconds)
+            format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                year, month, day, hours, minutes, seconds
+            )
         }
         None => "-".to_string(),
     }
@@ -687,13 +737,16 @@ async fn task_detail_page(
             ));
         }
         Err(_) => {
-            return Html(r#"<!DOCTYPE html><html><head><title>Error</title></head>
+            return Html(
+                r#"<!DOCTYPE html><html><head><title>Error</title></head>
                 <body style="background:#1a1a2e;color:#eaeaea;font-family:system-ui;padding:2rem;">
                 <h1>Error</h1><p>Failed to load task.</p>
-                <a href="/tasks" style="color:#e94560;">Back to Tasks</a></body></html>"#.to_string());
+                <a href="/tasks" style="color:#e94560;">Back to Tasks</a></body></html>"#
+                    .to_string(),
+            );
         }
     };
-    
+
     // Get parent task
     let parent_html = match state.db().get_parent(&task_id) {
         Ok(Some(parent_id)) => format!(
@@ -703,29 +756,43 @@ async fn task_detail_page(
         ),
         _ => "-".to_string(),
     };
-    
+
     // Get blocked by (tasks that block this one)
     let blocked_by = state.db().get_blockers(&task_id).unwrap_or_default();
     let blocked_by_html = if blocked_by.is_empty() {
         r#"<li class="empty-state">No blocking dependencies</li>"#.to_string()
     } else {
-        blocked_by.iter()
-            .map(|id| format!(r#"<li><a href="/tasks/{}">{}</a></li>"#, html_escape(id), html_escape(id)))
+        blocked_by
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"<li><a href="/tasks/{}">{}</a></li>"#,
+                    html_escape(id),
+                    html_escape(id)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
-    
+
     // Get blocks (tasks this one blocks)
     let blocks = state.db().get_blocking(&task_id).unwrap_or_default();
     let blocks_html = if blocks.is_empty() {
         r#"<li class="empty-state">No tasks blocked</li>"#.to_string()
     } else {
-        blocks.iter()
-            .map(|id| format!(r#"<li><a href="/tasks/{}">{}</a></li>"#, html_escape(id), html_escape(id)))
+        blocks
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"<li><a href="/tasks/{}">{}</a></li>"#,
+                    html_escape(id),
+                    html_escape(id)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
-    
+
     // Status badge class
     let status_badge = match task.status.as_str() {
         "completed" => "badge-success",
@@ -736,52 +803,86 @@ async fn task_detail_page(
         "cancelled" => "badge-warning",
         _ => "badge-warning",
     };
-    
+
     // Tags display
     let tags_html = if task.tags.is_empty() {
         "-".to_string()
     } else {
-        task.tags.iter()
+        task.tags
+            .iter()
             .map(|t| format!(r#"<span class="tag">{}</span>"#, html_escape(t)))
             .collect::<Vec<_>>()
             .join(" ")
     };
-    
+
     let tags_raw = task.tags.join(", ");
-    
+
     // Owner display
-    let owner_html = task.worker_id.as_deref()
+    let owner_html = task
+        .worker_id
+        .as_deref()
         .map(|w| html_escape(w))
         .unwrap_or_else(|| "-".to_string());
-    
+
     // Title display
     let title = task.title.as_str();
     let title_display = if title.is_empty() { &task.id } else { title };
-    
+
     // Description
     let description = task.description.as_deref().unwrap_or("");
     let description_escaped = html_escape(description);
-    
+
     // Status select options
-    let status_pending = if task.status == "pending" { "selected" } else { "" };
-    let status_assigned = if task.status == "assigned" { "selected" } else { "" };
-    let status_working = if task.status == "working" { "selected" } else { "" };
-    let status_completed = if task.status == "completed" { "selected" } else { "" };
-    let status_failed = if task.status == "failed" { "selected" } else { "" };
-    let status_cancelled = if task.status == "cancelled" { "selected" } else { "" };
-    
+    let status_pending = if task.status == "pending" {
+        "selected"
+    } else {
+        ""
+    };
+    let status_assigned = if task.status == "assigned" {
+        "selected"
+    } else {
+        ""
+    };
+    let status_working = if task.status == "working" {
+        "selected"
+    } else {
+        ""
+    };
+    let status_completed = if task.status == "completed" {
+        "selected"
+    } else {
+        ""
+    };
+    let status_failed = if task.status == "failed" {
+        "selected"
+    } else {
+        ""
+    };
+    let status_cancelled = if task.status == "cancelled" {
+        "selected"
+    } else {
+        ""
+    };
+
     // Check for message from form submission
-    let message = params.get("msg").map(|m| {
-        let (class, text) = if m.starts_with("success:") {
-            ("message-success", &m[8..])
-        } else if m.starts_with("error:") {
-            ("message-error", &m[6..])
-        } else {
-            ("message-success", m.as_str())
-        };
-        format!(r#"<div class="message {}">{}</div>"#, class, html_escape(text))
-    }).unwrap_or_default();
-    
+    let message = params
+        .get("msg")
+        .map(|m| {
+            let (class, text) = if m.starts_with("success:") {
+                ("message-success", &m[8..])
+            } else if m.starts_with("error:") {
+                ("message-error", &m[6..])
+            } else {
+                ("message-success", m.as_str())
+            };
+            format!(
+                r#"<div class="message {}">{}</div>"#,
+                class,
+                html_escape(text)
+            )
+        })
+        .unwrap_or_default();
+
     // Load and render template
     let template = templates::TASK_DETAIL_TEMPLATE;
     let html = template
@@ -810,7 +911,7 @@ async fn task_detail_page(
         .replace("{{status_failed}}", status_failed)
         .replace("{{status_cancelled}}", status_cancelled)
         .replace("{{message}}", &message);
-    
+
     Html(html)
 }
 
@@ -836,7 +937,7 @@ async fn task_update_handler(
             .filter(|s| !s.is_empty())
             .collect()
     });
-    
+
     // Use dashboard-specific update method
     match state.db().dashboard_update_task(
         &task_id,
@@ -845,15 +946,13 @@ async fn task_update_handler(
         form.description.as_deref(),
         new_tags,
     ) {
-        Ok(()) => {
-            Html(r#"<div class="message message-success">Task updated successfully</div>"#.to_string())
-        }
-        Err(e) => {
-            Html(format!(
-                r#"<div class="message message-error">Failed to update task: {}</div>"#,
-                html_escape(&e.to_string())
-            ))
-        }
+        Ok(()) => Html(
+            r#"<div class="message message-success">Task updated successfully</div>"#.to_string(),
+        ),
+        Err(e) => Html(format!(
+            r#"<div class="message message-error">Failed to update task: {}</div>"#,
+            html_escape(&e.to_string())
+        )),
     }
 }
 
@@ -912,31 +1011,37 @@ async fn api_tasks_list(
     Query(params): Query<TaskListParams>,
 ) -> Html<String> {
     // Parse sort parameter (format: "field_direction", e.g., "priority_desc")
-    let (sort_by, sort_order) = params.sort.as_deref()
+    let (sort_by, sort_order) = params
+        .sort
+        .as_deref()
         .and_then(|s| s.rsplit_once('_'))
         .map(|(field, order)| (field.to_string(), order.to_string()))
         .unwrap_or_else(|| ("priority".to_string(), "desc".to_string()));
-    
+
     // Determine timed filter based on show_untimed parameter
     // Default behavior: show only timed states (active work)
     // When show_untimed=true, show all states (no filter)
-    let show_untimed = params.show_untimed.as_ref()
+    let show_untimed = params
+        .show_untimed
+        .as_ref()
         .map(|s| s == "true" || s == "1")
         .unwrap_or(false);
-    
+
     let (timed_filter, timed_states) = if show_untimed {
         // Show all tasks (no filter)
         (None, Vec::new())
     } else {
         // Show only timed states (default - focus on active work)
-        let timed: Vec<String> = state.states_config().state_names()
+        let timed: Vec<String> = state
+            .states_config()
+            .state_names()
             .into_iter()
             .filter(|s| state.states_config().is_timed_state(s))
             .map(|s| s.to_string())
             .collect();
         (Some(true), timed)
     };
-    
+
     let query = TaskListQuery {
         status: params.status.filter(|s| !s.is_empty()),
         phase: params.phase.filter(|s| !s.is_empty()),
@@ -950,17 +1055,20 @@ async fn api_tasks_list(
         page: params.page.unwrap_or(1).max(1),
         limit: params.limit.unwrap_or(25).clamp(10, 100),
     };
-    
+
     let result = match state.db().query_tasks(&query) {
         Ok(r) => r,
         Err(_) => return Html(r#"<div class="empty-state">Error loading tasks</div>"#.to_string()),
     };
-    
+
     if result.tasks.is_empty() {
-        return Html(r#"<div class="empty-state">No tasks match the current filters</div>"#.to_string());
+        return Html(
+            r#"<div class="empty-state">No tasks match the current filters</div>"#.to_string(),
+        );
     }
-    
-    let mut html = String::from(r#"<table>
+
+    let mut html = String::from(
+        r#"<table>
         <thead>
             <tr>
                 <th class="checkbox-col"><input type="checkbox" id="select-all-checkbox" class="task-checkbox" onchange="onSelectAllChange(this)"></th>
@@ -972,8 +1080,9 @@ async fn api_tasks_list(
                 <th>Owner</th>
             </tr>
         </thead>
-        <tbody>"#);
-    
+        <tbody>"#,
+    );
+
     for task in &result.tasks {
         let badge_class = match task.status.as_str() {
             "completed" => "badge-success",
@@ -984,7 +1093,7 @@ async fn api_tasks_list(
             "cancelled" => "badge-warning",
             _ => "badge-warning",
         };
-        
+
         let priority_class = if task.priority >= 8 {
             "priority-high"
         } else if task.priority >= 4 {
@@ -992,8 +1101,10 @@ async fn api_tasks_list(
         } else {
             "priority-low"
         };
-        
-        let title_display = task.title.as_deref()
+
+        let title_display = task
+            .title
+            .as_deref()
             .filter(|t| !t.is_empty())
             .map(|t| {
                 if t.len() > 50 {
@@ -1003,14 +1114,15 @@ async fn api_tasks_list(
                 }
             })
             .unwrap_or_else(|| "-".to_string());
-        
+
         // Parse tags (stored as JSON array string)
         let tags_html = if task.tags.is_empty() || task.tags == "[]" {
             String::new()
         } else {
             // Try to parse as JSON array, fall back to displaying as-is
             match serde_json::from_str::<Vec<String>>(&task.tags) {
-                Ok(tags) => tags.iter()
+                Ok(tags) => tags
+                    .iter()
                     .take(3) // Limit to 3 visible tags
                     .map(|t| format!(r#"<span class="tag">{}</span>"#, html_escape(t)))
                     .collect::<Vec<_>>()
@@ -1018,11 +1130,13 @@ async fn api_tasks_list(
                 Err(_) => task.tags.clone(),
             }
         };
-        
-        let owner_display = task.worker_id.as_deref()
+
+        let owner_display = task
+            .worker_id
+            .as_deref()
             .map(|w| html_escape(w))
             .unwrap_or_else(|| "-".to_string());
-        
+
         html.push_str(&format!(
             r#"<tr>
                 <td class="checkbox-col"><input type="checkbox" class="task-checkbox" data-task-id="{id}" onchange="onTaskCheckboxChange(this, '{id}')"></td>
@@ -1045,13 +1159,13 @@ async fn api_tasks_list(
             owner = owner_display,
         ));
     }
-    
+
     html.push_str("</tbody></table>");
-    
+
     // Pagination
     let start = ((result.page - 1) * result.limit + 1) as i64;
     let end = (start - 1 + result.tasks.len() as i64).min(result.total);
-    
+
     html.push_str(&format!(
         r#"<div class="pagination">
             <div class="pagination-info">
@@ -1074,10 +1188,18 @@ async fn api_tasks_list(
         total_pages = result.total_pages,
         first_disabled = if result.page <= 1 { "disabled" } else { "" },
         prev_disabled = if result.page <= 1 { "disabled" } else { "" },
-        next_disabled = if result.page >= result.total_pages { "disabled" } else { "" },
-        last_disabled = if result.page >= result.total_pages { "disabled" } else { "" },
+        next_disabled = if result.page >= result.total_pages {
+            "disabled"
+        } else {
+            ""
+        },
+        last_disabled = if result.page >= result.total_pages {
+            "disabled"
+        } else {
+            ""
+        },
     ));
-    
+
     Html(html)
 }
 
@@ -1096,7 +1218,7 @@ async fn api_tasks_search(
     Query(params): Query<TaskSearchParams>,
 ) -> Html<String> {
     let query = params.q.filter(|s| !s.is_empty());
-    
+
     // If no query text, fall back to listing all tasks with optional status filter
     if query.is_none() {
         let list_query = TaskListQuery {
@@ -1112,16 +1234,18 @@ async fn api_tasks_search(
             page: 1,
             limit: params.limit.unwrap_or(50).clamp(10, 100),
         };
-        
+
         let result = match state.db().query_tasks(&list_query) {
             Ok(r) => r,
-            Err(_) => return Html(r#"<div class="empty-state">Error loading tasks</div>"#.to_string()),
+            Err(_) => {
+                return Html(r#"<div class="empty-state">Error loading tasks</div>"#.to_string());
+            }
         };
-        
+
         if result.tasks.is_empty() {
             return Html(r#"<div class="empty-state">No tasks found</div>"#.to_string());
         }
-        
+
         // Return simple table without search-specific columns (score)
         let mut html = format!(
             r#"<div style="margin-bottom: 1rem; color: var(--text-secondary);">
@@ -1138,9 +1262,13 @@ async fn api_tasks_search(
             </thead>
             <tbody>"#,
             result.tasks.len(),
-            params.status.as_ref().map(|s| format!(" (status: {})", s)).unwrap_or_default()
+            params
+                .status
+                .as_ref()
+                .map(|s| format!(" (status: {})", s))
+                .unwrap_or_default()
         );
-        
+
         for task in &result.tasks {
             let badge_class = match task.status.as_str() {
                 "completed" => "badge-success",
@@ -1151,8 +1279,10 @@ async fn api_tasks_search(
                 "cancelled" => "badge-warning",
                 _ => "badge-warning",
             };
-            
-            let title_display = task.title.as_deref()
+
+            let title_display = task
+                .title
+                .as_deref()
                 .filter(|t| !t.is_empty())
                 .map(|t| {
                     if t.len() > 60 {
@@ -1162,7 +1292,7 @@ async fn api_tasks_search(
                     }
                 })
                 .unwrap_or_else(|| "-".to_string());
-            
+
             html.push_str(&format!(
                 r#"<tr>
                     <td class="task-id"><a href="/tasks/{id}">{id_short}</a></td>
@@ -1171,29 +1301,39 @@ async fn api_tasks_search(
                     <td>{priority}</td>
                 </tr>"#,
                 id = html_escape(&task.id),
-                id_short = if task.id.len() > 20 { format!("{}...", &task.id[..17]) } else { task.id.clone() },
+                id_short = if task.id.len() > 20 {
+                    format!("{}...", &task.id[..17])
+                } else {
+                    task.id.clone()
+                },
                 title = html_escape(&title_display),
                 badge_class = badge_class,
                 status = task.status,
                 priority = task.priority,
             ));
         }
-        
+
         html.push_str("</tbody></table>");
         return Html(html);
     }
-    
+
     let query = query.unwrap();
 
     let status_filter = params.status.as_deref().filter(|s| !s.is_empty());
     let limit = params.limit.unwrap_or(50).clamp(10, 100);
 
-    let results = match state.db().search_tasks(&query, Some(limit), false, status_filter) {
+    let results = match state
+        .db()
+        .search_tasks(&query, Some(limit), false, status_filter)
+    {
         Ok(r) => r,
         Err(e) => {
             // Handle FTS5 query syntax errors gracefully
             let error_msg = e.to_string();
-            if error_msg.contains("fts5") || error_msg.contains("syntax") || error_msg.contains("MATCH") {
+            if error_msg.contains("fts5")
+                || error_msg.contains("syntax")
+                || error_msg.contains("MATCH")
+            {
                 return Html(format!(
                     r#"<div class="empty-state">Invalid search syntax: {}<br><br>
                     <small>Try: simple words, "exact phrase", prefix*, title:word, AND/OR/NOT</small></div>"#,
@@ -1248,7 +1388,8 @@ async fn api_tasks_search(
             html_escape(&result.title)
         } else {
             // title_snippet already has HTML <mark> tags, so don't escape the marks
-            result.title_snippet
+            result
+                .title_snippet
                 .replace('<', "&lt;")
                 .replace('>', "&gt;")
                 .replace("&lt;mark&gt;", "<mark>")
@@ -1266,7 +1407,11 @@ async fn api_tasks_search(
                 <td class="search-score">{score}</td>
             </tr>"#,
             id = html_escape(&result.task_id),
-            id_short = if result.task_id.len() > 20 { format!("{}...", &result.task_id[..17]) } else { result.task_id.clone() },
+            id_short = if result.task_id.len() > 20 {
+                format!("{}...", &result.task_id[..17])
+            } else {
+                result.task_id.clone()
+            },
             title = title_display,
             badge_class = badge_class,
             status = result.status,
@@ -1280,9 +1425,7 @@ async fn api_tasks_search(
 }
 
 /// API endpoint to get available phases (distinct phases from existing tasks).
-async fn api_tasks_phases(
-    State(state): State<DashboardServer>,
-) -> Json<Vec<String>> {
+async fn api_tasks_phases(State(state): State<DashboardServer>) -> Json<Vec<String>> {
     match state.db().get_available_phases() {
         Ok(phases) => Json(phases),
         Err(_) => Json(Vec::new()),
@@ -1301,20 +1444,24 @@ struct StatesConfigResponse {
 }
 
 /// API endpoint to get states configuration (for timed/untimed filtering).
-async fn api_states_config(
-    State(state): State<DashboardServer>,
-) -> Json<StatesConfigResponse> {
+async fn api_states_config(State(state): State<DashboardServer>) -> Json<StatesConfigResponse> {
     let config = state.states_config();
-    let states: Vec<String> = config.state_names().into_iter().map(|s| s.to_string()).collect();
-    let timed_states: Vec<String> = states.iter()
+    let states: Vec<String> = config
+        .state_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+    let timed_states: Vec<String> = states
+        .iter()
         .filter(|s| config.is_timed_state(s))
         .cloned()
         .collect();
-    let untimed_states: Vec<String> = states.iter()
+    let untimed_states: Vec<String> = states
+        .iter()
         .filter(|s| !config.is_timed_state(s))
         .cloned()
         .collect();
-    
+
     Json(StatesConfigResponse {
         states,
         timed_states,
@@ -1359,7 +1506,10 @@ async fn api_tasks_bulk(
                 }
             };
             for task_id in &request.task_ids {
-                match state.db().dashboard_update_task(task_id, Some(status), None, None, None) {
+                match state
+                    .db()
+                    .dashboard_update_task(task_id, Some(status), None, None, None)
+                {
                     Ok(()) => affected += 1,
                     Err(e) => last_error = Some(e.to_string()),
                 }
@@ -1386,7 +1536,11 @@ async fn api_tasks_bulk(
     Json(BulkOperationResponse {
         success: affected > 0,
         affected,
-        error: if affected < request.task_ids.len() { last_error } else { None },
+        error: if affected < request.task_ids.len() {
+            last_error
+        } else {
+            None
+        },
     })
 }
 
@@ -1439,8 +1593,9 @@ async fn api_file_marks_stats(State(state): State<DashboardServer>) -> Html<Stri
             stale_marks: 0,
         }
     });
-    
-    Html(format!(r#"
+
+    Html(format!(
+        r#"
         <div class="stats-row">
             <div class="stat-item">
                 <div class="stat-value">{}</div>
@@ -1459,11 +1614,15 @@ async fn api_file_marks_stats(State(state): State<DashboardServer>) -> Html<Stri
                 <div class="stat-label">Stale (&gt;1h)</div>
             </div>
         </div>
-    "#, 
+    "#,
         stats.total_marks,
         stats.unique_agents,
         stats.with_tasks,
-        if stats.stale_marks > 0 { "var(--warning)" } else { "var(--text-primary)" },
+        if stats.stale_marks > 0 {
+            "var(--warning)"
+        } else {
+            "var(--text-primary)"
+        },
         stats.stale_marks
     ))
 }
@@ -1471,13 +1630,16 @@ async fn api_file_marks_stats(State(state): State<DashboardServer>) -> Html<Stri
 /// File marks list API endpoint for htmx - returns HTML fragment with table.
 async fn api_file_marks_list(State(state): State<DashboardServer>) -> Html<String> {
     let marks = state.db().get_all_file_marks().unwrap_or_default();
-    
+
     if marks.is_empty() {
-        return Html(r#"<div class="empty-state">No file marks currently active</div>"#.to_string());
+        return Html(
+            r#"<div class="empty-state">No file marks currently active</div>"#.to_string(),
+        );
     }
-    
+
     let now = now_ms();
-    let mut html = String::from(r#"<table>
+    let mut html = String::from(
+        r#"<table>
         <thead>
             <tr>
                 <th>File Path</th>
@@ -1488,27 +1650,39 @@ async fn api_file_marks_list(State(state): State<DashboardServer>) -> Html<Strin
                 <th>Actions</th>
             </tr>
         </thead>
-        <tbody>"#);
-    
+        <tbody>"#,
+    );
+
     for mark in &marks {
         let age = now - mark.locked_at;
         let (age_text, age_class) = format_time_ago(age);
-        
+
         // Determine if mark is stale (older than 1 hour)
         let is_stale = age > 60 * 60 * 1000;
         let row_class = if is_stale { "stale-mark" } else { "" };
-        
-        let task_html = mark.task_id.as_ref()
-            .map(|t| format!(r#"<a href="/tasks/{}" class="task-link">{}</a>"#, 
-                html_escape(t), 
-                if t.len() > 20 { format!("{}...", &t[..17]) } else { t.clone() }
-            ))
+
+        let task_html = mark
+            .task_id
+            .as_ref()
+            .map(|t| {
+                format!(
+                    r#"<a href="/tasks/{}" class="task-link">{}</a>"#,
+                    html_escape(t),
+                    if t.len() > 20 {
+                        format!("{}...", &t[..17])
+                    } else {
+                        t.clone()
+                    }
+                )
+            })
             .unwrap_or_else(|| "-".to_string());
-        
-        let reason_html = mark.reason.as_ref()
+
+        let reason_html = mark
+            .reason
+            .as_ref()
             .map(|r| format!(r#"<span class="reason-text">{}</span>"#, html_escape(r)))
             .unwrap_or_else(|| "-".to_string());
-        
+
         html.push_str(&format!(
             r##"<tr class="{row_class}">
                 <td><span class="file-path">{file_path}</span></td>
@@ -1536,7 +1710,7 @@ async fn api_file_marks_list(State(state): State<DashboardServer>) -> Html<Strin
             age_text = age_text,
         ));
     }
-    
+
     html.push_str("</tbody></table>");
     Html(html)
 }
@@ -1557,18 +1731,14 @@ async fn api_file_marks_force_unmark(
             // Return updated file marks list
             api_file_marks_list(State(state)).await
         }
-        Ok(false) => {
-            Html(format!(
-                r#"<div class="empty-state" style="color: var(--warning);">File mark not found: {}</div>"#,
-                html_escape(&form.file_path)
-            ))
-        }
-        Err(e) => {
-            Html(format!(
-                r#"<div class="empty-state" style="color: var(--accent);">Error removing mark: {}</div>"#,
-                html_escape(&e.to_string())
-            ))
-        }
+        Ok(false) => Html(format!(
+            r#"<div class="empty-state" style="color: var(--warning);">File mark not found: {}</div>"#,
+            html_escape(&form.file_path)
+        )),
+        Err(e) => Html(format!(
+            r#"<div class="empty-state" style="color: var(--accent);">Error removing mark: {}</div>"#,
+            html_escape(&e.to_string())
+        )),
     }
 }
 
@@ -1619,15 +1789,16 @@ async fn api_metrics_overview(State(state): State<DashboardServer>) -> Html<Stri
             completed_points: 0,
         }
     });
-    
+
     let time_str = format_duration(overview.total_time_ms);
     let cost_str = if overview.total_cost_usd > 0.0 {
         format!("${:.2}", overview.total_cost_usd)
     } else {
         "$0.00".to_string()
     };
-    
-    Html(format!(r#"
+
+    Html(format!(
+        r#"
         <div class="grid grid-stats">
             <div class="card stat">
                 <div class="stat-value">{}</div>
@@ -1646,28 +1817,37 @@ async fn api_metrics_overview(State(state): State<DashboardServer>) -> Html<Stri
                 <div class="stat-label">Completed</div>
             </div>
         </div>
-    "#, overview.total_tasks, cost_str, time_str, overview.completed_tasks))
+    "#,
+        overview.total_tasks, cost_str, time_str, overview.completed_tasks
+    ))
 }
 
 /// Metrics distribution API endpoint for htmx - returns status distribution chart.
 async fn api_metrics_distribution(State(state): State<DashboardServer>) -> Html<String> {
     let distribution = state.db().get_status_distribution().unwrap_or_default();
-    
+
     if distribution.is_empty() {
         return Html(r#"<div class="empty-state">No tasks to display</div>"#.to_string());
     }
-    
+
     let total: i64 = distribution.values().sum();
     if total == 0 {
         return Html(r#"<div class="empty-state">No tasks to display</div>"#.to_string());
     }
-    
+
     // Build status bar
     let mut bar_html = String::from(r#"<div class="status-bar">"#);
-    
+
     // Order statuses for consistent display
-    let statuses = ["pending", "assigned", "working", "completed", "failed", "cancelled"];
-    
+    let statuses = [
+        "pending",
+        "assigned",
+        "working",
+        "completed",
+        "failed",
+        "cancelled",
+    ];
+
     for status in &statuses {
         if let Some(&count) = distribution.get(*status) {
             if count > 0 {
@@ -1682,12 +1862,12 @@ async fn api_metrics_distribution(State(state): State<DashboardServer>) -> Html<
             }
         }
     }
-    
+
     bar_html.push_str("</div>");
-    
+
     // Build legend
     let mut legend_html = String::from(r#"<div class="status-legend">"#);
-    
+
     for status in &statuses {
         if let Some(&count) = distribution.get(*status) {
             if count > 0 {
@@ -1702,9 +1882,9 @@ async fn api_metrics_distribution(State(state): State<DashboardServer>) -> Html<
             }
         }
     }
-    
+
     legend_html.push_str("</div>");
-    
+
     Html(format!("{}{}", bar_html, legend_html))
 }
 
@@ -1721,21 +1901,29 @@ async fn api_metrics_velocity(
 ) -> Html<String> {
     let period = params.period.as_deref().unwrap_or("day");
     let num_periods = if period == "week" { 6 } else { 7 };
-    
-    let velocity = state.db().get_velocity(period, num_periods).unwrap_or_default();
-    
+
+    let velocity = state
+        .db()
+        .get_velocity(period, num_periods)
+        .unwrap_or_default();
+
     if velocity.is_empty() {
         return Html(r#"<div class="empty-state">No velocity data available</div>"#.to_string());
     }
-    
+
     // Find max for scaling
-    let max_count = velocity.iter().map(|v| v.completed_count).max().unwrap_or(1).max(1);
-    
+    let max_count = velocity
+        .iter()
+        .map(|v| v.completed_count)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
     let mut html = String::from(r#"<div class="velocity-bars">"#);
-    
+
     for point in &velocity {
         let width_percent = (point.completed_count as f64 / max_count as f64) * 100.0;
-        
+
         html.push_str(&format!(
             r#"<div class="velocity-row">
                 <span class="velocity-label">{}</span>
@@ -1746,42 +1934,46 @@ async fn api_metrics_velocity(
             </div>"#,
             html_escape(&point.period_label),
             width_percent,
-            if point.completed_count > 0 { point.completed_count.to_string() } else { String::new() },
+            if point.completed_count > 0 {
+                point.completed_count.to_string()
+            } else {
+                String::new()
+            },
             point.completed_count
         ));
     }
-    
+
     html.push_str("</div>");
-    
+
     // Add summary stats
     let total_completed: i64 = velocity.iter().map(|v| v.completed_count).sum();
     let total_points: i64 = velocity.iter().map(|v| v.total_points).sum();
     let avg = total_completed as f64 / num_periods as f64;
-    
+
     html.push_str(&format!(
         r#"<div class="status-legend" style="margin-top: 1rem;">
             <div class="legend-item">Total: {} tasks</div>
             <div class="legend-item">Points: {}</div>
             <div class="legend-item">Avg: {:.1} per {}</div>
         </div>"#,
-        total_completed,
-        total_points,
-        avg,
-        period
+        total_completed, total_points, avg, period
     ));
-    
+
     Html(html)
 }
 
 /// Metrics time-in-status API endpoint for htmx - returns time stats table.
 async fn api_metrics_time_in_status(State(state): State<DashboardServer>) -> Html<String> {
     let time_stats = state.db().get_time_in_status().unwrap_or_default();
-    
+
     if time_stats.is_empty() {
-        return Html(r#"<div class="empty-state">No time tracking data available</div>"#.to_string());
+        return Html(
+            r#"<div class="empty-state">No time tracking data available</div>"#.to_string(),
+        );
     }
-    
-    let mut html = String::from(r#"<table>
+
+    let mut html = String::from(
+        r#"<table>
         <thead>
             <tr>
                 <th>Status</th>
@@ -1790,8 +1982,9 @@ async fn api_metrics_time_in_status(State(state): State<DashboardServer>) -> Htm
                 <th>Transitions</th>
             </tr>
         </thead>
-        <tbody>"#);
-    
+        <tbody>"#,
+    );
+
     for stat in &time_stats {
         html.push_str(&format!(
             r#"<tr>
@@ -1815,7 +2008,7 @@ async fn api_metrics_time_in_status(State(state): State<DashboardServer>) -> Htm
             stat.transition_count
         ));
     }
-    
+
     html.push_str("</tbody></table>");
     Html(html)
 }
@@ -1823,12 +2016,15 @@ async fn api_metrics_time_in_status(State(state): State<DashboardServer>) -> Htm
 /// Metrics cost-by-agent API endpoint for htmx - returns agent cost table.
 async fn api_metrics_cost_by_agent(State(state): State<DashboardServer>) -> Html<String> {
     let agent_stats = state.db().get_cost_by_agent().unwrap_or_default();
-    
+
     if agent_stats.is_empty() {
-        return Html(r#"<div class="empty-state">No cost data by agent available</div>"#.to_string());
+        return Html(
+            r#"<div class="empty-state">No cost data by agent available</div>"#.to_string(),
+        );
     }
-    
-    let mut html = String::from(r#"<table>
+
+    let mut html = String::from(
+        r#"<table>
         <thead>
             <tr>
                 <th>Agent</th>
@@ -1838,15 +2034,16 @@ async fn api_metrics_cost_by_agent(State(state): State<DashboardServer>) -> Html
                 <th>Time</th>
             </tr>
         </thead>
-        <tbody>"#);
-    
+        <tbody>"#,
+    );
+
     for stat in &agent_stats {
         let cost_str = if stat.total_cost_usd > 0.0 {
             format!("${:.4}", stat.total_cost_usd)
         } else {
             "$0.00".to_string()
         };
-        
+
         html.push_str(&format!(
             r#"<tr>
                 <td>{}</td>
@@ -1862,39 +2059,37 @@ async fn api_metrics_cost_by_agent(State(state): State<DashboardServer>) -> Html
             format_duration(stat.total_time_ms)
         ));
     }
-    
+
     html.push_str("</tbody></table>");
     Html(html)
 }
 
 /// Metrics custom metrics API endpoint for htmx - returns custom metrics display.
 async fn api_metrics_custom(State(state): State<DashboardServer>) -> Html<String> {
-    let custom = state.db().get_custom_metrics().unwrap_or_else(|_| {
-        crate::db::dashboard::CustomMetricsAggregate {
-            metrics: [0; 8],
-        }
-    });
-    
+    let custom = state
+        .db()
+        .get_custom_metrics()
+        .unwrap_or_else(|_| crate::db::dashboard::CustomMetricsAggregate { metrics: [0; 8] });
+
     // Check if all metrics are zero
     let has_data = custom.metrics.iter().any(|&m| m != 0);
-    
+
     if !has_data {
         return Html(r#"<div class="empty-state">No custom metrics recorded. Use log_metrics() to track custom values.</div>"#.to_string());
     }
-    
+
     let mut html = String::from(r#"<div class="metrics-row">"#);
-    
+
     for (i, &value) in custom.metrics.iter().enumerate() {
         html.push_str(&format!(
             r#"<div class="metric-box">
                 <div class="value">{}</div>
                 <div class="label">Metric {}</div>
             </div>"#,
-            value,
-            i
+            value, i
         ));
     }
-    
+
     html.push_str("</div>");
     Html(html)
 }
@@ -1950,25 +2145,21 @@ fn generate_mermaid_diagram(
     for node in &graph.nodes {
         // Sanitize node ID for mermaid (replace special chars)
         let safe_id = sanitize_mermaid_id(&node.id);
-        
+
         // Create a display label (truncate if too long)
         let display_label = if node.title.is_empty() {
             truncate_string(&node.id, 30)
         } else {
             truncate_string(&node.title, 30)
         };
-        
+
         // Escape quotes in label
         let escaped_label = display_label
             .replace('"', "'")
             .replace('<', "&lt;")
             .replace('>', "&gt;");
-        
-        diagram.push_str(&format!(
-            "    {}[\"{}\"]\n",
-            safe_id,
-            escaped_label
-        ));
+
+        diagram.push_str(&format!("    {}[\"{}\"]\n", safe_id, escaped_label));
     }
 
     // Add edges with different styles based on dependency type
@@ -1976,14 +2167,14 @@ fn generate_mermaid_diagram(
     for edge in &graph.edges {
         let from_safe = sanitize_mermaid_id(&edge.from_id);
         let to_safe = sanitize_mermaid_id(&edge.to_id);
-        
+
         let edge_style = match edge.dep_type.as_str() {
             "blocks" => "-->|blocks|",
             "follows" => "-.->|follows|",
             "contains" => "==>|contains|",
             _ => "-->",
         };
-        
+
         diagram.push_str(&format!("    {} {} {}\n", from_safe, edge_style, to_safe));
     }
 
@@ -2048,14 +2239,12 @@ async fn api_graph_mermaid(
                 error: None,
             })
         }
-        Err(e) => {
-            Json(MermaidResponse {
-                diagram: String::new(),
-                node_count: 0,
-                edge_count: 0,
-                error: Some(e.to_string()),
-            })
-        }
+        Err(e) => Json(MermaidResponse {
+            diagram: String::new(),
+            node_count: 0,
+            edge_count: 0,
+            error: Some(e.to_string()),
+        }),
     }
 }
 
@@ -2102,7 +2291,6 @@ async fn api_graph_stats(State(state): State<DashboardServer>) -> Html<String> {
     ))
 }
 
-
 /// SQL query page - serves the SQL query interface for power users.
 async fn sql_query_page() -> Html<&'static str> {
     Html(templates::SQL_QUERY_TEMPLATE)
@@ -2121,29 +2309,30 @@ async fn api_sql_execute(
     Form(form): Form<SqlQueryForm>,
 ) -> Html<String> {
     use std::time::Duration;
-    
+
     // Validate the query is read-only
     let sql = form.sql.trim();
     if sql.is_empty() {
         return Html(r#"<div class="error-message">Please enter a SQL query.</div>"#.to_string());
     }
-    
+
     // Normalize and validate
     let normalized = sql.to_uppercase();
     let first_word = normalized.split_whitespace().next().unwrap_or("");
-    
+
     if first_word != "SELECT" && first_word != "WITH" {
         return Html(format!(
             r#"<div class="error-message">Only SELECT queries are allowed. Got: {}</div>"#,
             html_escape(first_word)
         ));
     }
-    
+
     // Check for forbidden statements
-    let forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", 
-                     "REPLACE", "UPSERT", "MERGE", "GRANT", "REVOKE", "ATTACH", "DETACH",
-                     "VACUUM", "REINDEX", "ANALYZE", "PRAGMA"];
-    
+    let forbidden = [
+        "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "REPLACE", "UPSERT",
+        "MERGE", "GRANT", "REVOKE", "ATTACH", "DETACH", "VACUUM", "REINDEX", "ANALYZE", "PRAGMA",
+    ];
+
     for keyword in &forbidden {
         let pattern = format!(r"\b{}\s+", keyword);
         if let Ok(re) = regex_lite::Regex::new(&pattern) {
@@ -2155,42 +2344,43 @@ async fn api_sql_execute(
             }
         }
     }
-    
+
     // Check for multiple statements
     if sql.matches(';').count() > 1 {
-        return Html(r#"<div class="error-message">Multiple SQL statements are not allowed.</div>"#.to_string());
+        return Html(
+            r#"<div class="error-message">Multiple SQL statements are not allowed.</div>"#
+                .to_string(),
+        );
     }
-    
+
     let limit = form.limit.map(|l| l.clamp(1, 1000)).unwrap_or(100);
-    
+
     // Execute the query
     let result = state.db().with_conn(|conn| {
         conn.busy_timeout(Duration::from_secs(5))?;
-        
+
         let mut stmt = conn.prepare(sql)?;
         let column_count = stmt.column_count();
         let columns: Vec<String> = (0..column_count)
             .map(|i| stmt.column_name(i).unwrap_or("?").to_string())
             .collect();
-        
+
         let mut rows: Vec<Vec<String>> = Vec::new();
         let mut row_iter = stmt.query([])?;
         let mut count = 0;
-        
+
         while let Some(row) = row_iter.next()? {
             if count >= limit {
                 break;
             }
-            
+
             let mut row_values: Vec<String> = Vec::with_capacity(column_count);
             for i in 0..column_count {
                 let value = match row.get_ref(i)? {
                     rusqlite::types::ValueRef::Null => "NULL".to_string(),
                     rusqlite::types::ValueRef::Integer(i) => i.to_string(),
                     rusqlite::types::ValueRef::Real(f) => f.to_string(),
-                    rusqlite::types::ValueRef::Text(s) => {
-                        String::from_utf8_lossy(s).to_string()
-                    }
+                    rusqlite::types::ValueRef::Text(s) => String::from_utf8_lossy(s).to_string(),
                     rusqlite::types::ValueRef::Blob(b) => {
                         format!("[BLOB {} bytes]", b.len())
                     }
@@ -2200,16 +2390,16 @@ async fn api_sql_execute(
             rows.push(row_values);
             count += 1;
         }
-        
+
         let has_more = row_iter.next()?.is_some();
-        
+
         Ok((columns, rows, count, has_more))
     });
-    
+
     match result {
         Ok((columns, rows, row_count, truncated)) => {
             let mut html = String::new();
-            
+
             // Result stats
             html.push_str(r#"<div class="result-stats">"#);
             html.push_str(&format!(
@@ -2229,17 +2419,17 @@ async fn api_sql_execute(
                 ));
             }
             html.push_str("</div>");
-            
+
             // Results table
             html.push_str(r#"<div class="results-container"><table>"#);
-            
+
             // Header
             html.push_str("<thead><tr>");
             for col in &columns {
                 html.push_str(&format!("<th>{}</th>", html_escape(col)));
             }
             html.push_str("</tr></thead>");
-            
+
             // Body
             html.push_str("<tbody>");
             if rows.is_empty() {
@@ -2261,26 +2451,24 @@ async fn api_sql_execute(
                 }
             }
             html.push_str("</tbody></table></div>");
-            
+
             Html(html)
         }
-        Err(e) => {
-            Html(format!(
-                r#"<div class="error-message">Query Error: {}</div>"#,
-                html_escape(&e.to_string())
-            ))
-        }
+        Err(e) => Html(format!(
+            r#"<div class="error-message">Query Error: {}</div>"#,
+            html_escape(&e.to_string())
+        )),
     }
 }
 
 /// SQL schema API endpoint - returns HTML fragment with schema reference.
 async fn api_sql_schema(State(state): State<DashboardServer>) -> Html<String> {
     let schema_result = state.db().get_schema(false);
-    
+
     match schema_result {
         Ok(schema) => {
             let mut html = String::new();
-            
+
             for table in &schema.tables {
                 // Table name header
                 html.push_str(&format!(
@@ -2291,10 +2479,14 @@ async fn api_sql_schema(State(state): State<DashboardServer>) -> Html<String> {
                         <div class="schema-columns">"#,
                     html_escape(&table.name)
                 ));
-                
+
                 // Columns
                 for col in &table.columns {
-                    let pk_indicator = if col.primary_key { r#"<span class="schema-column-pk">PK</span>"# } else { "" };
+                    let pk_indicator = if col.primary_key {
+                        r#"<span class="schema-column-pk">PK</span>"#
+                    } else {
+                        ""
+                    };
                     let nullable = if col.nullable { "" } else { " NOT NULL" };
                     html.push_str(&format!(
                         r#"<div class="schema-column">
@@ -2308,18 +2500,16 @@ async fn api_sql_schema(State(state): State<DashboardServer>) -> Html<String> {
                         pk_indicator
                     ));
                 }
-                
+
                 html.push_str("</div></div>");
             }
-            
+
             Html(html)
         }
-        Err(e) => {
-            Html(format!(
-                r#"<div class="error-message">Failed to load schema: {}</div>"#,
-                html_escape(&e.to_string())
-            ))
-        }
+        Err(e) => Html(format!(
+            r#"<div class="error-message">Failed to load schema: {}</div>"#,
+            html_escape(&e.to_string())
+        )),
     }
 }
 
@@ -2336,7 +2526,12 @@ fn build_router(state: DashboardServer) -> Router {
         .route("/", get(root))
         .route("/workers", get(workers_page))
         .route("/tasks", get(tasks_page))
-        .route("/tasks/{task_id}", get(task_detail_page).post(task_update_handler).delete(task_delete_handler))
+        .route(
+            "/tasks/{task_id}",
+            get(task_detail_page)
+                .post(task_update_handler)
+                .delete(task_delete_handler),
+        )
         .route("/activity", get(activity_page))
         .route("/file-marks", get(file_marks_page))
         .route("/metrics", get(metrics_page))
@@ -2353,18 +2548,27 @@ fn build_router(state: DashboardServer) -> Router {
         .route("/api/workers/active", get(api_active_workers))
         .route("/api/workers/list", get(api_workers_list))
         .route("/api/workers/{worker_id}/details", get(api_worker_details))
-        .route("/api/workers/{worker_id}/disconnect", post(api_worker_disconnect))
+        .route(
+            "/api/workers/{worker_id}/disconnect",
+            post(api_worker_disconnect),
+        )
         .route("/api/workers/cleanup", post(api_workers_cleanup))
         .route("/api/activity/stats", get(api_activity_stats))
         .route("/api/activity/list", get(api_activity_list))
         .route("/api/file-marks/stats", get(api_file_marks_stats))
         .route("/api/file-marks/list", get(api_file_marks_list))
-        .route("/api/file-marks/force-unmark", post(api_file_marks_force_unmark))
+        .route(
+            "/api/file-marks/force-unmark",
+            post(api_file_marks_force_unmark),
+        )
         // Metrics routes
         .route("/api/metrics/overview", get(api_metrics_overview))
         .route("/api/metrics/distribution", get(api_metrics_distribution))
         .route("/api/metrics/velocity", get(api_metrics_velocity))
-        .route("/api/metrics/time-in-status", get(api_metrics_time_in_status))
+        .route(
+            "/api/metrics/time-in-status",
+            get(api_metrics_time_in_status),
+        )
         .route("/api/metrics/cost-by-agent", get(api_metrics_cost_by_agent))
         .route("/api/metrics/custom", get(api_metrics_custom))
         // Graph routes
@@ -2455,12 +2659,12 @@ pub async fn start_server(
 /// Uses system time nanoseconds for simple jitter without requiring rand crate.
 fn compute_jittered_delay(base_ms: u64, jitter_ms: u64) -> Duration {
     use std::time::SystemTime;
-    
+
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    
+
     // Map nanos to range [-jitter_ms, +jitter_ms]
     let jitter_range = (jitter_ms * 2) as i64;
     let jitter = if jitter_range > 0 {
@@ -2468,7 +2672,7 @@ fn compute_jittered_delay(base_ms: u64, jitter_ms: u64) -> Duration {
     } else {
         0
     };
-    
+
     let delay_ms = (base_ms as i64 + jitter).max(1000) as u64; // At least 1 second
     Duration::from_millis(delay_ms)
 }
@@ -2522,12 +2726,14 @@ pub fn start_server_with_retry(
                 Arc::clone(&db_clone),
                 port,
                 Arc::clone(&states_config_clone),
-            ).await {
+            )
+            .await
+            {
                 Ok((shutdown_tx, bound_addr)) => {
                     info!("Dashboard available at http://{}", bound_addr);
                     let _ = status_tx.send(DashboardStatus::Running);
                     server_shutdown_tx = Some(shutdown_tx);
-                    
+
                     // Wait for shutdown signal
                     let _ = handle_shutdown_rx.await;
                     info!("Dashboard handle shutdown received");
@@ -2551,8 +2757,8 @@ pub fn start_server_with_retry(
                     tokio::time::sleep(delay).await;
 
                     // Exponential backoff, capped at max
-                    current_delay_ms = ((current_delay_ms as f64 * retry_multiplier) as u64)
-                        .min(retry_max_ms);
+                    current_delay_ms =
+                        ((current_delay_ms as f64 * retry_multiplier) as u64).min(retry_max_ms);
                 }
             }
         }

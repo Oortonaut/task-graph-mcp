@@ -3,7 +3,7 @@
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{
     AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, StatesConfig,
-    UnknownKeyBehavior,
+    TagsConfig, UnknownKeyBehavior,
 };
 use crate::db::Database;
 use crate::error::ToolError;
@@ -343,6 +343,7 @@ pub fn create(
     db: &Database,
     states_config: &StatesConfig,
     phases_config: &PhasesConfig,
+    tags_config: &TagsConfig,
     args: Value,
 ) -> Result<Value> {
     let id = get_string(&args, "id");
@@ -365,6 +366,18 @@ pub fn create(
     } else {
         None
     };
+
+    // Check tag validity for all tag types
+    let mut tag_warnings = Vec::new();
+    if let Some(ref t) = tags {
+        tag_warnings.extend(tags_config.validate_tags(t)?);
+    }
+    if let Some(ref t) = needed_tags {
+        tag_warnings.extend(tags_config.validate_tags(t)?);
+    }
+    if let Some(ref t) = wanted_tags {
+        tag_warnings.extend(tags_config.validate_tags(t)?);
+    }
 
     let task = db.create_task(
         id,
@@ -393,6 +406,10 @@ pub fn create(
         response["phase_warning"] = json!(warning);
     }
 
+    if !tag_warnings.is_empty() {
+        response["tag_warnings"] = json!(tag_warnings);
+    }
+
     Ok(response)
 }
 
@@ -400,6 +417,7 @@ pub fn create_tree(
     db: &Database,
     states_config: &StatesConfig,
     phases_config: &PhasesConfig,
+    tags_config: &TagsConfig,
     args: Value,
 ) -> Result<Value> {
     let tree: TaskTreeInput = serde_json::from_value(
@@ -411,8 +429,15 @@ pub fn create_tree(
     let child_type = get_string(&args, "child_type");
     let sibling_type = get_string(&args, "sibling_type");
 
-    let (root_id, all_ids, phase_warnings) =
-        db.create_task_tree(tree, parent_id, child_type, sibling_type, states_config, phases_config)?;
+    let (root_id, all_ids, phase_warnings, tag_warnings) = db.create_task_tree(
+        tree,
+        parent_id,
+        child_type,
+        sibling_type,
+        states_config,
+        phases_config,
+        tags_config,
+    )?;
 
     // Fetch the root task to return full details
     let root_task = db.get_task(&root_id)?.ok_or_else(|| {
@@ -438,6 +463,10 @@ pub fn create_tree(
 
     if !phase_warnings.is_empty() {
         response["phase_warnings"] = json!(phase_warnings);
+    }
+
+    if !tag_warnings.is_empty() {
+        response["tag_warnings"] = json!(tag_warnings);
     }
 
     Ok(response)
@@ -668,6 +697,7 @@ pub fn update(
     phases_config: &PhasesConfig,
     deps_config: &DependenciesConfig,
     auto_advance: &AutoAdvanceConfig,
+    tags_config: &TagsConfig,
     workflows: &crate::config::workflows::WorkflowsConfig,
     args: Value,
 ) -> Result<Value> {
@@ -753,17 +783,21 @@ pub fn update(
                         continue;
                     }
                     UnknownKeyBehavior::Warn => {
-                        attachment_warnings.push(format!("Unknown attachment type '{}'", attachment_type));
+                        attachment_warnings
+                            .push(format!("Unknown attachment type '{}'", attachment_type));
                     }
                     UnknownKeyBehavior::Allow => {}
                 }
             }
 
             // Use config defaults for mime/mode, but allow explicit overrides
-            let mime_type = mime_override
-                .map(String::from)
-                .unwrap_or_else(|| attachments_config.get_mime_default(attachment_type).to_string());
-            let mode = mode_override.unwrap_or_else(|| attachments_config.get_mode_default(attachment_type));
+            let mime_type = mime_override.map(String::from).unwrap_or_else(|| {
+                attachments_config
+                    .get_mime_default(attachment_type)
+                    .to_string()
+            });
+            let mode = mode_override
+                .unwrap_or_else(|| attachments_config.get_mode_default(attachment_type));
 
             // Validate mode
             if mode != "append" && mode != "replace" {
@@ -797,7 +831,10 @@ pub fn update(
                     }));
                 }
                 Err(e) => {
-                    attachment_warnings.push(format!("Failed to add attachment type '{}': {}", attachment_type, e));
+                    attachment_warnings.push(format!(
+                        "Failed to add attachment type '{}': {}",
+                        attachment_type, e
+                    ));
                 }
             }
         }
@@ -809,6 +846,18 @@ pub fn update(
     } else {
         None
     };
+
+    // Check tag validity for all tag types
+    let mut tag_warnings = Vec::new();
+    if let Some(ref t) = tags {
+        tag_warnings.extend(tags_config.validate_tags(t)?);
+    }
+    if let Some(ref t) = needed_tags {
+        tag_warnings.extend(tags_config.validate_tags(t)?);
+    }
+    if let Some(ref t) = wanted_tags {
+        tag_warnings.extend(tags_config.validate_tags(t)?);
+    }
 
     // Perform the task update
     let (task, unblocked, auto_advanced) = db.update_task_unified(
@@ -836,11 +885,7 @@ pub fn update(
     // We update the worker's last seen state and get any matching prompts
     let transition_prompt_list: Vec<String> = {
         // Update worker state and get old state for prompt calculation
-        match db.update_worker_state(
-            &worker_id,
-            Some(&task.status),
-            task.phase.as_deref(),
-        ) {
+        match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
             Ok((old_status, old_phase)) => {
                 // Create context for template expansion
                 let ctx = PromptContext::new(
@@ -888,6 +933,10 @@ pub fn update(
         // Include phase warning if any
         if let Some(ref warning) = phase_warning {
             map.insert("phase_warning".to_string(), json!(warning));
+        }
+        // Include tag warnings if any
+        if !tag_warnings.is_empty() {
+            map.insert("tag_warnings".to_string(), json!(tag_warnings));
         }
         // Include transition prompts if any
         if !transition_prompt_list.is_empty() {

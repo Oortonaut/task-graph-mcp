@@ -123,8 +123,8 @@ impl Database {
 
         // For vertical (contains) dependencies, check single-parent constraint
         let def = deps_config
-        .get_definition(dep_type)
-        .ok_or_else(|| anyhow!("Unknown dependency type: {}", dep_type))?;
+            .get_definition(dep_type)
+            .ok_or_else(|| anyhow!("Unknown dependency type: {}", dep_type))?;
         if def.display == DependencyDisplay::Vertical
             && let Some(existing_parent) = self.get_parent(to_task_id)?
             && existing_parent != from_task_id
@@ -161,8 +161,8 @@ impl Database {
         deps_config: &DependenciesConfig,
     ) -> Result<bool> {
         let def = deps_config
-        .get_definition(dep_type)
-        .ok_or_else(|| anyhow!("Unknown dependency type: {}", dep_type))?;
+            .get_definition(dep_type)
+            .ok_or_else(|| anyhow!("Unknown dependency type: {}", dep_type))?;
 
         self.with_conn(|conn| {
             // A cycle would occur if to_task can already reach from_task
@@ -1111,8 +1111,8 @@ impl Database {
         }
 
         let def = deps_config
-        .get_definition(dep_type)
-        .ok_or_else(|| anyhow!("Unknown dependency type: {}", dep_type))?;
+            .get_definition(dep_type)
+            .ok_or_else(|| anyhow!("Unknown dependency type: {}", dep_type))?;
         let is_vertical = def.display == DependencyDisplay::Vertical;
 
         self.with_conn_mut(|conn| {

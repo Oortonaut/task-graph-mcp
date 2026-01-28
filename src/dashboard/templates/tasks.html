@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tasks - Task Graph</title>
+    <!-- htmx for dynamic updates -->
+    <script src="https://unpkg.com/htmx.org@2.0.0"></script>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eaeaea;
+            --text-secondary: #a0a0a0;
+            --accent: #e94560;
+            --accent-hover: #ff6b6b;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --info: #60a5fa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Navigation */
+        nav {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--bg-tertiary);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        nav .logo {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        nav .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s ease;
+        }
+
+        nav a:hover,
+        nav a.active {
+            color: var(--text-primary);
+            background-color: var(--bg-tertiary);
+        }
+
+        nav a.active {
+            border-bottom: 2px solid var(--accent);
+        }
+
+        /* Main content */
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Filters */
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            align-items: flex-end;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .filter-group label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--bg-tertiary);
+            color: var(--text-primary);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            min-width: 150px;
+        }
+
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .filter-group input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .btn {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background-color 0.2s;
+        }
+
+        .btn:hover {
+            background-color: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--text-secondary);
+        }
+
+        /* Status badges */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .badge-success { background-color: var(--success); color: #000; }
+        .badge-warning { background-color: var(--warning); color: #000; }
+        .badge-info { background-color: var(--info); color: #000; }
+        .badge-pending { background-color: var(--text-secondary); color: #000; }
+        .badge-error { background-color: var(--accent); color: #fff; }
+        .badge-assigned { background-color: #a78bfa; color: #000; }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        th:hover {
+            color: var(--text-primary);
+        }
+
+        th.sortable::after {
+            content: '';
+            display: inline-block;
+            margin-left: 0.5rem;
+            opacity: 0.3;
+        }
+
+        th.sort-asc::after {
+            content: '\2191';
+            opacity: 1;
+        }
+
+        th.sort-desc::after {
+            content: '\2193';
+            opacity: 1;
+        }
+
+        tr:hover td {
+            background-color: var(--bg-tertiary);
+        }
+
+        td a {
+            color: var(--info);
+            text-decoration: none;
+        }
+
+        td a:hover {
+            text-decoration: underline;
+        }
+
+        .task-id {
+            font-family: monospace;
+            font-size: 0.875rem;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .task-title {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .task-tags {
+            display: flex;
+            gap: 0.25rem;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            background-color: var(--bg-tertiary);
+            color: var(--text-secondary);
+            padding: 0.125rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+        }
+
+        .priority-high {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .priority-normal {
+            color: var(--text-primary);
+        }
+
+        .priority-low {
+            color: var(--text-secondary);
+        }
+
+        /* Bulk Operations */
+        .bulk-toolbar {
+            display: none;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--accent);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .bulk-toolbar.visible {
+            display: flex;
+        }
+
+        .bulk-toolbar .selection-count {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .bulk-toolbar .bulk-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .bulk-toolbar select {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            color: var(--text-primary);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+        }
+
+        .bulk-toolbar select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .btn-danger {
+            background-color: var(--accent);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: var(--accent-hover);
+        }
+
+        .btn-warning {
+            background-color: var(--warning);
+            color: #000;
+        }
+
+        .btn-warning:hover {
+            background-color: #fcd34d;
+        }
+
+        /* Checkbox styling */
+        .task-checkbox {
+            width: 1.1rem;
+            height: 1.1rem;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        th.checkbox-col,
+        td.checkbox-col {
+            width: 40px;
+            text-align: center;
+        }
+
+        tr.selected td {
+            background-color: rgba(233, 69, 96, 0.1);
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--bg-tertiary);
+        }
+
+        .pagination-info {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .pagination-controls button {
+            background-color: var(--bg-tertiary);
+            border: none;
+            color: var(--text-primary);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+
+        .pagination-controls button:hover:not(:disabled) {
+            background-color: var(--accent);
+        }
+
+        .pagination-controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination-controls .page-number {
+            background-color: var(--accent);
+            min-width: 2rem;
+            text-align: center;
+        }
+
+        /* Loading indicator */
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 200ms ease-in;
+        }
+
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator {
+            opacity: 1;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid var(--text-secondary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        /* Auto-refresh indicator */
+        .refresh-indicator {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .refresh-indicator .dot {
+            display: inline-block;
+            width: 0.5rem;
+            height: 0.5rem;
+            background-color: var(--success);
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Header with actions */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .page-header h1 {
+            margin-bottom: 0;
+        }
+
+        /* Search result highlighting */
+        .search-result mark {
+            background-color: var(--warning);
+            color: #000;
+            padding: 0 0.125rem;
+            border-radius: 0.125rem;
+        }
+
+        .search-score {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">Task Graph</a>
+        <div class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/workers">Workers</a>
+            <a href="/tasks" class="active">Tasks</a>
+            <a href="/activity">Activity</a>
+        </div>
+    </nav>
+
+    <main>
+        <div class="page-header">
+            <h1>Tasks</h1>
+            <span class="htmx-indicator"><span class="spinner"></span> Loading...</span>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="card" style="margin-bottom: 1rem;">
+            <form id="search-form"
+                  hx-get="/api/tasks/search"
+                  hx-target="#task-list"
+                  hx-trigger="submit"
+                  hx-indicator=".htmx-indicator">
+                <div class="filters">
+                    <div class="filter-group" style="flex: 1;">
+                        <label for="search-query">Full-Text Search (FTS5)</label>
+                        <input type="text"
+                               name="q"
+                               id="search-query"
+                               placeholder='words, "exact phrase", prefix*, title:word, AND/OR/NOT'
+                               style="width: 100%;">
+                    </div>
+                    <div class="filter-group">
+                        <label for="search-status">Status Filter</label>
+                        <select name="status" id="search-status">
+                            <option value="">All Statuses</option>
+                            <option value="pending">Pending</option>
+                            <option value="assigned">Assigned</option>
+                            <option value="working">In Progress</option>
+                            <option value="completed">Completed</option>
+                            <option value="failed">Failed</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>&nbsp;</label>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button type="submit" class="btn">Search</button>
+                            <button type="button" class="btn btn-secondary" onclick="clearSearch()">Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </form>
+            <div style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-secondary);">
+                Supports FTS5 syntax: simple words, "exact phrases", prefix*, title:word, description:word, AND/OR/NOT
+            </div>
+        </div>
+
+        <!-- Filter Controls -->
+        <form id="task-filters"
+              hx-get="/api/tasks/list"
+              hx-target="#task-list"
+              hx-trigger="change from:select, change from:input delay:300ms, submit"
+              hx-indicator=".htmx-indicator">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="status">Status</label>
+                    <select name="status" id="status">
+                        <option value="">All Statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="assigned">Assigned</option>
+                        <option value="working">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="failed">Failed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="phase">Phase</label>
+                    <select name="phase" id="phase">
+                        <option value="">All Phases</option>
+                        <!-- Populated dynamically via JavaScript -->
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="tags">Tags</label>
+                    <input type="text" name="tags" id="tags" placeholder="e.g. backend, api">
+                </div>
+
+                <div class="filter-group">
+                    <label for="parent">Parent Task</label>
+                    <input type="text" name="parent" id="parent" placeholder="Task ID">
+                </div>
+
+                <div class="filter-group">
+                    <label for="owner">Owner</label>
+                    <input type="text" name="owner" id="owner" placeholder="Worker ID">
+                </div>
+
+                <div class="filter-group">
+                    <label for="sort">Sort By</label>
+                    <select name="sort" id="sort">
+                        <option value="priority_desc">Priority (High to Low)</option>
+                        <option value="priority_asc">Priority (Low to High)</option>
+                        <option value="created_desc">Created (Newest)</option>
+                        <option value="created_asc">Created (Oldest)</option>
+                        <option value="updated_desc">Updated (Newest)</option>
+                        <option value="updated_asc">Updated (Oldest)</option>
+                    </select>
+                </div>
+
+                <div class="filter-group" style="align-self: center;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" name="show_untimed" id="show_untimed" value="true"
+                               style="width: 1rem; height: 1rem; accent-color: var(--accent);">
+                        <span>Show untimed tasks</span>
+                    </label>
+                    <small style="color: var(--text-secondary); font-size: 0.7rem;">
+                        (pending, completed, etc.)
+                    </small>
+                </div>
+
+                <button type="button" class="btn btn-secondary" onclick="clearFilters()">Clear</button>
+            </div>
+
+            <!-- Hidden inputs for pagination -->
+            <input type="hidden" name="page" id="page" value="1">
+            <input type="hidden" name="limit" id="limit" value="25">
+        </form>
+
+        <!-- Bulk Action Toolbar -->
+        <div id="bulk-toolbar" class="bulk-toolbar">
+            <span class="selection-count"><span id="selected-count">0</span> tasks selected</span>
+            <div class="bulk-actions">
+                <select id="bulk-status" name="status">
+                    <option value="">Change Status To...</option>
+                    <option value="pending">Pending</option>
+                    <option value="assigned">Assigned</option>
+                    <option value="working">In Progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <button type="button" class="btn" onclick="bulkChangeStatus()">Apply Status</button>
+                <button type="button" class="btn btn-warning" onclick="bulkForceRelease()">Force Release Claims</button>
+                <button type="button" class="btn btn-danger" onclick="bulkDelete()">Delete Selected</button>
+            </div>
+            <button type="button" class="btn btn-secondary" onclick="clearSelection()">Clear Selection</button>
+        </div>
+
+        <!-- Task List -->
+        <div class="card">
+            <div id="task-list"
+                 hx-get="/api/tasks/list"
+                 hx-trigger="load"
+                 hx-indicator=".htmx-indicator">
+                <div class="empty-state">Loading tasks...</div>
+            </div>
+        </div>
+    </main>
+
+    <div class="refresh-indicator">
+        <span class="dot"></span>
+        Auto-refresh: 10s
+    </div>
+
+    <script>
+        // Clear search form and reload task list
+        function clearSearch() {
+            document.getElementById('search-query').value = '';
+            document.getElementById('search-status').value = '';
+            htmx.trigger('#task-filters', 'submit');
+        }
+
+        // Clear all filters
+        function clearFilters() {
+            document.getElementById('status').value = '';
+            document.getElementById('phase').value = '';
+            document.getElementById('tags').value = '';
+            document.getElementById('parent').value = '';
+            document.getElementById('owner').value = '';
+            document.getElementById('show_untimed').checked = false;
+            document.getElementById('sort').value = 'priority_desc';
+            document.getElementById('page').value = '1';
+            htmx.trigger('#task-filters', 'submit');
+        }
+
+        // Load available phases from API and populate dropdown
+        async function loadPhases() {
+            try {
+                const response = await fetch('/api/tasks/phases');
+                const phases = await response.json();
+                const select = document.getElementById('phase');
+                
+                // Keep the "All Phases" option, clear the rest
+                while (select.options.length > 1) {
+                    select.remove(1);
+                }
+                
+                // Add each phase as an option
+                phases.forEach(phase => {
+                    const option = document.createElement('option');
+                    option.value = phase;
+                    option.textContent = phase;
+                    select.appendChild(option);
+                });
+            } catch (err) {
+                console.error('Failed to load phases:', err);
+            }
+        }
+
+        // Load phases on page load
+        document.addEventListener('DOMContentLoaded', loadPhases);
+
+        // Pagination helper
+        function goToPage(page) {
+            document.getElementById('page').value = page;
+            htmx.trigger('#task-filters', 'submit');
+        }
+
+        // Sort by column (updates sort dropdown and triggers reload)
+        function sortBy(column, direction) {
+            document.getElementById('sort').value = column + '_' + direction;
+            htmx.trigger('#task-filters', 'submit');
+        }
+
+        // Auto-refresh every 10 seconds (only if not in search mode)
+        setInterval(function() {
+            if (!document.getElementById('search-query').value) {
+                htmx.trigger('#task-filters', 'submit');
+            }
+        }, 10000);
+
+        // Track selected task IDs
+        let selectedTasks = new Set();
+
+        // Update selection count and toolbar visibility
+        function updateBulkToolbar() {
+            const count = selectedTasks.size;
+            document.getElementById('selected-count').textContent = count;
+            const toolbar = document.getElementById('bulk-toolbar');
+            if (count > 0) {
+                toolbar.classList.add('visible');
+            } else {
+                toolbar.classList.remove('visible');
+            }
+        }
+
+        // Handle individual checkbox change
+        function onTaskCheckboxChange(checkbox, taskId) {
+            if (checkbox.checked) {
+                selectedTasks.add(taskId);
+                checkbox.closest('tr').classList.add('selected');
+            } else {
+                selectedTasks.delete(taskId);
+                checkbox.closest('tr').classList.remove('selected');
+            }
+            updateBulkToolbar();
+            updateSelectAllCheckbox();
+        }
+
+        // Handle select-all checkbox
+        function onSelectAllChange(checkbox) {
+            const taskCheckboxes = document.querySelectorAll('.task-checkbox');
+            taskCheckboxes.forEach(cb => {
+                cb.checked = checkbox.checked;
+                const taskId = cb.dataset.taskId;
+                if (checkbox.checked) {
+                    selectedTasks.add(taskId);
+                    cb.closest('tr').classList.add('selected');
+                } else {
+                    selectedTasks.delete(taskId);
+                    cb.closest('tr').classList.remove('selected');
+                }
+            });
+            updateBulkToolbar();
+        }
+
+        // Update select-all checkbox state based on individual selections
+        function updateSelectAllCheckbox() {
+            const selectAll = document.getElementById('select-all-checkbox');
+            if (!selectAll) return;
+            const taskCheckboxes = document.querySelectorAll('.task-checkbox');
+            const allChecked = taskCheckboxes.length > 0 &&
+                Array.from(taskCheckboxes).every(cb => cb.checked);
+            const someChecked = Array.from(taskCheckboxes).some(cb => cb.checked);
+            selectAll.checked = allChecked;
+            selectAll.indeterminate = someChecked && !allChecked;
+        }
+
+        // Clear all selections
+        function clearSelection() {
+            selectedTasks.clear();
+            document.querySelectorAll('.task-checkbox').forEach(cb => {
+                cb.checked = false;
+                cb.closest('tr').classList.remove('selected');
+            });
+            const selectAll = document.getElementById('select-all-checkbox');
+            if (selectAll) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            }
+            updateBulkToolbar();
+        }
+
+        // Perform bulk status change
+        function bulkChangeStatus() {
+            const status = document.getElementById('bulk-status').value;
+            if (!status) {
+                alert('Please select a status');
+                return;
+            }
+            if (selectedTasks.size === 0) {
+                alert('No tasks selected');
+                return;
+            }
+            if (!confirm('Change status of ' + selectedTasks.size + ' tasks to "' + status + '"?')) {
+                return;
+            }
+            executeBulkAction('change_status', { status: status });
+        }
+
+        // Perform bulk force release
+        function bulkForceRelease() {
+            if (selectedTasks.size === 0) {
+                alert('No tasks selected');
+                return;
+            }
+            if (!confirm('Force release claims on ' + selectedTasks.size + ' tasks? This will set their status to pending.')) {
+                return;
+            }
+            executeBulkAction('force_release', {});
+        }
+
+        // Perform bulk delete
+        function bulkDelete() {
+            if (selectedTasks.size === 0) {
+                alert('No tasks selected');
+                return;
+            }
+            if (!confirm('DELETE ' + selectedTasks.size + ' tasks? This action cannot be undone!')) {
+                return;
+            }
+            executeBulkAction('delete', {});
+        }
+
+        // Execute a bulk action via htmx
+        function executeBulkAction(action, params) {
+            const taskIds = Array.from(selectedTasks);
+            const body = JSON.stringify({
+                action: action,
+                task_ids: taskIds,
+                ...params
+            });
+
+            fetch('/api/tasks/bulk', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: body
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Successfully processed ' + data.affected + ' tasks');
+                    clearSelection();
+                    htmx.trigger('#task-filters', 'submit');
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(err => {
+                alert('Request failed: ' + err.message);
+            });
+        }
+
+        // Re-apply selection state after htmx content swap
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            if (event.detail.target.id === 'task-list') {
+                // Re-check previously selected checkboxes
+                document.querySelectorAll('.task-checkbox').forEach(cb => {
+                    if (selectedTasks.has(cb.dataset.taskId)) {
+                        cb.checked = true;
+                        cb.closest('tr').classList.add('selected');
+                    }
+                });
+                updateSelectAllCheckbox();
+            }
+        });
+    </script>
+</body>
+</html>

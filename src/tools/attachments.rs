@@ -191,7 +191,8 @@ pub fn attach(
         .into());
     }
 
-    let attachment_type = get_string(&args, "type").ok_or_else(|| ToolError::missing_field("type"))?;
+    let attachment_type =
+        get_string(&args, "type").ok_or_else(|| ToolError::missing_field("type"))?;
     let name = get_string(&args, "name").unwrap_or_default();
     let content = get_string(&args, "content");
     let file_path = get_string(&args, "file");
@@ -207,7 +208,9 @@ pub fn attach(
                     format!("Unknown attachment type '{}'. Configure it in attachments.definitions or set unknown_key to 'allow' or 'warn'.", attachment_type)
                 ).into());
             }
-            UnknownKeyBehavior::Warn => Some(format!("Unknown attachment type '{}'", attachment_type)),
+            UnknownKeyBehavior::Warn => {
+                Some(format!("Unknown attachment type '{}'", attachment_type))
+            }
             UnknownKeyBehavior::Allow => None,
         }
     } else {
@@ -215,10 +218,16 @@ pub fn attach(
     };
 
     // Use config defaults for mime/mode, but allow explicit overrides from args
-    let mime_type = get_string(&args, "mime")
-        .unwrap_or_else(|| attachments_config.get_mime_default(&attachment_type).to_string());
-    let mode = get_string(&args, "mode")
-        .unwrap_or_else(|| attachments_config.get_mode_default(&attachment_type).to_string());
+    let mime_type = get_string(&args, "mime").unwrap_or_else(|| {
+        attachments_config
+            .get_mime_default(&attachment_type)
+            .to_string()
+    });
+    let mode = get_string(&args, "mode").unwrap_or_else(|| {
+        attachments_config
+            .get_mode_default(&attachment_type)
+            .to_string()
+    });
 
     // Validate mode
     if mode != "append" && mode != "replace" {
@@ -380,11 +389,13 @@ pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
     let _agent_id = get_string(&args, "agent");
 
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
-    let attachment_type = get_string(&args, "type").ok_or_else(|| ToolError::missing_field("type"))?;
+    let attachment_type =
+        get_string(&args, "type").ok_or_else(|| ToolError::missing_field("type"))?;
     let delete_files = get_bool(&args, "delete_files").unwrap_or(false);
 
     // Delete from database (returns count and file_paths)
-    let (deleted_count, file_paths) = db.delete_attachments_by_type_ex(&task_id, &attachment_type)?;
+    let (deleted_count, file_paths) =
+        db.delete_attachments_by_type_ex(&task_id, &attachment_type)?;
 
     // If delete_files is true, delete files that were in media dir
     let mut files_deleted = 0;

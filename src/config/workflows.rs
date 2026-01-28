@@ -521,7 +521,12 @@ mod tests {
         // Check settings
         assert_eq!(workflows.settings.initial_state, "pending");
         assert_eq!(workflows.settings.disconnect_state, "pending");
-        assert!(workflows.settings.blocking_states.contains(&"working".to_string()));
+        assert!(
+            workflows
+                .settings
+                .blocking_states
+                .contains(&"working".to_string())
+        );
 
         // Check states
         assert!(workflows.states.contains_key("pending"));

@@ -17,15 +17,24 @@ use rmcp::{
 };
 use serde_json::{Value, json};
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::Arc;
+use task_graph_mcp::cli::diff::DiffArgs;
+use task_graph_mcp::cli::diff::DiffFormat;
+use task_graph_mcp::cli::export::ExportArgs;
+use task_graph_mcp::cli::import::ImportArgs;
 use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode, migrate};
 use task_graph_mcp::config::{
     AttachmentsConfig, AutoAdvanceConfig, Config, ConfigLoader, DependenciesConfig, PhasesConfig,
-    Prompts, ServerPaths, StatesConfig, UiMode, workflows::WorkflowsConfig,
+    Prompts, ServerPaths, StatesConfig, TagsConfig, UiMode, workflows::WorkflowsConfig,
 };
 use task_graph_mcp::dashboard;
 use task_graph_mcp::db::Database;
+use task_graph_mcp::db::export::ExportOptions;
+use task_graph_mcp::db::import::ImportMode;
 use task_graph_mcp::error::ToolError;
+use task_graph_mcp::export::diff::{diff_snapshot_vs_database, diff_snapshots};
+use task_graph_mcp::export::{CURRENT_SCHEMA_VERSION, Snapshot};
 use task_graph_mcp::format::OutputFormat;
 use task_graph_mcp::resources::ResourceHandler;
 use task_graph_mcp::tools::ToolHandler;
@@ -53,6 +62,7 @@ impl TaskGraphServer {
         deps_config: Arc<DependenciesConfig>,
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
+        tags_config: Arc<TagsConfig>,
         workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
         path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
@@ -69,12 +79,14 @@ impl TaskGraphServer {
                 Arc::clone(&deps_config),
                 Arc::clone(&auto_advance),
                 Arc::clone(&attachments_config),
+                Arc::clone(&tags_config),
                 workflows,
                 default_format,
                 path_mapper,
             )),
             resource_handler: Arc::new(
-                ResourceHandler::new(db, states_config, phases_config, deps_config).with_skills_dir(skills_dir),
+                ResourceHandler::new(db, states_config, phases_config, deps_config, tags_config)
+                    .with_skills_dir(skills_dir),
             ),
             prompts,
         }
@@ -274,7 +286,9 @@ async fn main() -> Result<()> {
         );
     }
 
-    let config_path_used = loader.config_path().map(|p| p.to_string_lossy().to_string());
+    let config_path_used = loader
+        .config_path()
+        .map(|p| p.to_string_lossy().to_string());
 
     // Get mutable reference to apply CLI overrides
     let config = loader.config_mut();
@@ -300,17 +314,14 @@ async fn main() -> Result<()> {
 
     // Handle subcommands
     match cli.command {
-        Some(Command::Export(_args)) => {
-            // TODO: Implement export command
-            anyhow::bail!("Export command not yet implemented");
+        Some(Command::Export(args)) => {
+            run_export(&config, args)?;
         }
-        Some(Command::Import(_args)) => {
-            // TODO: Implement import command
-            anyhow::bail!("Import command not yet implemented");
+        Some(Command::Import(args)) => {
+            run_import(&config, args)?;
         }
-        Some(Command::Diff(_args)) => {
-            // TODO: Implement diff command
-            anyhow::bail!("Diff command not yet implemented");
+        Some(Command::Diff(args)) => {
+            run_diff(&config, args)?;
         }
         Some(Command::Migrate(args)) => {
             // Run migration command
@@ -332,7 +343,12 @@ async fn main() -> Result<()> {
 }
 
 /// Run the MCP server
-async fn run_server(config: Config, prompts: Prompts, workflows: WorkflowsConfig, config_path_used: Option<String>) -> Result<()> {
+async fn run_server(
+    config: Config,
+    prompts: Prompts,
+    workflows: WorkflowsConfig,
+    config_path_used: Option<String>,
+) -> Result<()> {
     // Ensure directories exist
     config.ensure_db_dir()?;
     config.ensure_media_dir()?;
@@ -382,6 +398,7 @@ async fn run_server(config: Config, prompts: Prompts, workflows: WorkflowsConfig
     let deps_config = Arc::new(config.dependencies.clone());
     let auto_advance = Arc::new(config.auto_advance.clone());
     let attachments_config = Arc::new(config.attachments.clone());
+    let tags_config = Arc::new(config.tags.clone());
 
     // Create path mapper from config
     let path_mapper = Arc::new(
@@ -400,6 +417,7 @@ async fn run_server(config: Config, prompts: Prompts, workflows: WorkflowsConfig
         deps_config,
         auto_advance,
         attachments_config,
+        tags_config,
         workflows,
         config.server.default_format,
         path_mapper,
@@ -422,6 +440,299 @@ async fn run_server(config: Config, prompts: Prompts, workflows: WorkflowsConfig
     let transport = stdio();
     let service = server.serve(transport).await?;
     service.waiting().await?;
+
+    Ok(())
+}
+
+/// Run the export command
+fn run_export(config: &Config, args: ExportArgs) -> Result<()> {
+    // Open database
+    let db = Database::open(&config.server.db_path)?;
+
+    // Build export options from CLI args
+    let options = ExportOptions {
+        exclude_deleted: args.exclude_deleted,
+        tables: args.tables_to_export(),
+    };
+
+    // Export tables
+    let export_tables = db.export_tables(&options)?;
+
+    // Build snapshot
+    let mut snapshot = Snapshot::new();
+
+    // Convert ExportTables to Snapshot tables format
+    if let Some(tasks) = export_tables.tasks {
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            tasks
+                .into_iter()
+                .map(|t| serde_json::to_value(t).unwrap())
+                .collect(),
+        );
+    }
+    if let Some(deps) = export_tables.dependencies {
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            deps.into_iter()
+                .map(|d| serde_json::to_value(d).unwrap())
+                .collect(),
+        );
+    }
+    if let Some(attachments) = export_tables.attachments {
+        snapshot.tables.insert(
+            "attachments".to_string(),
+            attachments
+                .into_iter()
+                .map(|a| serde_json::to_value(a).unwrap())
+                .collect(),
+        );
+    }
+    if let Some(tags) = export_tables.task_tags {
+        snapshot.tables.insert(
+            "task_tags".to_string(),
+            tags.into_iter()
+                .map(|t| serde_json::to_value(t).unwrap())
+                .collect(),
+        );
+    }
+    if let Some(tags) = export_tables.task_needed_tags {
+        snapshot.tables.insert(
+            "task_needed_tags".to_string(),
+            tags.into_iter()
+                .map(|t| serde_json::to_value(t).unwrap())
+                .collect(),
+        );
+    }
+    if let Some(tags) = export_tables.task_wanted_tags {
+        snapshot.tables.insert(
+            "task_wanted_tags".to_string(),
+            tags.into_iter()
+                .map(|t| serde_json::to_value(t).unwrap())
+                .collect(),
+        );
+    }
+    if let Some(sequence) = export_tables.task_sequence {
+        snapshot.tables.insert(
+            "task_sequence".to_string(),
+            sequence
+                .into_iter()
+                .map(|s| serde_json::to_value(s).unwrap())
+                .collect(),
+        );
+    }
+
+    // Serialize to JSON
+    let json_output = snapshot.to_json_pretty()?;
+    let json_bytes = json_output.as_bytes();
+
+    // Determine if we should compress
+    let should_compress = args.should_compress(Some(json_bytes.len() as u64));
+
+    // Write output
+    if let Some(ref path) = args.output {
+        if should_compress {
+            // Write gzipped
+            use flate2::Compression;
+            use flate2::write::GzEncoder;
+
+            let file = std::fs::File::create(path)?;
+            let mut encoder = GzEncoder::new(file, Compression::default());
+            encoder.write_all(json_bytes)?;
+            encoder.finish()?;
+            eprintln!("Exported to {} (gzipped)", path.display());
+        } else {
+            // Write plain JSON
+            std::fs::write(path, &json_output)?;
+            eprintln!("Exported to {}", path.display());
+        }
+    } else {
+        // Write to stdout
+        if should_compress {
+            use flate2::Compression;
+            use flate2::write::GzEncoder;
+
+            let stdout = std::io::stdout();
+            let mut encoder = GzEncoder::new(stdout.lock(), Compression::default());
+            encoder.write_all(json_bytes)?;
+            let _ = encoder.finish()?;
+        } else {
+            print!("{}", json_output);
+        }
+    }
+
+    Ok(())
+}
+
+/// Run the import command
+fn run_import(config: &Config, args: ImportArgs) -> Result<()> {
+    use task_graph_mcp::db::import::ImportOptions;
+
+    // Load snapshot from file
+    let snapshot = Snapshot::from_file(&args.file)?;
+
+    // Check schema compatibility
+    if !snapshot.is_schema_compatible() {
+        eprintln!(
+            "Warning: Snapshot schema version {} differs from current version {}",
+            snapshot.schema_version, CURRENT_SCHEMA_VERSION
+        );
+    }
+
+    // Open database
+    let db = Database::open(&config.server.db_path)?;
+
+    // Determine import options
+    let options = if args.merge {
+        ImportOptions::merge()
+    } else {
+        ImportOptions::replace()
+    };
+
+    if args.dry_run {
+        // Dry run - just validate and report
+        let result = db.preview_import(&snapshot, &options);
+        println!("Dry run results:");
+        println!("  Mode: {:?}", result.mode);
+        println!("  Database is empty: {}", result.database_is_empty);
+        println!("  Would succeed: {}", result.would_succeed);
+        if let Some(reason) = &result.failure_reason {
+            println!("  Failure reason: {}", reason);
+        }
+        println!("  Would insert:");
+        for (table, count) in &result.would_insert {
+            println!("    {}: {}", table, count);
+        }
+        if !result.would_skip.is_empty() {
+            println!("  Would skip:");
+            for (table, count) in &result.would_skip {
+                println!("    {}: {}", table, count);
+            }
+        }
+        if !result.would_delete.is_empty() {
+            println!("  Would delete:");
+            for (table, count) in &result.would_delete {
+                println!("    {}: {}", table, count);
+            }
+        }
+        if !result.warnings.is_empty() {
+            println!("  Warnings:");
+            for warning in &result.warnings {
+                println!("    - {}", warning);
+            }
+        }
+        return Ok(());
+    }
+
+    // Check if database has existing data and we're in replace mode without force
+    if options.mode == ImportMode::Replace && !args.force {
+        let preview = db.preview_import(&snapshot, &options);
+        if !preview.database_is_empty {
+            anyhow::bail!(
+                "Database contains existing data. Use --force to replace, or --merge to add."
+            );
+        }
+    }
+
+    // Perform import
+    let result = db.import_snapshot(&snapshot, &options)?;
+
+    println!("Import complete:");
+    println!("  Mode: {:?}", options.mode);
+    println!("  Rows imported:");
+    for (table, count) in &result.rows_imported {
+        println!("    {}: {}", table, count);
+    }
+    if !result.rows_skipped.is_empty() {
+        println!("  Rows skipped:");
+        for (table, count) in &result.rows_skipped {
+            println!("    {}: {}", table, count);
+        }
+    }
+    if !result.rows_deleted.is_empty() {
+        println!("  Rows deleted:");
+        for (table, count) in &result.rows_deleted {
+            println!("    {}: {}", table, count);
+        }
+    }
+    println!("  FTS indexes rebuilt: {}", result.fts_rebuilt);
+    if !result.warnings.is_empty() {
+        println!("  Warnings:");
+        for warning in &result.warnings {
+            println!("    - {}", warning);
+        }
+    }
+
+    Ok(())
+}
+
+/// Run the diff command
+fn run_diff(config: &Config, args: DiffArgs) -> Result<()> {
+    // Load source snapshot
+    let source = Snapshot::from_file(&args.source)?;
+
+    let diff = if let Some(ref target_path) = args.target {
+        // Two-file diff
+        let target = Snapshot::from_file(target_path)?;
+        let mut d = diff_snapshots(&source, &target);
+        d.source_label = args.source.display().to_string();
+        d.target_label = target_path.display().to_string();
+        d
+    } else {
+        // Diff against database
+        let db = Database::open(&config.server.db_path)?;
+        let mut d = diff_snapshot_vs_database(&source, &db)?;
+        d.source_label = args.source.display().to_string();
+        d.target_label = "database".to_string();
+        d
+    };
+
+    // Filter tables if requested
+    let filtered_tables: std::collections::BTreeMap<_, _> = diff
+        .tables
+        .into_iter()
+        .filter(|(name, _)| args.should_include_table(name))
+        .collect();
+
+    let diff = task_graph_mcp::export::diff::SnapshotDiff {
+        source_label: diff.source_label,
+        target_label: diff.target_label,
+        tables: filtered_tables,
+    };
+
+    // Output based on format
+    match args.format {
+        DiffFormat::Text => {
+            if args.summary_only {
+                println!("Diff: {} -> {}", diff.source_label, diff.target_label);
+                if diff.is_empty() {
+                    println!("No differences found.");
+                } else {
+                    for (table, added, removed, modified) in diff.summary() {
+                        println!("  {}: +{} -{} ~{}", table, added, removed, modified);
+                    }
+                    println!("Total: {} changes", diff.total_changes());
+                }
+            } else {
+                print!("{}", diff);
+            }
+        }
+        DiffFormat::Json => {
+            let json = serde_json::to_string_pretty(&diff)?;
+            println!("{}", json);
+        }
+        DiffFormat::Summary => {
+            println!("Diff: {} -> {}", diff.source_label, diff.target_label);
+            if diff.is_empty() {
+                println!("No differences found.");
+            } else {
+                for (table, added, removed, modified) in diff.summary() {
+                    println!("  {}: +{} -{} ~{}", table, added, removed, modified);
+                }
+                println!("Total: {} changes", diff.total_changes());
+            }
+        }
+    }
 
     Ok(())
 }

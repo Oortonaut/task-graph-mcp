@@ -6,4 +6,6 @@
 mod server;
 pub mod templates;
 
-pub use server::{DashboardServer, DashboardHandle, DashboardStatus, start_server, start_server_with_retry};
+pub use server::{
+    DashboardHandle, DashboardServer, DashboardStatus, start_server, start_server_with_retry,
+};

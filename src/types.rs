@@ -1,12 +1,50 @@
 //! Core types for the Task Graph MCP Server.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
+
+// Skip-if helpers (serde requires function paths, not closures)
+fn is_zero<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+fn is_default_priority(p: &Priority) -> bool {
+    *p == PRIORITY_DEFAULT
+}
+
+/// Metrics array - serializes with trailing zeros trimmed, deserializes back to [i64; 8]
+mod metrics_serde {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(metrics: &[i64; 8], s: S) -> Result<S::Ok, S::Error> {
+        // Find last non-zero index
+        let len = metrics
+            .iter()
+            .rposition(|&x| x != 0)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        s.collect_seq(&metrics[..len])
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[i64; 8], D::Error> {
+        let v: Vec<i64> = Vec::deserialize(d)?;
+        let mut arr = [0i64; 8];
+        for (i, val) in v.into_iter().take(8).enumerate() {
+            arr[i] = val;
+        }
+        Ok(arr)
+    }
+
+    pub fn is_empty(metrics: &[i64; 8]) -> bool {
+        metrics.iter().all(|&x| x == 0)
+    }
+}
 
 /// Worker (session-based) - represents a connected worker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Worker {
     pub id: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     pub max_claims: i32,
     pub registered_at: i64,
@@ -23,9 +61,12 @@ pub struct Worker {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerInfo {
     pub id: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     pub max_claims: i32,
+    #[serde(skip_serializing_if = "is_zero")]
     pub claim_count: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_thought: Option<String>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
@@ -59,33 +100,53 @@ pub fn clamp_priority(p: Priority) -> Priority {
 pub struct Task {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
+    #[serde(skip_serializing_if = "is_default_priority")]
     pub priority: Priority,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub claimed_at: Option<i64>,
 
     // Affinity (tag-based claiming requirements)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needed_tags: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub wanted_tags: Vec<String>,
 
     // Categorization/discovery tags
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 
     // Estimation & tracking
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub points: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time_estimate_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time_actual_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
 
     // Live status
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_thought: Option<String>,
 
     // Cost accounting
+    #[serde(skip_serializing_if = "is_zero")]
     pub cost_usd: f64,
     /// Fixed array of 8 integer metrics [metric_0..metric_7], aggregated on update
+    #[serde(
+        with = "metrics_serde",
+        skip_serializing_if = "metrics_serde::is_empty",
+        default
+    )]
     pub metrics: [i64; 8],
 
     pub created_at: i64,
@@ -162,8 +223,10 @@ pub struct Dependency {
 pub struct FileLock {
     pub file_path: String,
     pub worker_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub locked_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
 }
 
@@ -174,10 +237,13 @@ pub struct ClaimEvent {
     pub file_path: String,
     pub worker_id: String,
     pub event: ClaimEventType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub end_timestamp: Option<i64>,
     /// For release events: the ID of the corresponding claim event.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub claim_id: Option<i64>,
 }
 
@@ -186,6 +252,7 @@ pub struct ClaimEvent {
 pub struct TaskSequenceEvent {
     pub id: i64,
     pub task_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_id: Option<String>,
     /// Status value (None if phase-only change)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,8 +260,10 @@ pub struct TaskSequenceEvent {
     /// Phase value (None if status-only change)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub end_timestamp: Option<i64>,
 }
 
@@ -283,12 +352,22 @@ pub struct Stats {
     pub total_tasks: i64,
     /// Task counts by state (dynamic based on config).
     pub tasks_by_status: HashMap<String, i64>,
+    #[serde(skip_serializing_if = "is_zero")]
     pub total_points: i64,
+    #[serde(skip_serializing_if = "is_zero")]
     pub completed_points: i64,
+    #[serde(skip_serializing_if = "is_zero")]
     pub total_time_estimate_ms: i64,
+    #[serde(skip_serializing_if = "is_zero")]
     pub total_time_actual_ms: i64,
+    #[serde(skip_serializing_if = "is_zero")]
     pub total_cost_usd: f64,
     /// Aggregated metrics [metric_0..metric_7]
+    #[serde(
+        with = "metrics_serde",
+        skip_serializing_if = "metrics_serde::is_empty",
+        default
+    )]
     pub total_metrics: [i64; 8],
 }
 
@@ -298,9 +377,13 @@ pub struct TaskSummary {
     pub id: String,
     pub title: String,
     pub status: String,
+    #[serde(skip_serializing_if = "is_default_priority")]
     pub priority: Priority,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub points: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_thought: Option<String>,
 }
 
@@ -311,12 +394,16 @@ pub struct ScanResult {
     /// The task that was scanned from
     pub root: Task,
     /// Tasks that block this task (predecessors via blocks/follows)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub before: Vec<Task>,
     /// Tasks that this task blocks (successors via blocks/follows)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub after: Vec<Task>,
     /// Parent chain (ancestors via contains)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub above: Vec<Task>,
     /// Children tree (descendants via contains)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub below: Vec<Task>,
 }
 
@@ -344,6 +431,46 @@ pub struct CleanupSummary {
     pub final_status: String,
     /// IDs of evicted workers.
     pub evicted_worker_ids: Vec<String>,
+}
+
+/// A task tag row for export/import.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskTagRow {
+    pub task_id: String,
+    pub tag: String,
+}
+
+/// A task needed tag row for export/import.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskNeededTagRow {
+    pub task_id: String,
+    pub tag: String,
+}
+
+/// A task wanted tag row for export/import.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskWantedTagRow {
+    pub task_id: String,
+    pub tag: String,
+}
+
+/// Exported tables container for database export.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExportTables {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tasks: Option<Vec<Task>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<Vec<Dependency>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<Attachment>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_tags: Option<Vec<TaskTagRow>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_needed_tags: Option<Vec<TaskNeededTagRow>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_wanted_tags: Option<Vec<TaskWantedTagRow>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_sequence: Option<Vec<TaskSequenceEvent>>,
 }
 
 #[cfg(test)]

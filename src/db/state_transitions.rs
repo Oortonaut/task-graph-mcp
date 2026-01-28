@@ -1,10 +1,10 @@
 //! State and phase transition tracking for automatic time accumulation.
 
 use crate::config::StatesConfig;
-use crate::db::{now_ms, Database};
+use crate::db::{Database, now_ms};
 use crate::types::TaskSequenceEvent;
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 /// Record a state transition and accumulate time if transitioning from a timed state.
 ///

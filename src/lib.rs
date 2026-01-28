@@ -9,6 +9,7 @@ pub mod db;
 pub mod error;
 pub mod export;
 pub mod format;
+pub mod paths;
 pub mod prompts;
 pub mod resources;
 pub mod tools;

@@ -83,11 +83,7 @@ pub fn claim(
 
     // Get transition prompts for claiming (with template expansion)
     let transition_prompt_list: Vec<String> = {
-        match db.update_worker_state(
-            &worker_id,
-            Some(&task.status),
-            task.phase.as_deref(),
-        ) {
+        match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
             Ok((old_status, old_phase)) => {
                 // Create context for template expansion
                 let ctx = PromptContext::new(

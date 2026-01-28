@@ -14,14 +14,14 @@ pub struct ImportArgs {
     pub file: PathBuf,
 
     /// Validate import without modifying database
-    /// 
+    ///
     /// Parses the file, validates schema compatibility, and reports
     /// what would be imported without making any changes.
     #[arg(long)]
     pub dry_run: bool,
 
     /// Merge mode: add missing items, skip existing
-    /// 
+    ///
     /// By default, import replaces all project data. With --merge:
     /// - Tasks: skip if ID already exists, insert if new
     /// - Dependencies: skip if exact match exists
@@ -30,14 +30,14 @@ pub struct ImportArgs {
     pub merge: bool,
 
     /// Force overwrite of existing data without prompting
-    /// 
+    ///
     /// In replace mode (default): skip confirmation prompt
     /// In merge mode: overwrite conflicts instead of skipping
     #[arg(long)]
     pub force: bool,
 
     /// Enable strict validation mode
-    /// 
+    ///
     /// Rejects imports with:
     /// - Circular dependencies (normally just warned)
     /// - Missing referenced tasks

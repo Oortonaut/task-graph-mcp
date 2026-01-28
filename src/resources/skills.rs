@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 /// These are the SKILL.md files from the config/skills/ directory.
 pub mod embedded {
     pub const BASICS: &str = include_str!("../../config/skills/task-graph-basics/SKILL.md");
-    pub const COORDINATOR: &str = include_str!("../../config/skills/task-graph-coordinator/SKILL.md");
+    pub const COORDINATOR: &str =
+        include_str!("../../config/skills/task-graph-coordinator/SKILL.md");
     pub const WORKER: &str = include_str!("../../config/skills/task-graph-worker/SKILL.md");
     pub const REPORTING: &str = include_str!("../../config/skills/task-graph-reporting/SKILL.md");
     pub const MIGRATION: &str = include_str!("../../config/skills/task-graph-migration/SKILL.md");

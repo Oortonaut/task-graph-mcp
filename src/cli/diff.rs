@@ -91,7 +91,10 @@ mod tests {
     fn test_diff_format_parse() {
         assert_eq!("text".parse::<DiffFormat>().unwrap(), DiffFormat::Text);
         assert_eq!("json".parse::<DiffFormat>().unwrap(), DiffFormat::Json);
-        assert_eq!("summary".parse::<DiffFormat>().unwrap(), DiffFormat::Summary);
+        assert_eq!(
+            "summary".parse::<DiffFormat>().unwrap(),
+            DiffFormat::Summary
+        );
         assert_eq!("JSON".parse::<DiffFormat>().unwrap(), DiffFormat::Json);
         assert!("invalid".parse::<DiffFormat>().is_err());
     }

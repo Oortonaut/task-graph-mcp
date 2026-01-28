@@ -33,6 +33,7 @@ pub struct TaskListItem {
 #[derive(Debug, Clone, Default)]
 pub struct TaskListQuery {
     pub status: Option<String>,
+    pub phase: Option<String>,
     pub tags: Option<String>,
     pub parent: Option<String>,
     pub owner: Option<String>,
@@ -40,6 +41,10 @@ pub struct TaskListQuery {
     pub sort_order: String,
     pub page: i32,
     pub limit: i32,
+    /// Whether to filter to timed states only.
+    pub timed_filter: Option<bool>,
+    /// List of timed state names to filter on when timed_filter is Some(true).
+    pub timed_states: Vec<String>,
 }
 
 /// Result of task list query with pagination info.
@@ -141,23 +146,23 @@ impl Database {
                 [],
                 |row| row.get(0),
             )?;
-            
+
             let working: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM tasks WHERE status = 'working' AND deleted_at IS NULL",
                 [],
                 |row| row.get(0),
             )?;
-            
+
             let completed: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM tasks WHERE status = 'completed' AND deleted_at IS NULL",
                 [],
                 |row| row.get(0),
             )?;
-            
+
             Ok((total, working, completed))
         })
     }
-    
+
     /// Get count of active workers (those with recent heartbeats).
     pub fn get_active_worker_count(&self) -> Result<i64> {
         self.with_conn(|conn| {
@@ -171,48 +176,53 @@ impl Database {
             Ok(count)
         })
     }
-    
+
     /// Get recent tasks for dashboard display.
     pub fn get_recent_tasks(&self, limit: i32) -> Result<Vec<DashboardTask>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, title, status, priority 
-                 FROM tasks 
+                "SELECT id, title, status, priority
+                 FROM tasks
                  WHERE deleted_at IS NULL
-                 ORDER BY updated_at DESC 
-                 LIMIT ?1"
+                 ORDER BY updated_at DESC
+                 LIMIT ?1",
             )?;
-            
+
             let tasks = stmt
                 .query_map(params![limit], |row| {
                     let id: String = row.get(0)?;
                     let title: Option<String> = row.get(1)?;
                     let status: String = row.get(2)?;
                     let priority: i32 = row.get(3)?;
-                    Ok(DashboardTask { id, title, status, priority })
+                    Ok(DashboardTask {
+                        id,
+                        title,
+                        status,
+                        priority,
+                    })
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
-            
+
             Ok(tasks)
         })
     }
-    
+
     /// Get active workers for dashboard display.
     pub fn get_active_workers(&self) -> Result<Vec<DashboardWorker>> {
         self.with_conn(|conn| {
             // Consider workers active if heartbeat within last 5 minutes
             let cutoff = super::now_ms() - (5 * 60 * 1000);
-            
+
             let mut stmt = conn.prepare(
-                "SELECT w.id, 
+                "SELECT w.id,
                         (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1),
                         (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working')
                  FROM workers w
                  WHERE w.last_heartbeat > ?1
                  ORDER BY w.last_heartbeat DESC"
             )?;
-            
+
             let workers = stmt
                 .query_map(params![cutoff], |row| {
                     let id: String = row.get(0)?;
@@ -222,7 +232,7 @@ impl Database {
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
-            
+
             Ok(workers)
         })
     }
@@ -231,18 +241,18 @@ impl Database {
     pub fn query_tasks(&self, query: &TaskListQuery) -> Result<TaskListResult> {
         self.with_conn(|conn| {
             let mut sql = String::from(
-                "SELECT t.id, t.title, t.status, t.priority, t.worker_id, t.tags, t.created_at, t.updated_at 
+                "SELECT t.id, t.title, t.status, t.priority, t.worker_id, t.tags, t.created_at, t.updated_at
                  FROM tasks t
                  WHERE t.deleted_at IS NULL"
             );
-            
+
             let mut count_sql = String::from(
                 "SELECT COUNT(*) FROM tasks t WHERE t.deleted_at IS NULL"
             );
-            
+
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
             let mut param_idx = 1;
-            
+
             // Status filter
             if let Some(ref status) = query.status {
                 if !status.is_empty() {
@@ -253,7 +263,7 @@ impl Database {
                     param_idx += 1;
                 }
             }
-            
+
             // Owner filter
             if let Some(ref owner) = query.owner {
                 if !owner.is_empty() {
@@ -264,7 +274,7 @@ impl Database {
                     param_idx += 1;
                 }
             }
-            
+
             // Parent filter
             if let Some(ref parent) = query.parent {
                 if !parent.is_empty() {
@@ -278,7 +288,7 @@ impl Database {
                     param_idx += 1;
                 }
             }
-            
+
             // Tags filter (comma-separated, any match)
             if let Some(ref tags) = query.tags {
                 if !tags.is_empty() {
@@ -296,7 +306,7 @@ impl Database {
                     }
                 }
             }
-            
+
             // Sorting
             let order_clause = match (query.sort_by.as_str(), query.sort_order.as_str()) {
                 ("priority", "asc") => " ORDER BY t.priority ASC, t.created_at DESC",
@@ -308,19 +318,19 @@ impl Database {
                 _ => " ORDER BY t.priority DESC, t.created_at DESC",
             };
             sql.push_str(order_clause);
-            
+
             // Pagination
             let offset = (query.page - 1) * query.limit;
             sql.push_str(&format!(" LIMIT {} OFFSET {}", query.limit, offset));
-            
+
             // Get total count
             let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
             let total: i64 = conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))?;
-            
+
             // Get tasks
             let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
             let mut stmt = conn.prepare(&sql)?;
-            
+
             let tasks = stmt
                 .query_map(params_refs.as_slice(), |row| {
                     Ok(TaskListItem {
@@ -336,9 +346,9 @@ impl Database {
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
-            
+
             let total_pages = ((total as f64) / (query.limit as f64)).ceil() as i32;
-            
+
             Ok(TaskListResult {
                 tasks,
                 total,
@@ -348,32 +358,37 @@ impl Database {
             })
         })
     }
-    
+
     /// Get tasks claimed by a specific worker for the detail view.
     pub fn get_worker_claimed_tasks(&self, worker_id: &str) -> Result<Vec<WorkerClaimedTask>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, title, status, current_thought 
-                 FROM tasks 
+                "SELECT id, title, status, current_thought
+                 FROM tasks
                  WHERE worker_id = ?1 AND status = 'working' AND deleted_at IS NULL
-                 ORDER BY claimed_at DESC"
+                 ORDER BY claimed_at DESC",
             )?;
-            
+
             let tasks = stmt
                 .query_map(params![worker_id], |row| {
                     let id: String = row.get(0)?;
                     let title: Option<String> = row.get(1)?;
                     let status: String = row.get(2)?;
                     let current_thought: Option<String> = row.get(3)?;
-                    Ok(WorkerClaimedTask { id, title, status, current_thought })
+                    Ok(WorkerClaimedTask {
+                        id,
+                        title,
+                        status,
+                        current_thought,
+                    })
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
-            
+
             Ok(tasks)
         })
     }
-    
+
     /// Simple task update for dashboard (bypasses state machine validation).
     /// This is an admin-level operation that allows direct field updates.
     pub fn dashboard_update_task(
@@ -385,12 +400,12 @@ impl Database {
         tags: Option<Vec<String>>,
     ) -> Result<()> {
         let now = super::now_ms();
-        
+
         self.with_conn(|conn| {
             // Build dynamic update query
             let mut updates = vec!["updated_at = ?1".to_string()];
             let mut param_idx = 2;
-            
+
             if status.is_some() {
                 updates.push(format!("status = ?{}", param_idx));
                 param_idx += 1;
@@ -407,17 +422,17 @@ impl Database {
                 updates.push(format!("tags = ?{}", param_idx));
                 param_idx += 1;
             }
-            
+
             let sql = format!(
                 "UPDATE tasks SET {} WHERE id = ?{}",
                 updates.join(", "),
                 param_idx
             );
-            
+
             // Build params list dynamically
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
             params_vec.push(Box::new(now));
-            
+
             if let Some(s) = status {
                 params_vec.push(Box::new(s.to_string()));
             }
@@ -431,22 +446,23 @@ impl Database {
                 params_vec.push(Box::new(serde_json::to_string(&t)?));
             }
             params_vec.push(Box::new(task_id.to_string()));
-            
-            let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|b| b.as_ref()).collect();
             let rows_affected = conn.execute(&sql, params_refs.as_slice())?;
-            
+
             if rows_affected == 0 {
                 return Err(anyhow::anyhow!("Task not found"));
             }
-            
+
             Ok(())
         })
     }
-    
+
     /// Simple task deletion for dashboard (soft delete).
     pub fn dashboard_delete_task(&self, task_id: &str) -> Result<()> {
         let now = super::now_ms();
-        
+
         self.with_conn(|conn| {
             // Check for children
             let child_count: i32 = conn.query_row(
@@ -454,20 +470,20 @@ impl Database {
                 params![task_id],
                 |row| row.get(0),
             )?;
-            
+
             if child_count > 0 {
                 return Err(anyhow::anyhow!("Task has children; delete them first"));
             }
-            
+
             let rows_affected = conn.execute(
                 "UPDATE tasks SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![now, task_id],
             )?;
-            
+
             if rows_affected == 0 {
                 return Err(anyhow::anyhow!("Task not found or already deleted"));
             }
-            
+
             Ok(())
         })
     }
@@ -476,23 +492,23 @@ impl Database {
     /// Sets status to pending and clears worker_id, claimed_at.
     pub fn dashboard_force_release_task(&self, task_id: &str) -> Result<()> {
         let now = super::now_ms();
-        
+
         self.with_conn(|conn| {
             let rows_affected = conn.execute(
-                "UPDATE tasks SET 
-                    status = 'pending', 
-                    worker_id = NULL, 
+                "UPDATE tasks SET
+                    status = 'pending',
+                    worker_id = NULL,
                     claimed_at = NULL,
                     current_thought = NULL,
-                    updated_at = ?1 
+                    updated_at = ?1
                 WHERE id = ?2 AND deleted_at IS NULL",
                 params![now, task_id],
             )?;
-            
+
             if rows_affected == 0 {
                 return Err(anyhow::anyhow!("Task not found or already deleted"));
             }
-            
+
             Ok(())
         })
     }
@@ -501,7 +517,7 @@ impl Database {
     pub fn get_activity_stats(&self) -> Result<ActivityStats> {
         let now = super::now_ms();
         let cutoff_24h = now - (24 * 60 * 60 * 1000);
-        
+
         self.with_conn(|conn| {
             // Count task state transitions in last 24h
             let transitions_24h: i64 = conn.query_row(
@@ -509,16 +525,16 @@ impl Database {
                 params![cutoff_24h],
                 |row| row.get(0),
             )?;
-            
+
             // Count file claim/release events in last 24h
             let file_events_24h: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM claim_sequence WHERE timestamp >= ?1",
                 params![cutoff_24h],
                 |row| row.get(0),
             )?;
-            
+
             let total_events_24h = transitions_24h + file_events_24h;
-            
+
             // Count active workers (heartbeat in last 5 minutes)
             let worker_cutoff = now - (5 * 60 * 1000);
             let active_workers: i64 = conn.query_row(
@@ -526,12 +542,12 @@ impl Database {
                 params![worker_cutoff],
                 |row| row.get(0),
             )?;
-            
+
             // Get transition counts by status in last 24h
             let mut events_by_status = HashMap::new();
             let mut stmt = conn.prepare(
                 "SELECT status, COUNT(*) FROM task_sequence
-                 WHERE timestamp >= ?1 AND status IS NOT NULL GROUP BY status"
+                 WHERE timestamp >= ?1 AND status IS NOT NULL GROUP BY status",
             )?;
             let mut rows = stmt.query(params![cutoff_24h])?;
             while let Some(row) = rows.next()? {
@@ -539,7 +555,7 @@ impl Database {
                 let count: i64 = row.get(1)?;
                 events_by_status.insert(status, count);
             }
-            
+
             Ok(ActivityStats {
                 total_events_24h,
                 transitions_24h,
@@ -555,25 +571,24 @@ impl Database {
         self.with_conn(|conn| {
             // We need to combine task_sequence and claim_sequence into a unified view
             // Use UNION ALL for efficiency
-            
+
             let mut events = Vec::new();
             let mut total: i64 = 0;
-            
+
             // Determine which event types to query
-            let include_transitions = query.event_type.is_none() 
-                || query.event_type.as_deref() == Some("transition");
-            let include_files = query.event_type.is_none() 
-                || query.event_type.as_deref() == Some("file");
-            
+            let include_transitions =
+                query.event_type.is_none() || query.event_type.as_deref() == Some("transition");
+            let include_files =
+                query.event_type.is_none() || query.event_type.as_deref() == Some("file");
+
             // Query task state transitions
             if include_transitions {
                 let mut sql = String::from(
                     "SELECT id, task_id, worker_id, status, reason, timestamp
-                     FROM task_sequence WHERE status IS NOT NULL"
+                     FROM task_sequence WHERE status IS NOT NULL",
                 );
-                let mut count_sql = String::from(
-                    "SELECT COUNT(*) FROM task_sequence WHERE status IS NOT NULL"
-                );
+                let mut count_sql =
+                    String::from("SELECT COUNT(*) FROM task_sequence WHERE status IS NOT NULL");
                 let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
                 let mut param_idx = 1;
 
@@ -586,7 +601,7 @@ impl Database {
                         param_idx += 1;
                     }
                 }
-                
+
                 // Worker filter
                 if let Some(ref worker) = query.worker {
                     if !worker.is_empty() {
@@ -596,34 +611,38 @@ impl Database {
                         param_idx += 1;
                     }
                 }
-                
+
                 // Task filter
                 if let Some(ref task) = query.task {
                     if !task.is_empty() {
                         sql.push_str(&format!(" AND task_id LIKE '%' || ?{} || '%'", param_idx));
-                        count_sql.push_str(&format!(" AND task_id LIKE '%' || ?{} || '%'", param_idx));
+                        count_sql
+                            .push_str(&format!(" AND task_id LIKE '%' || ?{} || '%'", param_idx));
                         params_vec.push(Box::new(task.clone()));
                         let _ = param_idx; // Consumed
                     }
                 }
-                
+
                 sql.push_str(" ORDER BY timestamp DESC");
-                
+
                 // Get count for transitions
-                let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
-                let trans_count: i64 = conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))?;
+                let params_refs: Vec<&dyn rusqlite::ToSql> =
+                    params_vec.iter().map(|b| b.as_ref()).collect();
+                let trans_count: i64 =
+                    conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))?;
                 total += trans_count;
-                
+
                 // Pagination for transitions only if not querying file events too
                 if !include_files {
                     let offset = (query.page - 1) * query.limit;
                     sql.push_str(&format!(" LIMIT {} OFFSET {}", query.limit, offset));
                 }
-                
-                let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+
+                let params_refs: Vec<&dyn rusqlite::ToSql> =
+                    params_vec.iter().map(|b| b.as_ref()).collect();
                 let mut stmt = conn.prepare(&sql)?;
                 let mut rows = stmt.query(params_refs.as_slice())?;
-                
+
                 while let Some(row) = rows.next()? {
                     let id: i64 = row.get(0)?;
                     let task_id: String = row.get(1)?;
@@ -631,7 +650,7 @@ impl Database {
                     let event: String = row.get(3)?;
                     let reason: Option<String> = row.get(4)?;
                     let timestamp: i64 = row.get(5)?;
-                    
+
                     events.push(ActivityEvent {
                         id,
                         event_type: ActivityEventType::TaskTransition,
@@ -645,19 +664,17 @@ impl Database {
                     });
                 }
             }
-            
+
             // Query file claim/release events
             if include_files && query.status.is_none() {
                 let mut sql = String::from(
-                    "SELECT id, file_path, worker_id, event, reason, timestamp 
-                     FROM claim_sequence WHERE 1=1"
+                    "SELECT id, file_path, worker_id, event, reason, timestamp
+                     FROM claim_sequence WHERE 1=1",
                 );
-                let mut count_sql = String::from(
-                    "SELECT COUNT(*) FROM claim_sequence WHERE 1=1"
-                );
+                let mut count_sql = String::from("SELECT COUNT(*) FROM claim_sequence WHERE 1=1");
                 let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
                 let param_idx = 1;
-                
+
                 // Worker filter
                 if let Some(ref worker) = query.worker {
                     if !worker.is_empty() {
@@ -666,23 +683,27 @@ impl Database {
                         params_vec.push(Box::new(worker.clone()));
                     }
                 }
-                
+
                 // Note: Task filter for file events is not implemented - file events
                 // are less relevant when filtering by task
-                
+
                 sql.push_str(" ORDER BY timestamp DESC");
-                
+
                 // Get count for file events
-                let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
-                let file_count: i64 = conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))?;
+                let params_refs: Vec<&dyn rusqlite::ToSql> =
+                    params_vec.iter().map(|b| b.as_ref()).collect();
+                let file_count: i64 =
+                    conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))?;
                 total += file_count;
-                
+
                 // Skip file events if task filter is active
-                if query.task.is_none() || query.task.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
-                    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+                if query.task.is_none() || query.task.as_ref().map(|t| t.is_empty()).unwrap_or(true)
+                {
+                    let params_refs: Vec<&dyn rusqlite::ToSql> =
+                        params_vec.iter().map(|b| b.as_ref()).collect();
                     let mut stmt = conn.prepare(&sql)?;
                     let mut rows = stmt.query(params_refs.as_slice())?;
-                    
+
                     while let Some(row) = rows.next()? {
                         let id: i64 = row.get(0)?;
                         let file_path: String = row.get(1)?;
@@ -690,13 +711,13 @@ impl Database {
                         let event: String = row.get(3)?;
                         let reason: Option<String> = row.get(4)?;
                         let timestamp: i64 = row.get(5)?;
-                        
+
                         let event_type = if event == "claimed" {
                             ActivityEventType::FileClaim
                         } else {
                             ActivityEventType::FileRelease
                         };
-                        
+
                         events.push(ActivityEvent {
                             id: id + 1_000_000_000, // Offset to avoid ID collision
                             event_type,
@@ -711,21 +732,18 @@ impl Database {
                     }
                 }
             }
-            
+
             // Sort all events by timestamp descending
             events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-            
+
             // Apply pagination to combined results
             let offset = ((query.page - 1) * query.limit) as usize;
             let limit = query.limit as usize;
-            let paginated_events: Vec<ActivityEvent> = events
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .collect();
-            
+            let paginated_events: Vec<ActivityEvent> =
+                events.into_iter().skip(offset).take(limit).collect();
+
             let total_pages = ((total as f64) / (query.limit as f64)).ceil() as i32;
-            
+
             Ok(ActivityListResult {
                 events: paginated_events,
                 total,
@@ -740,11 +758,11 @@ impl Database {
     pub fn get_all_file_marks(&self) -> Result<Vec<DashboardFileMark>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT file_path, worker_id, reason, locked_at, task_id 
-                 FROM file_locks 
-                 ORDER BY locked_at DESC"
+                "SELECT file_path, worker_id, reason, locked_at, task_id
+                 FROM file_locks
+                 ORDER BY locked_at DESC",
             )?;
-            
+
             let marks = stmt
                 .query_map([], |row| {
                     Ok(DashboardFileMark {
@@ -757,7 +775,7 @@ impl Database {
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
-            
+
             Ok(marks)
         })
     }
@@ -765,24 +783,21 @@ impl Database {
     /// Get file marks statistics for the dashboard.
     pub fn get_file_marks_stats(&self) -> Result<FileMarksStats> {
         self.with_conn(|conn| {
-            let total_marks: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM file_locks",
-                [],
-                |row| row.get(0),
-            )?;
-            
+            let total_marks: i64 =
+                conn.query_row("SELECT COUNT(*) FROM file_locks", [], |row| row.get(0))?;
+
             let unique_agents: i64 = conn.query_row(
                 "SELECT COUNT(DISTINCT worker_id) FROM file_locks",
                 [],
                 |row| row.get(0),
             )?;
-            
+
             let with_tasks: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM file_locks WHERE task_id IS NOT NULL",
                 [],
                 |row| row.get(0),
             )?;
-            
+
             // Count stale marks (older than 1 hour)
             let now = super::now_ms();
             let stale_cutoff = now - (60 * 60 * 1000); // 1 hour
@@ -791,7 +806,7 @@ impl Database {
                 params![stale_cutoff],
                 |row| row.get(0),
             )?;
-            
+
             Ok(FileMarksStats {
                 total_marks,
                 unique_agents,
@@ -805,39 +820,39 @@ impl Database {
     /// Unlike normal unlock, this doesn't require the worker_id to match.
     pub fn force_unmark_file(&self, file_path: &str) -> Result<bool> {
         let now = super::now_ms();
-        
+
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
-            
+
             // Get the current owner before deleting
             let owner: Option<String> = tx.query_row(
                 "SELECT worker_id FROM file_locks WHERE file_path = ?1",
                 params![file_path],
                 |row| row.get(0),
             ).ok();
-            
+
             let deleted = tx.execute(
                 "DELETE FROM file_locks WHERE file_path = ?1",
                 params![file_path],
             )?;
-            
+
             if deleted > 0 {
                 if let Some(worker_id) = owner {
                     // Find the claim_id for this file+worker (most recent claim)
                     let claim_id: Option<i64> = tx.query_row(
-                        "SELECT MAX(id) FROM claim_sequence 
+                        "SELECT MAX(id) FROM claim_sequence
                          WHERE file_path = ?1 AND worker_id = ?2 AND event = 'claimed'",
                         params![file_path, &worker_id],
                         |row| row.get(0),
                     ).ok().flatten();
-                    
+
                     // Close any open claim for this file+worker
                     tx.execute(
-                        "UPDATE claim_sequence SET end_timestamp = ?1 
+                        "UPDATE claim_sequence SET end_timestamp = ?1
                          WHERE file_path = ?2 AND worker_id = ?3 AND end_timestamp IS NULL",
                         params![now, file_path, &worker_id],
                     )?;
-                    
+
                     // Record force-release event
                     tx.execute(
                         "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp, claim_id)
@@ -846,7 +861,7 @@ impl Database {
                     )?;
                 }
             }
-            
+
             tx.commit()?;
             Ok(deleted > 0)
         })
@@ -858,14 +873,14 @@ impl Database {
     pub fn get_metrics_overview(&self) -> Result<MetricsOverview> {
         self.with_conn(|conn| {
             let row: (i64, i64, f64, i64, i64, i64) = conn.query_row(
-                "SELECT 
+                "SELECT
                     COUNT(*) as total_tasks,
                     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
                     COALESCE(SUM(cost_usd), 0.0) as total_cost,
                     COALESCE(SUM(time_actual_ms), 0) as total_time,
                     COALESCE(SUM(points), 0) as total_points,
                     COALESCE(SUM(CASE WHEN status = 'completed' THEN points ELSE 0 END), 0) as completed_points
-                FROM tasks 
+                FROM tasks
                 WHERE deleted_at IS NULL",
                 [],
                 |row| Ok((
@@ -893,10 +908,10 @@ impl Database {
     pub fn get_status_distribution(&self) -> Result<HashMap<String, i64>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT status, COUNT(*) as count 
-                 FROM tasks 
-                 WHERE deleted_at IS NULL 
-                 GROUP BY status"
+                "SELECT status, COUNT(*) as count
+                 FROM tasks
+                 WHERE deleted_at IS NULL
+                 GROUP BY status",
             )?;
 
             let mut distribution = HashMap::new();
@@ -933,10 +948,10 @@ impl Database {
 
                 let (count, points): (i64, i64) = conn.query_row(
                     "SELECT COUNT(*), COALESCE(SUM(points), 0)
-                     FROM tasks 
-                     WHERE deleted_at IS NULL 
+                     FROM tasks
+                     WHERE deleted_at IS NULL
                      AND status = 'completed'
-                     AND completed_at >= ?1 
+                     AND completed_at >= ?1
                      AND completed_at < ?2",
                     params![period_start, period_end],
                     |row| Ok((row.get(0)?, row.get(1)?)),
@@ -986,7 +1001,7 @@ impl Database {
                 FROM task_sequence
                 WHERE status IS NOT NULL
                 GROUP BY status
-                ORDER BY avg_duration DESC"
+                ORDER BY avg_duration DESC",
             )?;
 
             let now = super::now_ms();
@@ -1010,16 +1025,16 @@ impl Database {
     pub fn get_cost_by_agent(&self) -> Result<Vec<AgentCostStats>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT 
+                "SELECT
                     worker_id,
                     COALESCE(SUM(cost_usd), 0.0) as total_cost,
                     COUNT(*) as task_count,
                     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
                     COALESCE(SUM(time_actual_ms), 0) as total_time
-                FROM tasks 
+                FROM tasks
                 WHERE deleted_at IS NULL AND worker_id IS NOT NULL
                 GROUP BY worker_id
-                ORDER BY total_cost DESC"
+                ORDER BY total_cost DESC",
             )?;
 
             let stats = stmt
@@ -1043,7 +1058,7 @@ impl Database {
     pub fn get_custom_metrics(&self) -> Result<CustomMetricsAggregate> {
         self.with_conn(|conn| {
             let row: (i64, i64, i64, i64, i64, i64, i64, i64) = conn.query_row(
-                "SELECT 
+                "SELECT
                     COALESCE(SUM(metric_0), 0),
                     COALESCE(SUM(metric_1), 0),
                     COALESCE(SUM(metric_2), 0),
@@ -1052,19 +1067,21 @@ impl Database {
                     COALESCE(SUM(metric_5), 0),
                     COALESCE(SUM(metric_6), 0),
                     COALESCE(SUM(metric_7), 0)
-                FROM tasks 
+                FROM tasks
                 WHERE deleted_at IS NULL",
                 [],
-                |row| Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                )),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
             )?;
 
             Ok(CustomMetricsAggregate {
@@ -1099,7 +1116,7 @@ impl Database {
             if let Some(focus_id) = focus_task {
                 // Focus mode: get dependencies around a specific task
                 let actual_depth = if depth < 0 { 100 } else { depth };
-                
+
                 // Get the focus task first
                 if let Ok(task) = conn.query_row(
                     "SELECT id, title, status, priority FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
@@ -1120,7 +1137,7 @@ impl Database {
                 for _ in 0..actual_depth {
                     if current_level.is_empty() { break; }
                     let mut next_level: Vec<String> = Vec::new();
-                    
+
                     for tid in &current_level {
                         let sql = format!(
                             "SELECT d.from_task_id, d.dep_type, t.id, t.title, t.status, t.priority
@@ -1129,7 +1146,7 @@ impl Database {
                              WHERE d.to_task_id = ?1 AND t.deleted_at IS NULL {}",
                             type_clause
                         );
-                        
+
                         let mut stmt = conn.prepare(&sql)?;
                         let rows = stmt.query_map(params![tid], |row| {
                             Ok((
@@ -1141,16 +1158,16 @@ impl Database {
                                 row.get::<_, i32>(5)?,
                             ))
                         })?;
-                        
+
                         for row in rows.flatten() {
                             let (from_id, dep_type_str, task_id, title, status, priority) = row;
-                            
+
                             edges.push(GraphEdge {
                                 from_id: from_id.clone(),
                                 to_id: tid.clone(),
                                 dep_type: dep_type_str,
                             });
-                            
+
                             if !seen_tasks.contains(&task_id) {
                                 seen_tasks.insert(task_id.clone());
                                 nodes.push(GraphNode {
@@ -1171,7 +1188,7 @@ impl Database {
                 for _ in 0..actual_depth {
                     if current_level.is_empty() { break; }
                     let mut next_level: Vec<String> = Vec::new();
-                    
+
                     for tid in &current_level {
                         let sql = format!(
                             "SELECT d.to_task_id, d.dep_type, t.id, t.title, t.status, t.priority
@@ -1180,7 +1197,7 @@ impl Database {
                              WHERE d.from_task_id = ?1 AND t.deleted_at IS NULL {}",
                             type_clause
                         );
-                        
+
                         let mut stmt = conn.prepare(&sql)?;
                         let rows = stmt.query_map(params![tid], |row| {
                             Ok((
@@ -1192,16 +1209,16 @@ impl Database {
                                 row.get::<_, i32>(5)?,
                             ))
                         })?;
-                        
+
                         for row in rows.flatten() {
                             let (to_id, dep_type_str, task_id, title, status, priority) = row;
-                            
+
                             edges.push(GraphEdge {
                                 from_id: tid.clone(),
                                 to_id: to_id.clone(),
                                 dep_type: dep_type_str,
                             });
-                            
+
                             if !seen_tasks.contains(&task_id) {
                                 seen_tasks.insert(task_id.clone());
                                 nodes.push(GraphNode {
@@ -1226,7 +1243,7 @@ impl Database {
                      WHERE t1.deleted_at IS NULL AND t2.deleted_at IS NULL {}",
                     type_clause
                 );
-                
+
                 let mut stmt = conn.prepare(&sql)?;
                 let edge_rows = stmt.query_map([], |row| {
                     Ok(GraphEdge {
@@ -1235,13 +1252,13 @@ impl Database {
                         dep_type: row.get(2)?,
                     })
                 })?;
-                
+
                 for edge in edge_rows.flatten() {
                     seen_tasks.insert(edge.from_id.clone());
                     seen_tasks.insert(edge.to_id.clone());
                     edges.push(edge);
                 }
-                
+
                 // Now get node details for all seen tasks
                 if !seen_tasks.is_empty() {
                     let placeholders: String = seen_tasks.iter()
@@ -1249,20 +1266,20 @@ impl Database {
                         .map(|(i, _)| format!("?{}", i + 1))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    
+
                     let node_sql = format!(
-                        "SELECT id, title, status, priority FROM tasks 
+                        "SELECT id, title, status, priority FROM tasks
                          WHERE id IN ({}) AND deleted_at IS NULL",
                         placeholders
                     );
-                    
+
                     let mut stmt = conn.prepare(&node_sql)?;
                     let params_vec: Vec<String> = seen_tasks.iter().cloned().collect();
                     let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec
                         .iter()
                         .map(|s| s as &dyn rusqlite::ToSql)
                         .collect();
-                    
+
                     let node_rows = stmt.query_map(params_refs.as_slice(), |row| {
                         Ok(GraphNode {
                             id: row.get(0)?,
@@ -1271,7 +1288,7 @@ impl Database {
                             priority: row.get(3)?,
                         })
                     })?;
-                    
+
                     for node in node_rows.flatten() {
                         nodes.push(node);
                     }
@@ -1334,6 +1351,22 @@ impl Database {
                 follows_count,
                 contains_count,
             })
+        })
+    }
+
+    /// Get all unique phases used by tasks.
+    pub fn get_available_phases(&self) -> Result<Vec<String>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT phase FROM tasks WHERE phase IS NOT NULL AND deleted_at IS NULL ORDER BY phase"
+            )?;
+
+            let phases = stmt
+                .query_map([], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(phases)
         })
     }
 }

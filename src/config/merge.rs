@@ -136,11 +136,7 @@ mod tests {
 
     #[test]
     fn test_merge_all() {
-        let values = vec![
-            json!({"a": 1}),
-            json!({"b": 2}),
-            json!({"a": 3, "c": 4}),
-        ];
+        let values = vec![json!({"a": 1}), json!({"b": 2}), json!({"a": 3, "c": 4})];
         let result = deep_merge_all(values);
         assert_eq!(result, json!({"a": 3, "b": 2, "c": 4}));
     }

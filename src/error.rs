@@ -11,6 +11,8 @@ pub enum ErrorCode {
     MissingRequiredField,
     InvalidFieldValue,
     InvalidState,
+    InvalidPath,
+    InvalidPrefix,
 
     // Not found errors
     AgentNotFound,
@@ -126,6 +128,34 @@ impl ToolError {
         Self::new(
             ErrorCode::DependencyNotSatisfied,
             format!("Task blocked by: {}", blockers.join(", ")),
+        )
+    }
+
+    pub fn invalid_path(path: &str, reason: &str) -> Self {
+        Self::new(
+            ErrorCode::InvalidPath,
+            format!("Invalid path '{}': {}", path, reason),
+        )
+    }
+
+    pub fn prefix_not_lowercase(prefix: &str) -> Self {
+        Self::new(
+            ErrorCode::InvalidPrefix,
+            format!("Path prefix '{}' must be lowercase", prefix),
+        )
+    }
+
+    pub fn unknown_prefix(prefix: &str) -> Self {
+        Self::new(
+            ErrorCode::InvalidPrefix,
+            format!("Unknown path prefix: {}", prefix),
+        )
+    }
+
+    pub fn sandbox_escape(path: &str, root: &str) -> Self {
+        Self::new(
+            ErrorCode::InvalidPath,
+            format!("Path '{}' escapes sandbox root '{}'", path, root),
         )
     }
 

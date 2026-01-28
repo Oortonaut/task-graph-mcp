@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dependency Graph - Task Graph Dashboard</title>
+    <!-- htmx for dynamic updates -->
+    <script src="https://unpkg.com/htmx.org@2.0.0"></script>
+    <!-- Mermaid.js for DAG rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eaeaea;
+            --text-secondary: #a0a0a0;
+            --accent: #e94560;
+            --accent-hover: #ff6b6b;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --info: #60a5fa;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        /* Navigation */
+        nav {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--bg-tertiary);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+        
+        nav .logo {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-decoration: none;
+        }
+        
+        nav .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s ease;
+        }
+        
+        nav a:hover,
+        nav a.active {
+            color: var(--text-primary);
+            background-color: var(--bg-tertiary);
+        }
+        
+        nav a.active {
+            border-bottom: 2px solid var(--accent);
+        }
+        
+        /* Main content */
+        main {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+        
+        /* Cards */
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+        
+        /* Graph container */
+        .graph-container {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            min-height: 500px;
+            overflow: auto;
+        }
+        
+        .graph-container .mermaid {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .filter-group label {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        .filter-group select,
+        .filter-group input {
+            padding: 0.5rem;
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.375rem;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+        
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-primary {
+            background-color: var(--accent);
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--accent-hover);
+        }
+        
+        .btn-secondary {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+        
+        .btn-secondary:hover {
+            background-color: var(--bg-primary);
+        }
+        
+        /* Legend */
+        .legend {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            padding: 1rem;
+            background-color: var(--bg-tertiary);
+            border-radius: 0.375rem;
+            margin-top: 1rem;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .legend-line {
+            width: 30px;
+            height: 2px;
+        }
+        
+        .legend-line.blocks {
+            background-color: var(--accent);
+        }
+        
+        .legend-line.follows {
+            background-color: var(--info);
+            background-image: repeating-linear-gradient(
+                90deg,
+                var(--info),
+                var(--info) 5px,
+                transparent 5px,
+                transparent 10px
+            );
+        }
+        
+        .legend-line.contains {
+            background-color: var(--success);
+        }
+        
+        .legend-node {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+        
+        .legend-node.pending { background-color: var(--text-secondary); }
+        .legend-node.working { background-color: var(--info); }
+        .legend-node.completed { background-color: var(--success); }
+        .legend-node.failed { background-color: var(--accent); }
+        
+        /* Loading indicator */
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 400px;
+            color: var(--text-secondary);
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 2rem;
+            height: 2rem;
+            border: 3px solid var(--text-secondary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 1rem;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+        
+        /* Error state */
+        .error-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--accent);
+        }
+        
+        /* Stats row */
+        .stats-row {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+        
+        /* Mermaid theme overrides */
+        .mermaid .node rect,
+        .mermaid .node polygon,
+        .mermaid .node circle {
+            stroke-width: 2px;
+        }
+        
+        .mermaid .edgePath .path {
+            stroke-width: 2px;
+        }
+        
+        /* Clickable nodes */
+        .mermaid .node {
+            cursor: pointer;
+        }
+        
+        .mermaid .node:hover rect,
+        .mermaid .node:hover polygon {
+            filter: brightness(1.2);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">Task Graph</a>
+        <div class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/workers">Workers</a>
+            <a href="/tasks">Tasks</a>
+            <a href="/graph" class="active">Graph</a>
+            <a href="/activity">Activity</a>
+            <a href="/file-marks">File Marks</a>
+            <a href="/metrics">Metrics</a>
+        </div>
+    </nav>
+    
+    <main>
+        <h1>Dependency Graph</h1>
+        
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Task Dependencies Visualization</span>
+            </div>
+            
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="dep-type">Dependency Type:</label>
+                    <select id="dep-type" onchange="refreshGraph()">
+                        <option value="all">All</option>
+                        <option value="blocks">Blocks</option>
+                        <option value="follows">Follows</option>
+                        <option value="contains">Contains</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="focus-task">Focus Task:</label>
+                    <input type="text" id="focus-task" placeholder="Task ID (optional)" onchange="refreshGraph()">
+                </div>
+                
+                <div class="filter-group">
+                    <label for="depth">Depth:</label>
+                    <select id="depth" onchange="refreshGraph()">
+                        <option value="1">1</option>
+                        <option value="2" selected>2</option>
+                        <option value="3">3</option>
+                        <option value="-1">All</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="direction">Direction:</label>
+                    <select id="direction" onchange="refreshGraph()">
+                        <option value="TB" selected>Top-Down</option>
+                        <option value="LR">Left-Right</option>
+                        <option value="BT">Bottom-Up</option>
+                        <option value="RL">Right-Left</option>
+                    </select>
+                </div>
+                
+                <button class="btn btn-primary" onclick="refreshGraph()">Refresh</button>
+            </div>
+            
+            <div id="graph-stats" class="stats-row"
+                 hx-get="/api/graph/stats"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+                <div class="loading"><span class="spinner"></span>Loading stats...</div>
+            </div>
+            
+            <div id="graph-container" class="graph-container">
+                <div class="loading"><span class="spinner"></span>Loading graph...</div>
+            </div>
+            
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-line blocks"></div>
+                    <span>Blocks</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-line follows"></div>
+                    <span>Follows</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-line contains"></div>
+                    <span>Contains</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-node pending"></div>
+                    <span>Pending</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-node working"></div>
+                    <span>In Progress</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-node completed"></div>
+                    <span>Completed</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-node failed"></div>
+                    <span>Failed</span>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script>
+        // Initialize Mermaid with dark theme
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#0f3460',
+                primaryTextColor: '#eaeaea',
+                primaryBorderColor: '#e94560',
+                lineColor: '#a0a0a0',
+                secondaryColor: '#16213e',
+                tertiaryColor: '#1a1a2e',
+                background: '#1a1a2e',
+                mainBkg: '#16213e',
+                nodeBorder: '#e94560',
+                clusterBkg: '#0f3460',
+                clusterBorder: '#e94560',
+                titleColor: '#eaeaea',
+                edgeLabelBackground: '#16213e'
+            },
+            flowchart: {
+                curve: 'basis',
+                htmlLabels: true,
+                useMaxWidth: true
+            },
+            securityLevel: 'loose'
+        });
+        
+        // Refresh the graph based on current filters
+        async function refreshGraph() {
+            const container = document.getElementById('graph-container');
+            container.innerHTML = '<div class="loading"><span class="spinner"></span>Loading graph...</div>';
+            
+            const depType = document.getElementById('dep-type').value;
+            const focusTask = document.getElementById('focus-task').value;
+            const depth = document.getElementById('depth').value;
+            const direction = document.getElementById('direction').value;
+            
+            const params = new URLSearchParams();
+            if (depType !== 'all') params.set('dep_type', depType);
+            if (focusTask) params.set('focus', focusTask);
+            if (depth) params.set('depth', depth);
+            params.set('direction', direction);
+            
+            try {
+                const response = await fetch('/api/graph/mermaid?' + params.toString());
+                const data = await response.json();
+                
+                if (data.error) {
+                    container.innerHTML = '<div class="error-state">' + escapeHtml(data.error) + '</div>';
+                    return;
+                }
+                
+                if (!data.diagram || data.node_count === 0) {
+                    container.innerHTML = '<div class="empty-state">No dependencies to display. Try adjusting the filters or creating some tasks with dependencies.</div>';
+                    return;
+                }
+                
+                // Render the mermaid diagram
+                container.innerHTML = '<div class="mermaid">' + data.diagram + '</div>';
+                
+                // Re-render mermaid
+                await mermaid.run({
+                    nodes: container.querySelectorAll('.mermaid')
+                });
+                
+                // Add click handlers to nodes after rendering
+                setTimeout(() => {
+                    addNodeClickHandlers();
+                }, 100);
+                
+            } catch (error) {
+                container.innerHTML = '<div class="error-state">Error loading graph: ' + escapeHtml(error.message) + '</div>';
+            }
+        }
+        
+        // Add click handlers to graph nodes
+        function addNodeClickHandlers() {
+            const nodes = document.querySelectorAll('.mermaid .node');
+            nodes.forEach(node => {
+                node.addEventListener('click', (e) => {
+                    // Extract task ID from node
+                    const nodeId = node.id;
+                    // The node ID format is typically "flowchart-taskid-N"
+                    const match = nodeId.match(/flowchart-(.+?)-\d+$/);
+                    if (match) {
+                        const taskId = match[1];
+                        window.location.href = '/tasks/' + encodeURIComponent(taskId);
+                    }
+                });
+            });
+        }
+        
+        // Escape HTML special characters
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Load graph on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshGraph();
+        });
+    </script>
+</body>
+</html>

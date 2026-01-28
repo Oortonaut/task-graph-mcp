@@ -1,12 +1,13 @@
 //! MCP resource implementations.
 
 pub mod agents;
+pub mod config;
 pub mod files;
 pub mod skills;
 pub mod stats;
 pub mod tasks;
 
-use crate::config::{DependenciesConfig, StatesConfig};
+use crate::config::{DependenciesConfig, PhasesConfig, StatesConfig, TagsConfig};
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::{Annotated, RawResourceTemplate, ResourceTemplate};
@@ -17,7 +18,9 @@ use std::sync::Arc;
 pub struct ResourceHandler {
     pub db: Arc<Database>,
     pub states_config: Arc<StatesConfig>,
+    pub phases_config: Arc<PhasesConfig>,
     pub deps_config: Arc<DependenciesConfig>,
+    pub tags_config: Arc<TagsConfig>,
     /// Directory for skill overrides (e.g., `.task-graph/skills/`)
     pub skills_dir: Option<std::path::PathBuf>,
 }
@@ -26,12 +29,16 @@ impl ResourceHandler {
     pub fn new(
         db: Arc<Database>,
         states_config: Arc<StatesConfig>,
+        phases_config: Arc<PhasesConfig>,
         deps_config: Arc<DependenciesConfig>,
+        tags_config: Arc<TagsConfig>,
     ) -> Self {
         Self {
             db,
             states_config,
+            phases_config,
             deps_config,
+            tags_config,
             skills_dir: None,
         }
     }
@@ -196,6 +203,8 @@ impl ResourceHandler {
             self.read_stats_resource(uri).await
         } else if uri.starts_with("skills://") {
             self.read_skills_resource(uri).await
+        } else if uri.starts_with("config://") {
+            self.read_config_resource(uri).await
         } else {
             Err(anyhow::anyhow!("Unknown resource URI: {}", uri))
         }
@@ -264,6 +273,18 @@ impl ResourceHandler {
         match path {
             "list" => skills::list_skills(skills_dir),
             name => skills::get_skill_resource(skills_dir, name),
+        }
+    }
+
+    async fn read_config_resource(&self, uri: &str) -> Result<Value> {
+        let path = uri.strip_prefix("config://").unwrap_or("");
+
+        match path {
+            "states" => config::get_states_config(&self.states_config),
+            "phases" => config::get_phases_config(&self.phases_config),
+            "dependencies" => config::get_dependencies_config(&self.deps_config),
+            "tags" => config::get_tags_config(&self.tags_config),
+            _ => Err(anyhow::anyhow!("Unknown config resource: {}", path)),
         }
     }
 }

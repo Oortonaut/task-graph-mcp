@@ -152,14 +152,18 @@ mod tests {
     fn create_test_structure(temp: &TempDir) -> PathBuf {
         let base = temp.path().to_path_buf();
         let deprecated = base.join(".task-graph");
-        
+
         // Create deprecated directory structure
         fs::create_dir_all(deprecated.join("skills")).unwrap();
         fs::create_dir_all(deprecated.join("media")).unwrap();
-        fs::write(deprecated.join("config.yaml"), "server:\n  claim_limit: 10\n").unwrap();
+        fs::write(
+            deprecated.join("config.yaml"),
+            "server:\n  claim_limit: 10\n",
+        )
+        .unwrap();
         fs::write(deprecated.join("tasks.db"), "fake-db-content").unwrap();
         fs::write(deprecated.join("skills/custom.md"), "# Custom Skill").unwrap();
-        
+
         base
     }
 
@@ -167,16 +171,16 @@ mod tests {
     fn test_migrate_dry_run_no_changes() {
         let temp = TempDir::new().unwrap();
         let base = create_test_structure(&temp);
-        
+
         let args = MigrateArgs {
             yes: false,
             dry_run: true,
             from: base.join(".task-graph").to_string_lossy().to_string(),
             to: base.join("task-graph").to_string_lossy().to_string(),
         };
-        
+
         run_migrate(&args).unwrap();
-        
+
         // Source should still exist
         assert!(base.join(".task-graph").exists());
         // Target should not exist
@@ -187,16 +191,16 @@ mod tests {
     fn test_migrate_moves_directory() {
         let temp = TempDir::new().unwrap();
         let base = create_test_structure(&temp);
-        
+
         let args = MigrateArgs {
-            yes: true,  // Skip confirmation
+            yes: true, // Skip confirmation
             dry_run: false,
             from: base.join(".task-graph").to_string_lossy().to_string(),
             to: base.join("task-graph").to_string_lossy().to_string(),
         };
-        
+
         run_migrate(&args).unwrap();
-        
+
         // Source should no longer exist
         assert!(!base.join(".task-graph").exists());
         // Target should exist with all contents
@@ -204,7 +208,7 @@ mod tests {
         assert!(base.join("task-graph/config.yaml").exists());
         assert!(base.join("task-graph/tasks.db").exists());
         assert!(base.join("task-graph/skills/custom.md").exists());
-        
+
         // Verify content
         let config = fs::read_to_string(base.join("task-graph/config.yaml")).unwrap();
         assert!(config.contains("claim_limit: 10"));
@@ -214,14 +218,14 @@ mod tests {
     fn test_migrate_no_source() {
         let temp = TempDir::new().unwrap();
         let base = temp.path();
-        
+
         let args = MigrateArgs {
             yes: true,
             dry_run: false,
             from: base.join(".task-graph").to_string_lossy().to_string(),
             to: base.join("task-graph").to_string_lossy().to_string(),
         };
-        
+
         // Should succeed with "no migration needed" message
         run_migrate(&args).unwrap();
     }
@@ -230,20 +234,20 @@ mod tests {
     fn test_migrate_target_exists() {
         let temp = TempDir::new().unwrap();
         let base = create_test_structure(&temp);
-        
+
         // Create target directory
         fs::create_dir_all(base.join("task-graph")).unwrap();
-        
+
         let args = MigrateArgs {
             yes: true,
             dry_run: false,
             from: base.join(".task-graph").to_string_lossy().to_string(),
             to: base.join("task-graph").to_string_lossy().to_string(),
         };
-        
+
         // Should succeed but not migrate (target exists)
         run_migrate(&args).unwrap();
-        
+
         // Both should still exist
         assert!(base.join(".task-graph").exists());
         assert!(base.join("task-graph").exists());

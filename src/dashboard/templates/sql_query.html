@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Query - Task Graph Dashboard</title>
+    <!-- htmx for dynamic updates -->
+    <script src="https://unpkg.com/htmx.org@2.0.0"></script>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eaeaea;
+            --text-secondary: #a0a0a0;
+            --accent: #e94560;
+            --accent-hover: #ff6b6b;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --info: #60a5fa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Navigation */
+        nav {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--bg-tertiary);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        nav .logo {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        nav .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s ease;
+        }
+
+        nav a:hover,
+        nav a.active {
+            color: var(--text-primary);
+            background-color: var(--bg-tertiary);
+        }
+
+        nav a.active {
+            border-bottom: 2px solid var(--accent);
+        }
+
+        /* Main content */
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        h3 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        /* Grid layout */
+        .grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .grid-2 {
+            grid-template-columns: 2fr 1fr;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* SQL Editor */
+        .sql-editor {
+            width: 100%;
+            min-height: 150px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.875rem;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.375rem;
+            color: var(--text-primary);
+            resize: vertical;
+        }
+
+        .sql-editor:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .sql-editor::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background-color: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-hover);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--bg-primary);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        /* Form controls */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.5rem;
+            font-size: 0.875rem;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 0.375rem;
+            color: var(--text-primary);
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .form-row {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+        }
+
+        /* Results table */
+        .results-container {
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--bg-tertiary);
+            font-size: 0.875rem;
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            background-color: var(--bg-primary);
+            position: sticky;
+            top: 0;
+        }
+
+        tr:hover td {
+            background-color: var(--bg-tertiary);
+        }
+
+        td {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        td.null-value {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Schema reference */
+        .schema-section {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .schema-table {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background-color: var(--bg-primary);
+            border-radius: 0.375rem;
+        }
+
+        .schema-table-name {
+            font-family: monospace;
+            font-weight: 600;
+            color: var(--info);
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .schema-table-name:hover {
+            color: var(--accent);
+        }
+
+        .schema-table-name .toggle-icon {
+            transition: transform 0.2s ease;
+        }
+
+        .schema-table-name.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .schema-columns {
+            margin-left: 1rem;
+            font-size: 0.8rem;
+        }
+
+        .schema-columns.hidden {
+            display: none;
+        }
+
+        .schema-column {
+            display: flex;
+            gap: 0.5rem;
+            padding: 0.25rem 0;
+            color: var(--text-secondary);
+        }
+
+        .schema-column-name {
+            font-family: monospace;
+            color: var(--text-primary);
+        }
+
+        .schema-column-type {
+            font-family: monospace;
+            color: var(--warning);
+        }
+
+        .schema-column-pk {
+            color: var(--accent);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+        }
+
+        /* Loading indicator */
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 200ms ease-in;
+        }
+
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator {
+            opacity: 1;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid var(--text-secondary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Error message */
+        .error-message {
+            background-color: rgba(233, 69, 96, 0.1);
+            border: 1px solid var(--accent);
+            border-radius: 0.375rem;
+            padding: 1rem;
+            color: var(--accent);
+            font-family: monospace;
+            font-size: 0.875rem;
+            white-space: pre-wrap;
+        }
+
+        /* Success message */
+        .success-message {
+            background-color: rgba(74, 222, 128, 0.1);
+            border: 1px solid var(--success);
+            border-radius: 0.375rem;
+            padding: 0.75rem;
+            color: var(--success);
+            font-size: 0.875rem;
+        }
+
+        /* Result stats */
+        .result-stats {
+            display: flex;
+            gap: 1.5rem;
+            padding: 0.75rem;
+            background-color: var(--bg-primary);
+            border-radius: 0.375rem;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .result-stat {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .result-stat-label {
+            color: var(--text-secondary);
+        }
+
+        .result-stat-value {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .result-stat-value.truncated {
+            color: var(--warning);
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        /* Example queries */
+        .example-queries {
+            margin-top: 1rem;
+        }
+
+        .example-query {
+            display: block;
+            padding: 0.5rem;
+            margin-bottom: 0.25rem;
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 0.25rem;
+            transition: all 0.2s ease;
+        }
+
+        .example-query:hover {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        /* Warning banner */
+        .warning-banner {
+            background-color: rgba(251, 191, 36, 0.1);
+            border: 1px solid var(--warning);
+            border-radius: 0.375rem;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+            color: var(--warning);
+        }
+
+        .warning-banner strong {
+            color: var(--text-primary);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">Task Graph</a>
+        <div class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/workers">Workers</a>
+            <a href="/tasks">Tasks</a>
+            <a href="/metrics">Metrics</a>
+            <a href="/sql" class="active">SQL</a>
+        </div>
+    </nav>
+
+    <main>
+        <h1>SQL Query</h1>
+
+        <div class="warning-banner">
+            <strong>Read-Only:</strong> Only SELECT queries are allowed. This interface is for advanced users and debugging purposes.
+        </div>
+
+        <div class="grid grid-2">
+            <!-- Query Editor -->
+            <div>
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Query Editor</h2>
+                        <span id="query-indicator" class="htmx-indicator"><span class="spinner"></span></span>
+                    </div>
+
+                    <form id="sql-form" hx-post="/api/sql/execute" hx-target="#query-results" hx-indicator="#query-indicator">
+                        <div class="form-group">
+                            <textarea 
+                                id="sql-input"
+                                name="sql" 
+                                class="sql-editor" 
+                                placeholder="SELECT * FROM tasks WHERE status = 'pending' LIMIT 10"
+                                rows="6"
+                            ></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="limit-input">Row Limit</label>
+                                <input type="number" id="limit-input" name="limit" class="form-input" value="100" min="1" max="1000">
+                            </div>
+                        </div>
+
+                        <div class="btn-group">
+                            <button type="submit" class="btn btn-primary">
+                                Execute Query
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="clearResults()">
+                                Clear
+                            </button>
+                        </div>
+                    </form>
+
+                    <div class="example-queries">
+                        <h3>Example Queries</h3>
+                        <span class="example-query" onclick="setQuery(this.innerText)">SELECT * FROM tasks ORDER BY created_at DESC LIMIT 10</span>
+                        <span class="example-query" onclick="setQuery(this.innerText)">SELECT status, COUNT(*) as count FROM tasks GROUP BY status</span>
+                        <span class="example-query" onclick="setQuery(this.innerText)">SELECT * FROM agents WHERE last_heartbeat > strftime('%s', 'now', '-5 minutes') * 1000</span>
+                        <span class="example-query" onclick="setQuery(this.innerText)">SELECT t.id, t.title, d.from_task_id FROM tasks t JOIN deps d ON t.id = d.to_task_id</span>
+                        <span class="example-query" onclick="setQuery(this.innerText)">SELECT agent, SUM(cost_usd) as total_cost FROM task_metrics GROUP BY agent ORDER BY total_cost DESC</span>
+                    </div>
+                </div>
+
+                <!-- Query Results -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Results</h2>
+                    </div>
+                    <div id="query-results">
+                        <div class="empty-state">
+                            Enter a SELECT query and click Execute to see results.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Schema Reference -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Schema Reference</h2>
+                </div>
+                <div id="schema-reference" class="schema-section"
+                     hx-get="/api/sql/schema"
+                     hx-trigger="load"
+                     hx-swap="innerHTML">
+                    <div class="empty-state">Loading schema...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Set query from example
+        function setQuery(sql) {
+            document.getElementById('sql-input').value = sql;
+        }
+
+        // Clear results
+        function clearResults() {
+            document.getElementById('query-results').innerHTML = 
+                '<div class="empty-state">Enter a SELECT query and click Execute to see results.</div>';
+            document.getElementById('sql-input').value = '';
+        }
+
+        // Toggle schema table columns visibility
+        function toggleSchemaTable(element) {
+            element.classList.toggle('collapsed');
+            const columns = element.nextElementSibling;
+            columns.classList.toggle('hidden');
+        }
+
+        // Handle keyboard shortcut (Ctrl/Cmd + Enter to execute)
+        document.getElementById('sql-input').addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('sql-form').requestSubmit();
+            }
+        });
+    </script>
+</body>
+</html>

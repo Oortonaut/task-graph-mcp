@@ -223,7 +223,10 @@ pub fn format_attachments_markdown(attachments: &[crate::types::AttachmentMeta])
         let header = if attachment.name.is_empty() {
             format!("{} [{}]", attachment.attachment_type, attachment.sequence)
         } else {
-            format!("{} [{}]: {}", attachment.attachment_type, attachment.sequence, attachment.name)
+            format!(
+                "{} [{}]: {}",
+                attachment.attachment_type, attachment.sequence, attachment.name
+            )
         };
         md.push_str(&format!("## {}\n", header));
         md.push_str(&format!("- **type**: {}\n", attachment.attachment_type));
@@ -502,13 +505,7 @@ mod tests {
     #[test]
     fn test_format_task_tree_markdown_with_children() {
         let tree = TaskTree {
-            task: make_test_task(
-                "root-1",
-                "API Refactoring Sprint",
-                "working",
-                8,
-                Some(16),
-            ),
+            task: make_test_task("root-1", "API Refactoring Sprint", "working", 8, Some(16)),
             children: vec![
                 TaskTree {
                     task: make_test_task("child-1", "Tier 1: Prerequisites", "pending", 8, Some(9)),

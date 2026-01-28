@@ -5,7 +5,7 @@
 //! - Comparison between two snapshot files
 //! - Human-readable diff output suitable for review
 
-use super::{get_table_primary_key, Snapshot, EXPORTED_TABLES};
+use super::{EXPORTED_TABLES, Snapshot, get_table_primary_key};
 use crate::db::Database;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -99,11 +99,7 @@ impl fmt::Display for SnapshotDiff {
             return Ok(());
         }
 
-        writeln!(
-            f,
-            "Diff: {} -> {}",
-            self.source_label, self.target_label
-        )?;
+        writeln!(f, "Diff: {} -> {}", self.source_label, self.target_label)?;
         writeln!(f, "{}", "=".repeat(60))?;
 
         for (table_name, diff) in &self.tables {
@@ -181,10 +177,7 @@ fn format_record_brief(record: &Value) -> String {
 /// Extract the primary key value from a record.
 fn extract_key(record: &Value, key_columns: &[&str]) -> Value {
     if key_columns.len() == 1 {
-        record
-            .get(key_columns[0])
-            .cloned()
-            .unwrap_or(Value::Null)
+        record.get(key_columns[0]).cloned().unwrap_or(Value::Null)
     } else {
         // Composite key - return as array
         Value::Array(
@@ -258,11 +251,7 @@ fn diff_records(source: &Value, target: &Value, key_columns: &[&str]) -> Vec<Fie
 }
 
 /// Diff a single table's data.
-fn diff_table(
-    source_rows: &[Value],
-    target_rows: &[Value],
-    key_columns: &[&str],
-) -> TableDiff {
+fn diff_table(source_rows: &[Value], target_rows: &[Value], key_columns: &[&str]) -> TableDiff {
     // Build lookup maps by key
     let source_by_key: BTreeMap<String, &Value> = source_rows
         .iter()
@@ -363,8 +352,14 @@ pub fn diff_snapshots(source: &Snapshot, target: &Snapshot) -> SnapshotDiff {
 
     for table_name in all_tables {
         let key_columns = get_table_primary_key(table_name);
-        let source_rows = source.get_table(table_name).map(|v| v.as_slice()).unwrap_or(&[]);
-        let target_rows = target.get_table(table_name).map(|v| v.as_slice()).unwrap_or(&[]);
+        let source_rows = source
+            .get_table(table_name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let target_rows = target
+            .get_table(table_name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
 
         let table_diff = diff_table(source_rows, target_rows, key_columns);
 
@@ -387,11 +382,7 @@ fn query_table_as_json(db: &Database, table_name: &str) -> Result<Vec<Value>> {
 
     db.with_conn(|conn| {
         let mut stmt = conn.prepare(&query)?;
-        let column_names: Vec<String> = stmt
-            .column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
         let rows: Vec<Value> = stmt
             .query_map([], |row| {
@@ -425,7 +416,7 @@ fn row_value_to_json(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<Value>
         }
         ValueRef::Blob(b) => {
             // Encode blob as base64
-            use base64::{engine::general_purpose::STANDARD, Engine};
+            use base64::{Engine, engine::general_purpose::STANDARD};
             Ok(Value::String(STANDARD.encode(b)))
         }
     }

@@ -79,10 +79,7 @@ impl ConfigPaths {
     }
 
     /// Create paths with explicit directories.
-    pub fn with_dirs(
-        project_dir: Option<PathBuf>,
-        user_dir: Option<PathBuf>,
-    ) -> Self {
+    pub fn with_dirs(project_dir: Option<PathBuf>, user_dir: Option<PathBuf>) -> Self {
         Self {
             defaults_dir: None,
             project_dir,
@@ -149,7 +146,7 @@ impl ConfigLoader {
     /// Load configuration with explicit paths.
     pub fn load_with_paths(paths: ConfigPaths) -> Result<Self> {
         let using_deprecated = paths.is_using_deprecated();
-        
+
         if using_deprecated {
             warn!(
                 "Using deprecated config directory '.task-graph/'. \
@@ -284,7 +281,9 @@ impl ConfigLoader {
         let mut workflows_configs: Vec<Value> = Vec::new();
 
         // Tier 1: Defaults (embedded)
-        if let Ok(default_json) = serde_json::to_value(&super::workflows::WorkflowsConfig::default()) {
+        if let Ok(default_json) =
+            serde_json::to_value(&super::workflows::WorkflowsConfig::default())
+        {
             workflows_configs.push(default_json);
         }
 
@@ -414,10 +413,7 @@ server:
 "#;
         std::fs::write(project_dir.join("config.yaml"), config_content).unwrap();
 
-        let paths = ConfigPaths::with_dirs(
-            Some(project_dir),
-            Some(temp.path().join("user")),
-        );
+        let paths = ConfigPaths::with_dirs(Some(project_dir), Some(temp.path().join("user")));
 
         let loader = ConfigLoader::load_with_paths(paths).unwrap();
         let config = loader.config();
