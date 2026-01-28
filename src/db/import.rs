@@ -1317,6 +1317,7 @@ fn get_f64_or_default(obj: &serde_json::Map<String, Value>, key: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::IdsConfig;
     use crate::export::Snapshot;
     use serde_json::json;
 
@@ -1495,6 +1496,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -1525,6 +1527,7 @@ mod tests {
                 None,
                 None, // tags
                 &StatesConfig::default(),
+                &IdsConfig::default(),
             )
             .unwrap();
 
@@ -1598,6 +1601,7 @@ mod tests {
             Some("test-worker".to_string()),
             vec!["rust".to_string(), "test".to_string()],
             false,
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -1620,6 +1624,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -1656,6 +1661,7 @@ mod tests {
                 None,
                 Some(vec!["rust".to_string(), "test".to_string()]), // tags
                 &StatesConfig::default(),
+                &IdsConfig::default(),
             )
             .unwrap();
 
@@ -1672,6 +1678,7 @@ mod tests {
                 None,
                 None, // tags
                 &StatesConfig::default(),
+                &IdsConfig::default(),
             )
             .unwrap();
 
@@ -2023,6 +2030,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -2134,6 +2142,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -2148,6 +2157,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -2162,6 +2172,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
         db.add_dependency("task-a", "task-b", "blocks", &DependenciesConfig::default())
@@ -2212,6 +2223,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -2257,6 +2269,7 @@ mod tests {
             None,
             Some(vec!["existing-tag".to_string()]), // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -2360,6 +2373,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -2392,6 +2406,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -2406,6 +2421,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -2478,6 +2494,7 @@ mod tests {
             None,
             None, // tags
             &StatesConfig::default(),
+            &IdsConfig::default(),
         )
         .unwrap();
 

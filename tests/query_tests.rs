@@ -3,7 +3,7 @@
 //! These tests verify the read-only SQL query functionality.
 
 use serde_json::{Value, json};
-use task_graph_mcp::config::StatesConfig;
+use task_graph_mcp::config::{IdsConfig, StatesConfig};
 use task_graph_mcp::db::Database;
 use task_graph_mcp::format::{OutputFormat, ToolResult};
 use task_graph_mcp::tools::query;
@@ -52,6 +52,7 @@ fn query_select_all_tasks() {
         None,
         None,
         &states_config,
+        &IdsConfig::default(),
     )
     .unwrap();
 
@@ -67,6 +68,7 @@ fn query_select_all_tasks() {
         None,
         None,
         &states_config,
+        &IdsConfig::default(),
     )
     .unwrap();
 
@@ -111,6 +113,7 @@ fn query_with_parameters() {
             None,
             None,
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -126,6 +129,7 @@ fn query_with_parameters() {
         None,
         None,
         &states_config,
+        &IdsConfig::default(),
     )
     .unwrap();
 
@@ -166,6 +170,7 @@ fn query_enforces_row_limit() {
             None,
             None,
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
     }
@@ -206,6 +211,7 @@ fn query_csv_format() {
         None,
         None,
         &states_config,
+        &IdsConfig::default(),
     )
     .unwrap();
 
@@ -243,6 +249,7 @@ fn query_markdown_format() {
         None,
         None,
         &states_config,
+        &IdsConfig::default(),
     )
     .unwrap();
 
@@ -375,6 +382,7 @@ fn query_with_cte() {
         None,
         None,
         &states_config,
+        &IdsConfig::default(),
     )
     .unwrap();
 

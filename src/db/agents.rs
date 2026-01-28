@@ -1,6 +1,7 @@
 //! Worker CRUD operations.
 
 use super::{Database, now_ms};
+use crate::config::IdsConfig;
 use crate::types::{CleanupSummary, DisconnectSummary, Worker};
 use anyhow::{Result, anyhow};
 use petname::{Generator, Petnames};
@@ -9,54 +10,19 @@ use rusqlite::{Connection, params};
 /// Maximum length for worker IDs (4-word petnames can be ~50 chars).
 pub const MAX_WORKER_ID_LEN: usize = 64;
 
-/// Default number of words for generated petnames.
-const PETNAME_WORDS: u8 = 4;
+/// Generate a petname-based agent ID using the large wordlist with configured case style.
+/// With 4 words from a large wordlist, collisions are extremely unlikely.
+fn generate_agent_id(ids_config: &IdsConfig) -> String {
+    let words = ids_config.agent_id_words;
+    let case = ids_config.id_case;
 
-/// Maximum attempts to generate a unique petname before falling back.
-const MAX_PETNAME_ATTEMPTS: u32 = 100;
-
-/// Generate a petname using the large wordlist.
-fn generate_petname(words: u8) -> String {
-    Petnames::large()
+    // Generate with hyphen separator first (petname's default format)
+    let base = Petnames::large()
         .generate_one(words, "-")
-        .unwrap_or_else(|| format!("worker-{}", now_ms()))
-}
+        .unwrap_or_else(|| format!("worker-{}", now_ms()));
 
-/// Generate a unique petname-based worker ID.
-/// Tries base petname first, then appends numbers (e.g., "happy-turtle-swift-fox-2").
-fn generate_unique_petname(conn: &Connection) -> String {
-    let base = generate_petname(PETNAME_WORDS);
-
-    // Check if base name is available
-    let exists: bool = conn
-        .query_row(
-            "SELECT 1 FROM workers WHERE id = ?1",
-            params![&base],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
-
-    if !exists {
-        return base;
-    }
-
-    // Try appending numbers: happy-turtle-swift-fox-2, etc.
-    for i in 2..=MAX_PETNAME_ATTEMPTS {
-        let candidate = format!("{}-{}", base, i);
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM workers WHERE id = ?1",
-                params![&candidate],
-                |_| Ok(true),
-            )
-            .unwrap_or(false);
-        if !exists {
-            return candidate;
-        }
-    }
-
-    // Fallback: generate a completely new petname with 5 words for uniqueness
-    generate_petname(5)
+    // Convert to desired case
+    case.convert(&base)
 }
 
 /// Internal helper to get a worker using an existing connection (avoids deadlock).
@@ -116,6 +82,7 @@ impl Database {
         worker_id: Option<String>,
         tags: Vec<String>,
         force: bool,
+        ids_config: &IdsConfig,
     ) -> Result<Worker> {
         // Validate user-provided ID upfront (before acquiring connection)
         let provided_id = match worker_id {
@@ -139,10 +106,10 @@ impl Database {
         let tags_json = serde_json::to_string(&tags)?;
 
         self.with_conn(|conn| {
-            // Generate ID inside connection to avoid race conditions
+            // Generate ID (with 4+ words from a large wordlist, collisions are extremely unlikely)
             let id = match provided_id {
                 Some(id) => id,
-                None => generate_unique_petname(conn),
+                None => generate_agent_id(ids_config),
             };
 
             // Check if worker ID already exists

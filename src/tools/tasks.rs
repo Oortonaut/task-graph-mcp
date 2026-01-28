@@ -2,8 +2,8 @@
 
 use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{
-    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, StatesConfig,
-    TagsConfig, UnknownKeyBehavior,
+    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, Prompts,
+    StatesConfig, TagsConfig, UnknownKeyBehavior,
 };
 use crate::db::Database;
 use crate::error::ToolError;
@@ -29,7 +29,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
             json!({
                 "id": {
                     "type": "string",
-                    "description": "Custom task ID (optional, UUID7 generated if not provided)"
+                    "description": "Custom task ID (optional, petname ID generated if not provided)"
                 },
                 "description": {
                     "type": "string",
@@ -69,7 +69,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "description": "Nested tree structure with title, children[], etc. Use 'ref' to reference existing tasks.",
                     "properties": {
                         "ref": { "type": "string", "description": "Reference to an existing task ID (other fields ignored when set)" },
-                        "id": { "type": "string", "description": "Custom task ID (optional, UUID7 generated if not provided)" },
+                        "id": { "type": "string", "description": "Custom task ID (optional, petname ID generated if not provided)" },
                         "title": { "type": "string", "description": "Task title (required for new tasks)" },
                         "description": { "type": "string", "description": "Task description" },
                         "priority": { "type": "integer", "description": "Task priority 0-10 (default 5)" },
@@ -344,6 +344,7 @@ pub fn create(
     states_config: &StatesConfig,
     phases_config: &PhasesConfig,
     tags_config: &TagsConfig,
+    ids_config: &IdsConfig,
     args: Value,
 ) -> Result<Value> {
     let id = get_string(&args, "id");
@@ -391,6 +392,7 @@ pub fn create(
         wanted_tags,
         tags,
         states_config,
+        ids_config,
     )?;
 
     let mut response = json!({
@@ -418,6 +420,7 @@ pub fn create_tree(
     states_config: &StatesConfig,
     phases_config: &PhasesConfig,
     tags_config: &TagsConfig,
+    ids_config: &IdsConfig,
     args: Value,
 ) -> Result<Value> {
     let tree: TaskTreeInput = serde_json::from_value(
@@ -437,6 +440,7 @@ pub fn create_tree(
         states_config,
         phases_config,
         tags_config,
+        ids_config,
     )?;
 
     // Fetch the root task to return full details

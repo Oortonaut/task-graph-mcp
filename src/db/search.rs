@@ -200,7 +200,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::StatesConfig;
+    use crate::config::{IdsConfig, StatesConfig};
 
     fn states() -> StatesConfig {
         StatesConfig::default()
@@ -231,6 +231,7 @@ mod tests {
                 None,
                 None,
                 &states(),
+                &IdsConfig::default(),
             )
             .unwrap();
 
@@ -258,6 +259,7 @@ mod tests {
                 None,
                 None,
                 &states(),
+                &IdsConfig::default(),
             )
             .unwrap();
 
@@ -306,6 +308,7 @@ mod tests {
                 None,
                 None,
                 &states(),
+                &IdsConfig::default(),
             )
             .unwrap();
 
@@ -339,6 +342,7 @@ mod tests {
             None,
             None,
             &states(),
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -353,6 +357,7 @@ mod tests {
             None,
             None,
             &states(),
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -367,6 +372,7 @@ mod tests {
             None,
             None,
             &states(),
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -395,6 +401,7 @@ mod tests {
                 None,
                 None,
                 &states(),
+                &IdsConfig::default(),
             )
             .unwrap();
 

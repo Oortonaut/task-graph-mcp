@@ -3,7 +3,7 @@
 use super::state_transitions::record_state_transition;
 use super::{Database, now_ms};
 use crate::config::{
-    AutoAdvanceConfig, DependenciesConfig, PhasesConfig, StatesConfig, TagsConfig,
+    AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, StatesConfig, TagsConfig,
 };
 use crate::types::{
     PRIORITY_DEFAULT, Priority, Task, TaskTree, TaskTreeInput, Worker, clamp_priority,
@@ -13,14 +13,19 @@ use anyhow::{Result, anyhow};
 use petname::{Generator, Petnames};
 use rusqlite::{Connection, Row, params};
 
-/// Default number of words for generated task IDs.
-const TASK_ID_WORDS: u8 = 4;
-
 /// Generate a petname-based task ID using the large wordlist.
-fn generate_task_id() -> String {
-    Petnames::large()
-        .generate_one(TASK_ID_WORDS, "-")
-        .unwrap_or_else(|| format!("task-{}", super::now_ms()))
+/// Uses the configured number of words and case style.
+fn generate_task_id(ids_config: &IdsConfig) -> String {
+    let words = ids_config.task_id_words;
+    let case = ids_config.id_case;
+
+    // Generate with hyphen separator first (petname's default format)
+    let base = Petnames::large()
+        .generate_one(words, "-")
+        .unwrap_or_else(|| format!("task-{}", super::now_ms()));
+
+    // Convert to desired case
+    case.convert(&base)
 }
 
 /// Build an ORDER BY clause from sort_by and sort_order parameters.
@@ -220,7 +225,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
 
 impl Database {
     /// Create a new task.
-    /// If id is provided, uses it as the task ID; otherwise generates UUID7.
+    /// If id is provided, uses it as the task ID; otherwise generates a petname ID.
     /// If parent_id is provided, creates a 'contains' dependency from parent to this task.
     #[allow(clippy::too_many_arguments)]
     pub fn create_task(
@@ -236,8 +241,9 @@ impl Database {
         agent_tags_any: Option<Vec<String>>,
         tags: Option<Vec<String>>,
         states_config: &StatesConfig,
+        ids_config: &IdsConfig,
     ) -> Result<Task> {
-        let task_id = id.unwrap_or_else(generate_task_id);
+        let task_id = id.unwrap_or_else(|| generate_task_id(ids_config));
         let now = now_ms();
         let priority = clamp_priority(priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
@@ -321,6 +327,7 @@ impl Database {
         &self,
         description: impl Into<String>,
         states_config: &StatesConfig,
+        ids_config: &IdsConfig,
     ) -> Result<Task> {
         self.create_task(
             None,
@@ -334,6 +341,7 @@ impl Database {
             None,
             None,
             states_config,
+            ids_config,
         )
     }
 
@@ -349,6 +357,7 @@ impl Database {
         states_config: &StatesConfig,
         phases_config: &PhasesConfig,
         tags_config: &TagsConfig,
+        ids_config: &IdsConfig,
     ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>)> {
         let mut all_ids = Vec::new();
         let mut phase_warnings = Vec::new();
@@ -371,6 +380,7 @@ impl Database {
                 states_config,
                 phases_config,
                 tags_config,
+                ids_config,
             )?;
             tx.commit()?;
             Ok((root_id, all_ids, phase_warnings, tag_warnings))
@@ -1716,6 +1726,7 @@ fn create_tree_recursive(
     states_config: &StatesConfig,
     phases_config: &PhasesConfig,
     tags_config: &TagsConfig,
+    ids_config: &IdsConfig,
 ) -> Result<String> {
     // Check if this node references an existing task
     let task_id = if let Some(ref ref_id) = input.ref_id {
@@ -1731,7 +1742,10 @@ fn create_tree_recursive(
         ref_id.clone()
     } else {
         // Create a new task
-        let task_id = input.id.clone().unwrap_or_else(generate_task_id);
+        let task_id = input
+            .id
+            .clone()
+            .unwrap_or_else(|| generate_task_id(ids_config));
         let now = now_ms();
         let priority = clamp_priority(input.priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
@@ -1823,6 +1837,7 @@ fn create_tree_recursive(
             states_config,
             phases_config,
             tags_config,
+            ids_config,
         )?;
         prev_child_id = Some(child_id);
     }

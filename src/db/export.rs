@@ -265,7 +265,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{DependenciesConfig, StatesConfig};
+    use crate::config::{DependenciesConfig, IdsConfig, StatesConfig};
 
     fn default_states_config() -> StatesConfig {
         StatesConfig::default()
@@ -329,6 +329,7 @@ mod tests {
             None,
             None,
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -343,6 +344,7 @@ mod tests {
             None,
             None,
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -357,6 +359,7 @@ mod tests {
             None,
             None,
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -388,6 +391,7 @@ mod tests {
             None,
             None,
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
 
@@ -404,6 +408,7 @@ mod tests {
             None,
             None,
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
         // Soft delete: task_id, worker_id, cascade, reason, obliterate, force
@@ -448,6 +453,7 @@ mod tests {
                 None,
                 None,
                 &states_config,
+                &IdsConfig::default(),
             )
             .unwrap();
         }
@@ -508,6 +514,7 @@ mod tests {
             None,                                                 // wanted_tags
             Some(vec!["zebra".to_string(), "apple".to_string()]), // tags
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
         db.create_task(
@@ -522,6 +529,7 @@ mod tests {
             None,                            // wanted_tags
             Some(vec!["mango".to_string()]), // tags
             &states_config,
+            &IdsConfig::default(),
         )
         .unwrap();
 

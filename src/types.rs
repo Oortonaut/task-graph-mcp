@@ -171,7 +171,7 @@ pub struct TaskTreeInput {
     #[serde(rename = "ref")]
     pub ref_id: Option<String>,
 
-    /// Custom task ID (optional, UUID7 generated if not provided).
+    /// Custom task ID (optional, petname ID generated if not provided).
     /// Ignored if ref is set.
     pub id: Option<String>,
 

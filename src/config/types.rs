@@ -4,12 +4,94 @@
 
 use crate::format::OutputFormat;
 use anyhow::{Result, anyhow};
+use heck::{ToKebabCase, ToLowerCamelCase, ToSnakeCase, ToTitleCase, ToUpperCamelCase};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Default port for the web dashboard.
 pub const DEFAULT_UI_PORT: u16 = 31994;
+
+/// Default number of words for generated IDs.
+pub const DEFAULT_ID_WORDS: u8 = 4;
+
+/// Case style for generated IDs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IdCase {
+    /// kebab-case (default): happy-turtle-swift-fox
+    #[default]
+    KebabCase,
+    /// snake_case: happy_turtle_swift_fox
+    SnakeCase,
+    /// camelCase: happyTurtleSwiftFox
+    CamelCase,
+    /// PascalCase: HappyTurtleSwiftFox
+    PascalCase,
+    /// lowercase: happyturtleswiftfox
+    Lowercase,
+    /// UPPERCASE: HAPPYTURTLESWIFTFOX
+    Uppercase,
+    /// Title Case: Happy Turtle Swift Fox
+    TitleCase,
+}
+
+/// ID generation configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdsConfig {
+    /// Number of words for generated task IDs (default: 4).
+    #[serde(default = "default_id_words")]
+    pub task_id_words: u8,
+
+    /// Number of words for generated agent IDs (default: 4).
+    #[serde(default = "default_id_words")]
+    pub agent_id_words: u8,
+
+    /// Case style for generated IDs (default: kebab-case).
+    #[serde(default)]
+    pub id_case: IdCase,
+}
+
+fn default_id_words() -> u8 {
+    DEFAULT_ID_WORDS
+}
+
+impl Default for IdsConfig {
+    fn default() -> Self {
+        Self {
+            task_id_words: DEFAULT_ID_WORDS,
+            agent_id_words: DEFAULT_ID_WORDS,
+            id_case: IdCase::default(),
+        }
+    }
+}
+
+impl IdCase {
+    /// Convert a kebab-case string to the target case style.
+    /// Input is expected to be lowercase words separated by hyphens.
+    pub fn convert(&self, input: &str) -> String {
+        match self {
+            IdCase::KebabCase => input.to_kebab_case(),
+            IdCase::SnakeCase => input.to_snake_case(),
+            IdCase::CamelCase => input.to_lower_camel_case(),
+            IdCase::PascalCase => input.to_upper_camel_case(),
+            IdCase::Lowercase => input.replace('-', "").to_lowercase(),
+            IdCase::Uppercase => input.replace('-', "").to_uppercase(),
+            IdCase::TitleCase => input.to_title_case(),
+        }
+    }
+
+    /// Get the separator for this case style (used in petname generation).
+    /// Returns None for cases that don't use separators (camelCase, PascalCase, etc.).
+    pub fn separator(&self) -> Option<&'static str> {
+        match self {
+            IdCase::KebabCase => Some("-"),
+            IdCase::SnakeCase => Some("_"),
+            IdCase::TitleCase => Some(" "),
+            IdCase::CamelCase | IdCase::PascalCase | IdCase::Lowercase | IdCase::Uppercase => None,
+        }
+    }
+}
 
 /// UI mode for the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -396,6 +478,9 @@ pub struct Config {
 
     #[serde(default)]
     pub tags: TagsConfig,
+
+    #[serde(default)]
+    pub ids: IdsConfig,
 }
 
 /// Paths configured for the server, returned by connect.

@@ -13,8 +13,8 @@ pub mod tasks;
 pub mod tracking;
 
 use crate::config::{
-    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, ServerPaths,
-    StatesConfig, TagsConfig, workflows::WorkflowsConfig,
+    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, Prompts,
+    ServerPaths, StatesConfig, TagsConfig, workflows::WorkflowsConfig,
 };
 use crate::db::Database;
 use crate::error::ToolError;
@@ -38,6 +38,7 @@ pub struct ToolHandler {
     pub auto_advance: Arc<AutoAdvanceConfig>,
     pub attachments_config: Arc<AttachmentsConfig>,
     pub tags_config: Arc<TagsConfig>,
+    pub ids_config: Arc<IdsConfig>,
     pub workflows: Arc<WorkflowsConfig>,
     pub default_format: OutputFormat,
     pub path_mapper: Arc<crate::paths::PathMapper>,
@@ -57,6 +58,7 @@ impl ToolHandler {
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
         tags_config: Arc<TagsConfig>,
+        ids_config: Arc<IdsConfig>,
         workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
         path_mapper: Arc<crate::paths::PathMapper>,
@@ -73,6 +75,7 @@ impl ToolHandler {
             auto_advance,
             attachments_config,
             tags_config,
+            ids_config,
             workflows,
             default_format,
             path_mapper,
@@ -134,6 +137,7 @@ impl ToolHandler {
                 &self.phases_config,
                 &self.deps_config,
                 &self.tags_config,
+                &self.ids_config,
                 arguments,
             )),
             "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
@@ -155,6 +159,7 @@ impl ToolHandler {
                 &self.states_config,
                 &self.phases_config,
                 &self.tags_config,
+                &self.ids_config,
                 arguments,
             )),
             "create_tree" => json(tasks::create_tree(
@@ -162,6 +167,7 @@ impl ToolHandler {
                 &self.states_config,
                 &self.phases_config,
                 &self.tags_config,
+                &self.ids_config,
                 arguments,
             )),
             "get" => json(tasks::get(&self.db, self.default_format, arguments)),

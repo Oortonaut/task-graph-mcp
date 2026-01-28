@@ -25,8 +25,9 @@ use task_graph_mcp::cli::export::ExportArgs;
 use task_graph_mcp::cli::import::ImportArgs;
 use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode, migrate};
 use task_graph_mcp::config::{
-    AttachmentsConfig, AutoAdvanceConfig, Config, ConfigLoader, DependenciesConfig, PhasesConfig,
-    Prompts, ServerPaths, StatesConfig, TagsConfig, UiMode, workflows::WorkflowsConfig,
+    AttachmentsConfig, AutoAdvanceConfig, Config, ConfigLoader, DependenciesConfig, IdsConfig,
+    PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig, UiMode,
+    workflows::WorkflowsConfig,
 };
 use task_graph_mcp::dashboard;
 use task_graph_mcp::db::Database;
@@ -63,6 +64,7 @@ impl TaskGraphServer {
         auto_advance: Arc<AutoAdvanceConfig>,
         attachments_config: Arc<AttachmentsConfig>,
         tags_config: Arc<TagsConfig>,
+        ids_config: Arc<IdsConfig>,
         workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
         path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
@@ -80,6 +82,7 @@ impl TaskGraphServer {
                 Arc::clone(&auto_advance),
                 Arc::clone(&attachments_config),
                 Arc::clone(&tags_config),
+                ids_config,
                 workflows,
                 default_format,
                 path_mapper,
@@ -399,6 +402,7 @@ async fn run_server(
     let auto_advance = Arc::new(config.auto_advance.clone());
     let attachments_config = Arc::new(config.attachments.clone());
     let tags_config = Arc::new(config.tags.clone());
+    let ids_config = Arc::new(config.ids.clone());
 
     // Create path mapper from config
     let path_mapper = Arc::new(
@@ -418,6 +422,7 @@ async fn run_server(
         auto_advance,
         attachments_config,
         tags_config,
+        ids_config,
         workflows,
         config.server.default_format,
         path_mapper,

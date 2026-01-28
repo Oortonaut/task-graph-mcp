@@ -2,7 +2,7 @@
 
 use super::{get_bool, get_i32, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::{
-    DependenciesConfig, PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig,
+    DependenciesConfig, IdsConfig, PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig,
 };
 use crate::db::Database;
 use crate::error::ToolError;
@@ -123,6 +123,7 @@ pub fn connect(
     phases_config: &PhasesConfig,
     deps_config: &DependenciesConfig,
     tags_config: &TagsConfig,
+    ids_config: &IdsConfig,
     args: Value,
 ) -> Result<Value> {
     let worker_id = get_string(&args, "worker_id");
@@ -179,7 +180,7 @@ pub fn connect(
         }
     }
 
-    let worker = db.register_worker(worker_id, tags, force)?;
+    let worker = db.register_worker(worker_id, tags, force, ids_config)?;
 
     // Build config summary for the response
     let timed_states: Vec<&str> = states_config
