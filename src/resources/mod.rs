@@ -52,9 +52,10 @@ impl ResourceHandler {
     /// Get all available resource templates.
     pub fn get_resource_templates(&self) -> Vec<ResourceTemplate> {
         vec![
+            // Query resources (live DB queries)
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "tasks://all".into(),
+                    uri_template: "query://tasks/all".into(),
                     name: "All Tasks".into(),
                     title: None,
                     description: Some("Full task graph with dependencies".into()),
@@ -65,7 +66,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "tasks://ready".into(),
+                    uri_template: "query://tasks/ready".into(),
                     name: "Ready Tasks".into(),
                     title: None,
                     description: Some("Tasks ready to claim".into()),
@@ -76,7 +77,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "tasks://blocked".into(),
+                    uri_template: "query://tasks/blocked".into(),
                     name: "Blocked Tasks".into(),
                     title: None,
                     description: Some("Tasks blocked by dependencies".into()),
@@ -87,7 +88,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "tasks://claimed".into(),
+                    uri_template: "query://tasks/claimed".into(),
                     name: "Claimed Tasks".into(),
                     title: None,
                     description: Some("All claimed tasks".into()),
@@ -98,7 +99,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "tasks://agent/{agent_id}".into(),
+                    uri_template: "query://tasks/agent/{agent_id}".into(),
                     name: "Agent Tasks".into(),
                     title: None,
                     description: Some("Tasks owned by an agent".into()),
@@ -109,7 +110,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "tasks://tree/{task_id}".into(),
+                    uri_template: "query://tasks/tree/{task_id}".into(),
                     name: "Task Tree".into(),
                     title: None,
                     description: Some("Task with all descendants".into()),
@@ -120,7 +121,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "files://marks".into(),
+                    uri_template: "query://files/marks".into(),
                     name: "File Marks".into(),
                     title: None,
                     description: Some("All advisory file marks".into()),
@@ -131,7 +132,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "agents://all".into(),
+                    uri_template: "query://agents/all".into(),
                     name: "All Agents".into(),
                     title: None,
                     description: Some("Registered agents".into()),
@@ -142,67 +143,10 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
-                    uri_template: "plan://acp".into(),
-                    name: "ACP Plan".into(),
-                    title: None,
-                    description: Some("ACP-compatible plan export".into()),
-                    mime_type: Some("application/json".into()),
-                    icons: None,
-                },
-                None,
-            ),
-            Annotated::new(
-                RawResourceTemplate {
-                    uri_template: "stats://summary".into(),
+                    uri_template: "query://stats/summary".into(),
                     name: "Stats Summary".into(),
                     title: None,
                     description: Some("Aggregate statistics".into()),
-                    mime_type: Some("application/json".into()),
-                    icons: None,
-                },
-                None,
-            ),
-            // Skills resources
-            Annotated::new(
-                RawResourceTemplate {
-                    uri_template: "skills://list".into(),
-                    name: "Available Skills".into(),
-                    title: None,
-                    description: Some("List all bundled task-graph skills".into()),
-                    mime_type: Some("application/json".into()),
-                    icons: None,
-                },
-                None,
-            ),
-            Annotated::new(
-                RawResourceTemplate {
-                    uri_template: "skills://{name}".into(),
-                    name: "Skill Content".into(),
-                    title: None,
-                    description: Some("Get a specific skill (basics, coordinator, worker, reporting, migration, repair)".into()),
-                    mime_type: Some("text/markdown".into()),
-                    icons: None,
-                },
-                None,
-            ),
-            // Workflow resources
-            Annotated::new(
-                RawResourceTemplate {
-                    uri_template: "workflows://list".into(),
-                    name: "Available Workflows".into(),
-                    title: None,
-                    description: Some("List all available workflow topologies with descriptions".into()),
-                    mime_type: Some("application/json".into()),
-                    icons: None,
-                },
-                None,
-            ),
-            Annotated::new(
-                RawResourceTemplate {
-                    uri_template: "workflows://{name}".into(),
-                    name: "Workflow Details".into(),
-                    title: None,
-                    description: Some("Get detailed information about a specific workflow (states, phases, settings)".into()),
                     mime_type: Some("application/json".into()),
                     icons: None,
                 },
@@ -264,7 +208,51 @@ impl ResourceHandler {
                 },
                 None,
             ),
-            // Documentation resources
+            // Docs resources (reference content: docs, skills, workflows)
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://skills/list".into(),
+                    name: "Available Skills".into(),
+                    title: None,
+                    description: Some("List all bundled task-graph skills".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://skills/{name}".into(),
+                    name: "Skill Content".into(),
+                    title: None,
+                    description: Some("Get a specific skill (basics, coordinator, worker, reporting, migration, repair)".into()),
+                    mime_type: Some("text/markdown".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://workflows/list".into(),
+                    name: "Available Workflows".into(),
+                    title: None,
+                    description: Some("List all available workflow topologies with descriptions".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://workflows/{name}".into(),
+                    name: "Workflow Details".into(),
+                    title: None,
+                    description: Some("Get detailed information about a specific workflow (states, phases, settings)".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
             Annotated::new(
                 RawResourceTemplate {
                     uri_template: "docs://index".into(),
@@ -310,9 +298,10 @@ impl ResourceHandler {
     /// These are resources that can be directly accessed without any parameters.
     pub fn get_resources(&self) -> Vec<Resource> {
         vec![
+            // Query resources (live DB queries)
             Annotated::new(
                 RawResource {
-                    uri: "tasks://all".into(),
+                    uri: "query://tasks/all".into(),
                     name: "All Tasks".into(),
                     title: None,
                     description: Some("Full task graph with dependencies".into()),
@@ -325,7 +314,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResource {
-                    uri: "tasks://ready".into(),
+                    uri: "query://tasks/ready".into(),
                     name: "Ready Tasks".into(),
                     title: None,
                     description: Some("Tasks ready to claim".into()),
@@ -338,7 +327,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResource {
-                    uri: "tasks://blocked".into(),
+                    uri: "query://tasks/blocked".into(),
                     name: "Blocked Tasks".into(),
                     title: None,
                     description: Some("Tasks blocked by dependencies".into()),
@@ -351,7 +340,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResource {
-                    uri: "tasks://claimed".into(),
+                    uri: "query://tasks/claimed".into(),
                     name: "Claimed Tasks".into(),
                     title: None,
                     description: Some("All claimed tasks".into()),
@@ -364,7 +353,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResource {
-                    uri: "files://marks".into(),
+                    uri: "query://files/marks".into(),
                     name: "File Marks".into(),
                     title: None,
                     description: Some("All advisory file marks".into()),
@@ -377,7 +366,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResource {
-                    uri: "agents://all".into(),
+                    uri: "query://agents/all".into(),
                     name: "All Agents".into(),
                     title: None,
                     description: Some("Registered agents".into()),
@@ -390,20 +379,7 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResource {
-                    uri: "plan://acp".into(),
-                    name: "ACP Plan".into(),
-                    title: None,
-                    description: Some("ACP-compatible plan export".into()),
-                    mime_type: Some("application/json".into()),
-                    size: None,
-                    icons: None,
-                    meta: None,
-                },
-                None,
-            ),
-            Annotated::new(
-                RawResource {
-                    uri: "stats://summary".into(),
+                    uri: "query://stats/summary".into(),
                     name: "Stats Summary".into(),
                     title: None,
                     description: Some("Aggregate statistics".into()),
@@ -414,34 +390,7 @@ impl ResourceHandler {
                 },
                 None,
             ),
-            Annotated::new(
-                RawResource {
-                    uri: "skills://list".into(),
-                    name: "Available Skills".into(),
-                    title: None,
-                    description: Some("List all bundled task-graph skills".into()),
-                    mime_type: Some("application/json".into()),
-                    size: None,
-                    icons: None,
-                    meta: None,
-                },
-                None,
-            ),
-            Annotated::new(
-                RawResource {
-                    uri: "workflows://list".into(),
-                    name: "Available Workflows".into(),
-                    title: None,
-                    description: Some(
-                        "List all available workflow topologies with descriptions".into(),
-                    ),
-                    mime_type: Some("application/json".into()),
-                    size: None,
-                    icons: None,
-                    meta: None,
-                },
-                None,
-            ),
+            // Config resources
             Annotated::new(
                 RawResource {
                     uri: "config://current".into(),
@@ -510,7 +459,35 @@ impl ResourceHandler {
                 },
                 None,
             ),
-            // Documentation resources
+            // Docs resources (reference content: docs, skills, workflows)
+            Annotated::new(
+                RawResource {
+                    uri: "docs://skills/list".into(),
+                    name: "Available Skills".into(),
+                    title: None,
+                    description: Some("List all bundled task-graph skills".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "docs://workflows/list".into(),
+                    name: "Available Workflows".into(),
+                    title: None,
+                    description: Some(
+                        "List all available workflow topologies with descriptions".into(),
+                    ),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
             Annotated::new(
                 RawResource {
                     uri: "docs://index".into(),
@@ -529,23 +506,10 @@ impl ResourceHandler {
 
     /// Read a resource by URI.
     pub async fn read_resource(&self, uri: &str) -> Result<Value> {
-        // Parse the URI
-        if uri.starts_with("tasks://") {
-            self.read_tasks_resource(uri).await
-        } else if uri.starts_with("files://") {
-            self.read_files_resource(uri).await
-        } else if uri.starts_with("agents://") {
-            self.read_agents_resource(uri).await
-        } else if uri.starts_with("plan://") {
-            self.read_plan_resource(uri).await
-        } else if uri.starts_with("stats://") {
-            self.read_stats_resource(uri).await
-        } else if uri.starts_with("skills://") {
-            self.read_skills_resource(uri).await
+        if uri.starts_with("query://") {
+            self.read_query_resource(uri).await
         } else if uri.starts_with("config://") {
             self.read_config_resource(uri).await
-        } else if uri.starts_with("workflows://") {
-            self.read_workflows_resource(uri).await
         } else if uri.starts_with("docs://") {
             self.read_docs_resource(uri).await
         } else {
@@ -553,69 +517,34 @@ impl ResourceHandler {
         }
     }
 
-    async fn read_tasks_resource(&self, uri: &str) -> Result<Value> {
-        let path = uri.strip_prefix("tasks://").unwrap_or("");
+    async fn read_query_resource(&self, uri: &str) -> Result<Value> {
+        let path = uri.strip_prefix("query://").unwrap_or("");
 
         match path {
-            "all" => tasks::get_all_tasks(&self.db),
-            "ready" => tasks::get_ready_tasks(&self.db, &self.config.states, &self.config.deps),
-            "blocked" => tasks::get_blocked_tasks(&self.db, &self.config.states, &self.config.deps),
-            "claimed" => tasks::get_claimed_tasks(&self.db, None),
-            _ if path.starts_with("agent/") => {
-                let agent_id = path.strip_prefix("agent/").unwrap();
+            // Tasks
+            "tasks/all" => tasks::get_all_tasks(&self.db),
+            "tasks/ready" => {
+                tasks::get_ready_tasks(&self.db, &self.config.states, &self.config.deps)
+            }
+            "tasks/blocked" => {
+                tasks::get_blocked_tasks(&self.db, &self.config.states, &self.config.deps)
+            }
+            "tasks/claimed" => tasks::get_claimed_tasks(&self.db, None),
+            _ if path.starts_with("tasks/agent/") => {
+                let agent_id = path.strip_prefix("tasks/agent/").unwrap();
                 tasks::get_claimed_tasks(&self.db, Some(agent_id))
             }
-            _ if path.starts_with("tree/") => {
-                let task_id = path.strip_prefix("tree/").unwrap();
+            _ if path.starts_with("tasks/tree/") => {
+                let task_id = path.strip_prefix("tasks/tree/").unwrap();
                 tasks::get_task_tree(&self.db, task_id)
             }
-            _ => Err(anyhow::anyhow!("Unknown tasks resource: {}", path)),
-        }
-    }
-
-    async fn read_files_resource(&self, uri: &str) -> Result<Value> {
-        let path = uri.strip_prefix("files://").unwrap_or("");
-
-        match path {
-            "marks" => files::get_all_file_locks(&self.db),
-            _ => Err(anyhow::anyhow!("Unknown files resource: {}", path)),
-        }
-    }
-
-    async fn read_agents_resource(&self, uri: &str) -> Result<Value> {
-        let path = uri.strip_prefix("agents://").unwrap_or("");
-
-        match path {
-            "all" => agents::get_all_workers(&self.db),
-            _ => Err(anyhow::anyhow!("Unknown agents resource: {}", path)),
-        }
-    }
-
-    async fn read_plan_resource(&self, uri: &str) -> Result<Value> {
-        let path = uri.strip_prefix("plan://").unwrap_or("");
-
-        match path {
-            "acp" => stats::get_acp_plan(&self.db),
-            _ => Err(anyhow::anyhow!("Unknown plan resource: {}", path)),
-        }
-    }
-
-    async fn read_stats_resource(&self, uri: &str) -> Result<Value> {
-        let path = uri.strip_prefix("stats://").unwrap_or("");
-
-        match path {
-            "summary" => stats::get_stats_summary(&self.db, &self.config.states),
-            _ => Err(anyhow::anyhow!("Unknown stats resource: {}", path)),
-        }
-    }
-
-    async fn read_skills_resource(&self, uri: &str) -> Result<Value> {
-        let path = uri.strip_prefix("skills://").unwrap_or("");
-        let skills_dir = self.skills_dir.as_deref();
-
-        match path {
-            "list" => skills::list_skills(skills_dir),
-            name => skills::get_skill_resource(skills_dir, name),
+            // Files
+            "files/marks" => files::get_all_file_locks(&self.db),
+            // Agents
+            "agents/all" => agents::get_all_workers(&self.db),
+            // Stats
+            "stats/summary" => stats::get_stats_summary(&self.db, &self.config.states),
+            _ => Err(anyhow::anyhow!("Unknown query resource: {}", path)),
         }
     }
 
@@ -645,20 +574,25 @@ impl ResourceHandler {
         }
     }
 
-    async fn read_workflows_resource(&self, uri: &str) -> Result<Value> {
-        let path = uri.strip_prefix("workflows://").unwrap_or("");
-
-        match path {
-            "list" => workflows::list_workflows(&self.config.workflows),
-            name => workflows::get_workflow(&self.config.workflows, name),
-        }
-    }
-
     async fn read_docs_resource(&self, uri: &str) -> Result<Value> {
         let path = uri.strip_prefix("docs://").unwrap_or("");
+        let skills_dir = self.skills_dir.as_deref();
         let docs_dir = self.docs_dir.as_deref();
 
         match path {
+            // Skills
+            "skills/list" => skills::list_skills(skills_dir),
+            _ if path.starts_with("skills/") => {
+                let name = path.strip_prefix("skills/").unwrap();
+                skills::get_skill_resource(skills_dir, name)
+            }
+            // Workflows
+            "workflows/list" => workflows::list_workflows(&self.config.workflows),
+            _ if path.starts_with("workflows/") => {
+                let name = path.strip_prefix("workflows/").unwrap();
+                workflows::get_workflow(&self.config.workflows, name)
+            }
+            // Documentation files
             "index" => docs::list_docs(docs_dir),
             _ if path.starts_with("search/") => {
                 let query = path.strip_prefix("search/").unwrap_or("");

@@ -36,23 +36,25 @@ impl MutationKind {
     pub fn affected_uris(&self) -> &'static [&'static str] {
         match self {
             MutationKind::TaskChanged => &[
-                "tasks://all",
-                "tasks://ready",
-                "tasks://blocked",
-                "tasks://claimed",
-                "stats://summary",
-                "plan://acp",
+                "query://tasks/all",
+                "query://tasks/ready",
+                "query://tasks/blocked",
+                "query://tasks/claimed",
+                "query://stats/summary",
             ],
             MutationKind::DependencyChanged => &[
-                "tasks://all",
-                "tasks://ready",
-                "tasks://blocked",
-                "stats://summary",
-                "plan://acp",
+                "query://tasks/all",
+                "query://tasks/ready",
+                "query://tasks/blocked",
+                "query://stats/summary",
             ],
-            MutationKind::FileMarkChanged => &["files://marks"],
-            MutationKind::AgentChanged => &["agents://all", "tasks://claimed", "stats://summary"],
-            MutationKind::AttachmentChanged => &["tasks://all", "stats://summary"],
+            MutationKind::FileMarkChanged => &["query://files/marks"],
+            MutationKind::AgentChanged => &[
+                "query://agents/all",
+                "query://tasks/claimed",
+                "query://stats/summary",
+            ],
+            MutationKind::AttachmentChanged => &["query://tasks/all", "query://stats/summary"],
         }
     }
 }
@@ -128,41 +130,41 @@ mod tests {
         assert!(!mgr.has_subscriptions());
 
         // Subscribe
-        assert!(mgr.subscribe("tasks://all"));
+        assert!(mgr.subscribe("query://tasks/all"));
         assert!(mgr.has_subscriptions());
 
         // Duplicate subscribe returns false
-        assert!(!mgr.subscribe("tasks://all"));
+        assert!(!mgr.subscribe("query://tasks/all"));
 
         // Unsubscribe
-        assert!(mgr.unsubscribe("tasks://all"));
+        assert!(mgr.unsubscribe("query://tasks/all"));
         assert!(!mgr.has_subscriptions());
 
         // Unsubscribe missing returns false
-        assert!(!mgr.unsubscribe("tasks://all"));
+        assert!(!mgr.unsubscribe("query://tasks/all"));
     }
 
     #[test]
     fn test_affected_subscriptions() {
         let mgr = SubscriptionManager::new();
-        mgr.subscribe("tasks://all");
-        mgr.subscribe("files://marks");
+        mgr.subscribe("query://tasks/all");
+        mgr.subscribe("query://files/marks");
 
-        // TaskChanged should include tasks://all but not files://marks
+        // TaskChanged should include query://tasks/all but not query://files/marks
         let affected = mgr.affected_subscriptions(&[MutationKind::TaskChanged]);
-        assert!(affected.contains(&"tasks://all".to_string()));
-        assert!(!affected.contains(&"files://marks".to_string()));
+        assert!(affected.contains(&"query://tasks/all".to_string()));
+        assert!(!affected.contains(&"query://files/marks".to_string()));
 
-        // FileMarkChanged should include files://marks
+        // FileMarkChanged should include query://files/marks
         let affected = mgr.affected_subscriptions(&[MutationKind::FileMarkChanged]);
-        assert!(affected.contains(&"files://marks".to_string()));
-        assert!(!affected.contains(&"tasks://all".to_string()));
+        assert!(affected.contains(&"query://files/marks".to_string()));
+        assert!(!affected.contains(&"query://tasks/all".to_string()));
 
         // Combined mutations
         let affected =
             mgr.affected_subscriptions(&[MutationKind::TaskChanged, MutationKind::FileMarkChanged]);
-        assert!(affected.contains(&"tasks://all".to_string()));
-        assert!(affected.contains(&"files://marks".to_string()));
+        assert!(affected.contains(&"query://tasks/all".to_string()));
+        assert!(affected.contains(&"query://files/marks".to_string()));
     }
 
     #[test]
@@ -175,10 +177,10 @@ mod tests {
     #[test]
     fn test_unsubscribed_uri_not_notified() {
         let mgr = SubscriptionManager::new();
-        // Subscribe only to files://marks, not tasks://all
-        mgr.subscribe("files://marks");
+        // Subscribe only to query://files/marks, not query://tasks/all
+        mgr.subscribe("query://files/marks");
 
         let affected = mgr.affected_subscriptions(&[MutationKind::TaskChanged]);
-        assert!(affected.is_empty()); // tasks://all is not subscribed
+        assert!(affected.is_empty()); // query://tasks/all is not subscribed
     }
 }
