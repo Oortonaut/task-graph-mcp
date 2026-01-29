@@ -12,7 +12,7 @@ use crate::config::workflows::WorkflowsConfig;
 use crate::config::{DependenciesConfig, PhasesConfig, StatesConfig, TagsConfig};
 use crate::db::Database;
 use anyhow::Result;
-use rmcp::model::{Annotated, RawResourceTemplate, ResourceTemplate};
+use rmcp::model::{Annotated, RawResource, RawResourceTemplate, Resource, ResourceTemplate};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -213,6 +213,269 @@ impl ResourceHandler {
                 },
                 None,
             ),
+            // Config resources
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "config://current".into(),
+                    name: "Current Configuration".into(),
+                    title: None,
+                    description: Some("All configuration (states, phases, dependencies, tags) in one response".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "config://states".into(),
+                    name: "States Configuration".into(),
+                    title: None,
+                    description: Some("Task state definitions and transitions".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "config://phases".into(),
+                    name: "Phases Configuration".into(),
+                    title: None,
+                    description: Some("Work phase definitions".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "config://dependencies".into(),
+                    name: "Dependencies Configuration".into(),
+                    title: None,
+                    description: Some("Dependency type definitions".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "config://tags".into(),
+                    name: "Tags Configuration".into(),
+                    title: None,
+                    description: Some("Tag definitions and categories".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+        ]
+    }
+
+    /// Get all concrete resources (those without template parameters).
+    /// These are resources that can be directly accessed without any parameters.
+    pub fn get_resources(&self) -> Vec<Resource> {
+        vec![
+            Annotated::new(
+                RawResource {
+                    uri: "tasks://all".into(),
+                    name: "All Tasks".into(),
+                    title: None,
+                    description: Some("Full task graph with dependencies".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "tasks://ready".into(),
+                    name: "Ready Tasks".into(),
+                    title: None,
+                    description: Some("Tasks ready to claim".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "tasks://blocked".into(),
+                    name: "Blocked Tasks".into(),
+                    title: None,
+                    description: Some("Tasks blocked by dependencies".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "tasks://claimed".into(),
+                    name: "Claimed Tasks".into(),
+                    title: None,
+                    description: Some("All claimed tasks".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "files://marks".into(),
+                    name: "File Marks".into(),
+                    title: None,
+                    description: Some("All advisory file marks".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "agents://all".into(),
+                    name: "All Agents".into(),
+                    title: None,
+                    description: Some("Registered agents".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "plan://acp".into(),
+                    name: "ACP Plan".into(),
+                    title: None,
+                    description: Some("ACP-compatible plan export".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "stats://summary".into(),
+                    name: "Stats Summary".into(),
+                    title: None,
+                    description: Some("Aggregate statistics".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "skills://list".into(),
+                    name: "Available Skills".into(),
+                    title: None,
+                    description: Some("List all bundled task-graph skills".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "workflows://list".into(),
+                    name: "Available Workflows".into(),
+                    title: None,
+                    description: Some(
+                        "List all available workflow topologies with descriptions".into(),
+                    ),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "config://current".into(),
+                    name: "Current Configuration".into(),
+                    title: None,
+                    description: Some(
+                        "All configuration (states, phases, dependencies, tags) in one response"
+                            .into(),
+                    ),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "config://states".into(),
+                    name: "States Configuration".into(),
+                    title: None,
+                    description: Some("Task state definitions and transitions".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "config://phases".into(),
+                    name: "Phases Configuration".into(),
+                    title: None,
+                    description: Some("Work phase definitions".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "config://dependencies".into(),
+                    name: "Dependencies Configuration".into(),
+                    title: None,
+                    description: Some("Dependency type definitions".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
+                    uri: "config://tags".into(),
+                    name: "Tags Configuration".into(),
+                    title: None,
+                    description: Some("Tag definitions and categories".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
         ]
     }
 
@@ -310,6 +573,20 @@ impl ResourceHandler {
         let path = uri.strip_prefix("config://").unwrap_or("");
 
         match path {
+            "current" => {
+                // Return all configuration in one response
+                let states = config::get_states_config(&self.states_config)?;
+                let phases = config::get_phases_config(&self.phases_config)?;
+                let dependencies = config::get_dependencies_config(&self.deps_config)?;
+                let tags = config::get_tags_config(&self.tags_config)?;
+
+                Ok(serde_json::json!({
+                    "states": states,
+                    "phases": phases,
+                    "dependencies": dependencies,
+                    "tags": tags,
+                }))
+            }
             "states" => config::get_states_config(&self.states_config),
             "phases" => config::get_phases_config(&self.phases_config),
             "dependencies" => config::get_dependencies_config(&self.deps_config),

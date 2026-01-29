@@ -441,6 +441,25 @@ hierarchical:
     velocity_window_days: 7     # Calculate velocity over 7 days
 
 # =============================================================================
+# GATES
+# =============================================================================
+# Hierarchical workflows use bidirectional gates for lead-worker communication.
+# Workers report results up to leads; leads provide specs down to workers.
+
+gates:
+  # Workers must attach results for lead visibility
+  status:working:
+    - type: "gate/results"
+      enforcement: warn
+      description: "Attach results for lead visibility"
+
+  # Lead should provide task specification before worker claims
+  status:assigned:
+    - type: "gate/spec"
+      enforcement: warn
+      description: "Lead should provide task specification"
+
+# =============================================================================
 # ATTACHMENT GUIDANCE
 # =============================================================================
 # Recommended attachment types for hierarchical workflows. These types are

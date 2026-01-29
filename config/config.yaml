@@ -9,6 +9,11 @@
 #   TASK_GRAPH_DB_PATH, TASK_GRAPH_MEDIA_DIR, TASK_GRAPH_LOG_DIR, TASK_GRAPH_SKILLS_DIR
 
 server:
+  # Default workflow name (e.g., "solo", "swarm", "relay", "hierarchical")
+  # Uses workflow-{name}.yaml as the base workflow configuration.
+  # Solo is recommended for single-agent use.
+  default_workflow: "solo"
+  
   # Path to SQLite database file
   db_path: "task-graph/tasks.db"
   

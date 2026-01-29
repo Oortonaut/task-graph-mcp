@@ -214,7 +214,7 @@ impl ServerHandler for TaskGraphServer {
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListResourcesResult, ErrorData> {
         Ok(ListResourcesResult {
-            resources: vec![],
+            resources: self.resource_handler.get_resources(),
             next_cursor: None,
             meta: None,
         })

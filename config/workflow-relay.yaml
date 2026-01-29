@@ -550,6 +550,37 @@ attachments:
       example: |
         attach(task=id, type="gate/commit", content="abc123f - merged to main")
 
+# =============================================================================
+# GATES
+# =============================================================================
+# Relay workflows use reject gates to ensure proper handoff artifacts.
+# Each specialist must provide deliverables the next specialist needs.
+
+gates:
+  # Phase-exit gates enforce handoff artifacts
+  phase:design:
+    - type: "gate/spec"
+      enforcement: reject
+      description: "Design specification required for handoff to implementer"
+
+  phase:implement:
+    - type: "gate/commit"
+      enforcement: reject
+      description: "Commit hash required for reviewer"
+    - type: "gate/impl-notes"
+      enforcement: warn
+      description: "Implementation notes explaining decisions"
+
+  phase:review:
+    - type: "gate/approval"
+      enforcement: reject
+      description: "Explicit approval or rejection with notes required"
+
+  phase:test:
+    - type: "gate/test-results"
+      enforcement: reject
+      description: "Comprehensive test results required"
+
 # Task tree template for relay workflow
 templates:
   feature:

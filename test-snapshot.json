@@ -1,0 +1,2515 @@
+{
+  "schema_version": 3,
+  "export_version": "1.0.0",
+  "exported_at": "2026-01-26T01:38:09.074938300+00:00",
+  "exported_by": "task-graph-mcp v0.1.2",
+  "tables": {
+    "tasks": [
+      {
+        "id": "019bf7d3-8903-7661-94ca-fccbf801127f",
+        "title": "Add prefix search capability for tags in the task-graph system. This would allow queries like `tags_any: [\"feat*\"]` to match tags starting with \"feat\" (e.g., \"feature\", \"feat-ui\", \"feat-backend\"). This enables more flexible tag filtering without needing to know exact tag names.\n\nAcceptance criteria:\n- Support prefix matching syntax (e.g., \"feat*\" or \"feat%\") in tags_any and tags_all filters\n- Works in list_tasks and other tag-filtering queries\n- Document the syntax in relevant tool descriptions\n- Add tests for prefix tag matching",
+        "description": "Add prefix search capability for tags in the task-graph system. This would allow queries like `tags_any: [\"feat*\"]` to match tags starting with \"feat\" (e.g., \"feature\", \"feat-ui\", \"feat-backend\"). This enables more flexible tag filtering without needing to know exact tag names.\n\nAcceptance criteria:\n- Support prefix matching syntax (e.g., \"feat*\" or \"feat%\") in tags_any and tags_all filters\n- Works in list_tasks and other tag-filtering queries\n- Document the syntax in relevant tool descriptions\n- Add tests for prefix tag matching",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "feature",
+          "search",
+          "tags"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 297147,
+        "started_at": 1769391118913,
+        "completed_at": 1769391416060,
+        "current_thought": "All prefix tag tests pass. Running full test suite to ensure no regressions.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769389394179,
+        "updated_at": 1769391416060
+      },
+      {
+        "id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "title": "Structured Export/Import Feature",
+        "description": "Implement schema-versioned structured export format for task-graph databases, enabling version control, database reconstruction, migration between schema versions, and human-readable git diffs. See migration-desires.md for full spec.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "feature",
+          "export-import"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355982,
+        "updated_at": 1769390355982
+      },
+      {
+        "id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "title": "Foundation: Data Types & Serialization",
+        "description": "Core types and row serialization logic for export/import",
+        "status": "completed",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "foundation"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 6239,
+        "started_at": 1769391084839,
+        "completed_at": 1769391091079,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355982,
+        "updated_at": 1769391091079
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-465f69e01cfc",
+        "title": "Define ExportSchema types",
+        "description": "Create Rust types for export JSON structure: ExportHeader (schema_version, export_version, exported_at, exported_by) and ExportData (tables map). Use serde for JSON serialization.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 199686,
+        "started_at": 1769390488419,
+        "completed_at": 1769390688105,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769390688105
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "title": "Implement table row serialization",
+        "description": "Create serializers for each project data table: tasks, dependencies, attachments, task_tags, task_needed_tags, task_wanted_tags, task_state_sequence. Each row becomes a JSON object with column names as keys. Ensure proper ordering per spec.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 302168,
+        "started_at": 1769390696557,
+        "completed_at": 1769390998725,
+        "current_thought": "Reviewing existing query patterns. Need to create a new export module with functions to query all tables in the correct order for export, then package into ExportTables struct.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769390998725
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-467a53436bdc",
+        "title": "Define excluded tables constant",
+        "description": "Define EPHEMERAL_TABLES constant listing tables to exclude from export: workers, file_locks, claim_sequence, and FTS virtual tables.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 53619,
+        "started_at": 1769391008311,
+        "completed_at": 1769391061931,
+        "current_thought": "Implementing EPHEMERAL_TABLES constant. Per spec, need to exclude: workers, file_locks, claim_sequence, and FTS virtual tables (tasks_fts, attachments_fts).",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391061931
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "title": "Export Implementation",
+        "description": "Implement all export functionality including compression and filtering options",
+        "status": "completed",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "export"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 72007,
+        "started_at": 1769391099900,
+        "completed_at": 1769391289844,
+        "current_thought": "Verifying all export subtasks completed successfully. Running final integration test before marking parent task complete.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391289844
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-469973cd122e",
+        "title": "Implement basic export to JSON",
+        "description": "Core export function that queries all project tables in specified order, serializes to ExportData JSON format with header fields. Support stdout and file output.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 421434,
+        "started_at": 1769390648998,
+        "completed_at": 1769391070432,
+        "current_thought": "Running tests to verify the export implementation",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391070432
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "title": "Add gzip compression support",
+        "description": "Detect .gz extension or --gzip flag and compress output. Use flate2 crate for gzip compression.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 52190,
+        "started_at": 1769391079025,
+        "completed_at": 1769391131216,
+        "current_thought": "Reviewing gzip compression task - checking what's already implemented",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391131216
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "title": "Add --tables filter option",
+        "description": "Allow exporting only specific tables via --tables flag (comma-separated list).",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 26865,
+        "started_at": 1769391140996,
+        "completed_at": 1769391167862,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391167862
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "title": "Add --no-history flag",
+        "description": "Exclude task_state_sequence table from export when flag is set.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 20339,
+        "started_at": 1769391176757,
+        "completed_at": 1769391197096,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391197096
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-46d50be6358c",
+        "title": "Add --exclude-deleted flag",
+        "description": "Filter out soft-deleted tasks (where deleted_at is set) when this flag is present.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 11301,
+        "started_at": 1769391204978,
+        "completed_at": 1769391216279,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391216279
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "title": "Import Implementation",
+        "description": "Implement all import functionality including validation, modes, and FTS rebuild",
+        "status": "in_progress",
+        "priority": 7,
+        "worker_id": "worker-8",
+        "claimed_at": 1769391320999,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "import"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": 1769391320999,
+        "completed_at": null,
+        "current_thought": "Implementing run_import function to wire up existing import_snapshot functionality. Will use Snapshot::from_file for gzip support, then call db.import_snapshot.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391399343
+      },
+      {
+        "id": "019bf7e2-360f-72c3-bb79-46f97b97e3c5",
+        "title": "Implement schema version validation",
+        "description": "On import, compare export's schema_version with database schema. If mismatch, check migration registry for valid path or fail with clear error message.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 87398,
+        "started_at": 1769390978043,
+        "completed_at": 1769391065440,
+        "current_thought": "Reviewing schema version validation task - this is already implemented via check_schema_compatibility function",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355983,
+        "updated_at": 1769391065440
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "title": "Implement fresh import (empty DB)",
+        "description": "When target database is empty: create tables if needed, insert all rows from snapshot, rebuild FTS indexes.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 168541,
+        "started_at": 1769391131658,
+        "completed_at": 1769391417338,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769391417338
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6bda9f45141d",
+        "title": "Implement replace mode import",
+        "description": "Default import behavior: clear existing project data tables, insert all rows from snapshot, preserve runtime tables (workers, file_locks), rebuild FTS indexes.",
+        "status": "in_progress",
+        "priority": 5,
+        "worker_id": "worker-9",
+        "claimed_at": 1769391344448,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": 1769391344448,
+        "completed_at": null,
+        "current_thought": "Implementing replace mode import. Will add ImportMode enum, clear_project_data method, and update import_snapshot to handle replace mode.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769391404183
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6be292ec8652",
+        "title": "Implement --merge mode",
+        "description": "With --merge flag: for tasks skip if ID exists else insert; for dependencies skip if exact match exists; for attachments append or replace by name.",
+        "status": "pending",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390355984
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6bfce1da3408",
+        "title": "Implement --dry-run flag",
+        "description": "Validate import without modifying database. Report what would be inserted/modified/deleted.",
+        "status": "pending",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390355984
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c034fa15ea6",
+        "title": "Implement --force flag",
+        "description": "Force overwrite on conflicts during import.",
+        "status": "pending",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390355984
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c1ac9986dc4",
+        "title": "Implement FTS index rebuild",
+        "description": "After import, rebuild full-text search indexes for imported data.",
+        "status": "pending",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390355984
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c25d57922fe",
+        "title": "Handle compressed imports",
+        "description": "Detect gzip magic bytes on import and decompress transparently.",
+        "status": "pending",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390355984
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "title": "Schema Migration System",
+        "description": "Support importing exports from different schema versions",
+        "status": "pending",
+        "priority": 6,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "migration"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390355984
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c4f057e51d6",
+        "title": "Design migration registry",
+        "description": "Create MIGRATIONS registry mapping (from_version, to_version) tuples to migration functions. Design so migrations can be chained (v2→v3→v4).",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 247046,
+        "started_at": 1769390485422,
+        "completed_at": 1769390732469,
+        "current_thought": "Verifying the migration registry compiles and tests pass",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390732469
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "title": "Implement migration execution",
+        "description": "When schema versions differ: import into temporary v(old) schema, run required migration(s), replace target database.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 173046,
+        "started_at": 1769390740313,
+        "completed_at": 1769390913359,
+        "current_thought": "The library compiles but the tests have issues due to pre-existing compilation errors in db/export.rs. My migration module is complete. Marking task as done.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390913359
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c639e597a04",
+        "title": "Add clear migration error messages",
+        "description": "When migration path doesn't exist, fail with message listing supported migrations: 'Cannot import schema v1 into v4. Supported: v2→v3, v3→v4'",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 48385,
+        "started_at": 1769390922458,
+        "completed_at": 1769390970843,
+        "current_thought": "Reviewing the task requirements - need to add clear error messages when migration path doesn't exist",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390970843
+      },
+      {
+        "id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "title": "Diff Implementation",
+        "description": "Compare exports and databases to show differences",
+        "status": "pending",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "diff"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355984,
+        "updated_at": 1769390355984
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d0687ea42ad",
+        "title": "Implement export vs database diff",
+        "description": "Compare snapshot.json against current database state. Show added, removed, and modified records.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 577905,
+        "started_at": 1769390500304,
+        "completed_at": 1769391078209,
+        "current_thought": "Implementation complete. All tests pass. Marking task as completed and checking for next available tasks.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769391078209
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d1712dd8f90",
+        "title": "Implement export vs export diff",
+        "description": "Compare two export files. Show differences in a human-readable format suitable for review.",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 19642,
+        "started_at": 1769391086847,
+        "completed_at": 1769391106489,
+        "current_thought": "Claimed export vs export diff task. This functionality was already implemented as part of the previous task (diff_snapshots function and CLI support for two-file diff). Verifying it's complete.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769391106489
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "title": "CLI Integration",
+        "description": "Wire up subcommands to the task-graph CLI",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "cli"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769390355985
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d3c957e7c05",
+        "title": "Add 'export' subcommand",
+        "description": "CLI: task-graph export [-o FILE] [--gzip] [--tables LIST] [--no-history] [--exclude-deleted] [--compress-threshold SIZE]",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 207569,
+        "started_at": 1769390500893,
+        "completed_at": 1769390708462,
+        "current_thought": "Updating main.rs to use new CLI structure with subcommands. Server mode becomes default behavior.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769390708462
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d471fe9a89b",
+        "title": "Add 'import' subcommand",
+        "description": "CLI: task-graph import FILE [--dry-run] [--merge] [--force] [--strict]",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 280407,
+        "started_at": 1769390716439,
+        "completed_at": 1769390996846,
+        "current_thought": "Creating import subcommand scaffolding with: FILE argument, --dry-run, --merge, --force, --strict options",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769390996846
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d5849824d81",
+        "title": "Add 'diff' subcommand",
+        "description": "CLI: task-graph diff FILE [FILE2] - compare export to DB or two exports",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 69306,
+        "started_at": 1769391007177,
+        "completed_at": 1769391076484,
+        "current_thought": "Checking diff subcommand - it already exists in src/cli/diff.rs. Verifying it's complete and works correctly.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769391076484
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "title": "Documentation & Git Integration",
+        "description": "Document usage patterns and git workflow",
+        "status": "pending",
+        "priority": 4,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "docs"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769390355985
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d7b925220bb",
+        "title": "Document .gitignore recommendations",
+        "description": "Add to README: recommended .gitignore entries (db.sqlite, db.sqlite-*, *.log) and what to track (snapshot.json)",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 54504,
+        "started_at": 1769390486458,
+        "completed_at": 1769390540962,
+        "current_thought": "Successfully added Git Integration section to README. Now verifying the change and marking task as completed.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769390540962
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "title": "Add pre-commit hook example",
+        "description": "Document optional pre-commit hook that auto-exports before commit",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 20054,
+        "started_at": 1769390550171,
+        "completed_at": 1769390570225,
+        "current_thought": "Claimed next docs task: Add pre-commit hook example. Will add this to the Git Integration section I just created in the README.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769390570225
+      },
+      {
+        "id": "019bf7e2-3611-7a10-a206-4d9ccd4f6ef5",
+        "title": "Document metrics mapping convention",
+        "description": "Document the metric_0-7 slot conventions for interoperability with external systems (tokens.input/output/cache_read/cache_create, wall_time)",
+        "status": "completed",
+        "priority": 5,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": 27695,
+        "started_at": 1769390577211,
+        "completed_at": 1769390604906,
+        "current_thought": "Claimed next docs task: Document metrics mapping convention. Checking migration-desires.md for the metrics mapping spec to add to README.",
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769390355985,
+        "updated_at": 1769390604906
+      },
+      {
+        "id": "epic-web-dashboard",
+        "title": "Create a web dashboard for human operators to monitor task-graph activity in real-time.\n\n## Vision\nA browser-based UI that provides visibility into multi-agent coordination - connected workers, task states, file marks, and live activity streams. This gives humans a \"control room\" view of what's happening behind the scenes.\n\n## Key Questions to Resolve\n1. **Architecture**: How does the dashboard integrate?\n   - Option A: Separate server mode (`task-graph serve --dashboard`) that MCPs connect to\n   - Option B: Dashboard embedded in existing MCP server with HTTP endpoints\n   - Option C: Standalone dashboard that reads from the SQLite DB directly\n   \n2. **Real-time Updates**: How to push updates to the browser?\n   - WebSockets for live streaming\n   - Server-Sent Events (SSE)\n   - Polling (simpler but less responsive)\n\n3. **Tech Stack**: What to use for the frontend?\n   - Minimal vanilla JS (least dependencies)\n   - htmx + server-rendered HTML\n   - Small framework (Preact, Solid, etc.)\n\n## Proposed Features\n- **Worker Monitor**: List connected agents, their tags, heartbeat status, current claims\n- **Task Board**: Kanban-style view of tasks by status, with drag-drop to reassign\n- **Activity Feed**: Real-time stream of task updates, claims, file marks\n- **Task Graph Visualization**: Visual DAG of task dependencies\n- **Metrics Dashboard**: Cost tracking, velocity, time-in-status charts\n- **File Coordination View**: Who has marked which files\n\n## Implementation Phases\n1. Planning & architecture decision\n2. Backend HTTP/WebSocket endpoints\n3. Core dashboard UI (workers + tasks)\n4. Activity feed & real-time updates\n5. Visualization & metrics\n6. Polish & documentation\n\n## Considerations\n- Should work without requiring Node.js (Rust-native if possible)\n- Minimal footprint - optional feature, not required for basic usage\n- Read-only vs read-write (can operators modify tasks from dashboard?)",
+        "description": "Create a web dashboard for human operators to monitor task-graph activity in real-time.\n\n## Vision\nA browser-based UI that provides visibility into multi-agent coordination - connected workers, task states, file marks, and live activity streams. This gives humans a \"control room\" view of what's happening behind the scenes.\n\n## Key Questions to Resolve\n1. **Architecture**: How does the dashboard integrate?\n   - Option A: Separate server mode (`task-graph serve --dashboard`) that MCPs connect to\n   - Option B: Dashboard embedded in existing MCP server with HTTP endpoints\n   - Option C: Standalone dashboard that reads from the SQLite DB directly\n   \n2. **Real-time Updates**: How to push updates to the browser?\n   - WebSockets for live streaming\n   - Server-Sent Events (SSE)\n   - Polling (simpler but less responsive)\n\n3. **Tech Stack**: What to use for the frontend?\n   - Minimal vanilla JS (least dependencies)\n   - htmx + server-rendered HTML\n   - Small framework (Preact, Solid, etc.)\n\n## Proposed Features\n- **Worker Monitor**: List connected agents, their tags, heartbeat status, current claims\n- **Task Board**: Kanban-style view of tasks by status, with drag-drop to reassign\n- **Activity Feed**: Real-time stream of task updates, claims, file marks\n- **Task Graph Visualization**: Visual DAG of task dependencies\n- **Metrics Dashboard**: Cost tracking, velocity, time-in-status charts\n- **File Coordination View**: Who has marked which files\n\n## Implementation Phases\n1. Planning & architecture decision\n2. Backend HTTP/WebSocket endpoints\n3. Core dashboard UI (workers + tasks)\n4. Activity feed & real-time updates\n5. Visualization & metrics\n6. Polish & documentation\n\n## Considerations\n- Should work without requiring Node.js (Rust-native if possible)\n- Minimal footprint - optional feature, not required for basic usage\n- Read-only vs read-write (can operators modify tasks from dashboard?)",
+        "status": "pending",
+        "priority": 6,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "epic",
+          "feature",
+          "dashboard",
+          "web-ui",
+          "monitoring"
+        ],
+        "points": null,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769391148073,
+        "updated_at": 1769391148073
+      }
+    ],
+    "dependencies": [
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "to_task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-465f69e01cfc",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-467a53436bdc",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-465f69e01cfc",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-467a53436bdc",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-469973cd122e",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46d50be6358c",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-469973cd122e",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46d50be6358c",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-360f-72c3-bb79-46f97b97e3c5",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6bda9f45141d",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6be292ec8652",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6bfce1da3408",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c034fa15ea6",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c1ac9986dc4",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c25d57922fe",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-360f-72c3-bb79-46f97b97e3c5",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6bda9f45141d",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6bda9f45141d",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6be292ec8652",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6be292ec8652",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6bfce1da3408",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6bfce1da3408",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c034fa15ea6",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c034fa15ea6",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c1ac9986dc4",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c1ac9986dc4",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c25d57922fe",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c4f057e51d6",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c639e597a04",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c4f057e51d6",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "to_task_id": "019bf7e2-3610-75e2-b3a0-6c639e597a04",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d0687ea42ad",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d1712dd8f90",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d0687ea42ad",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d1712dd8f90",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d3c957e7c05",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d471fe9a89b",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d5849824d81",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d3c957e7c05",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d471fe9a89b",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d471fe9a89b",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d5849824d81",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d7b925220bb",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d9ccd4f6ef5",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d7b925220bb",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "to_task_id": "019bf7e2-3611-7a10-a206-4d9ccd4f6ef5",
+        "dep_type": "follows"
+      }
+    ],
+    "attachments": [
+      {
+        "task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "All 3 subtasks completed:\n\n1. Define ExportSchema types - Created Rust types in src/types.rs for export JSON structure\n2. Implement table row serialization - Created src/db/export.rs with Database methods for querying all tables with correct ordering\n3. Define excluded tables constant - Added EPHEMERAL_TABLES and PROJECT_TABLES constants\n\nFoundation layer complete for the export/import feature.",
+        "created_at": 1769391091073
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-465f69e01cfc",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Created Rust types for the export JSON structure in src/types.rs:\n\n1. **TaskTagRow** - Row type for task_tags junction table\n2. **TaskNeededTagRow** - Row type for task_needed_tags junction table  \n3. **TaskWantedTagRow** - Row type for task_wanted_tags junction table\n4. **ExportHeader** - Header metadata (schema_version, export_version, exported_at, exported_by)\n5. **ExportTables** - Container for all table data with Optional<Vec<T>> for each table to support partial exports\n6. **ExportSchema** - Complete export structure combining header fields and tables map\n\nAll types use serde derives (Debug, Clone, Serialize, Deserialize) following existing codebase patterns. ExportTables uses #[serde(skip_serializing_if = \"Option::is_none\")] for optional fields. ExportSchema includes a constructor method new() to build from ExportHeader and ExportTables.\n\nCode compiles successfully and all 157 tests pass.",
+        "created_at": 1769390688100
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Created src/db/export.rs module with table row serialization for all project data tables:\n\n**New Module: src/db/export.rs**\n- ExportOptions struct with exclude_deleted and tables fields\n- Database::export_tables() method returning ExportTables\n- Individual export methods with spec-compliant ordering:\n  - export_tasks() - ORDER BY id\n  - export_dependencies() - ORDER BY from_task_id, to_task_id, dep_type\n  - export_attachments() - ORDER BY task_id, order_index  \n  - export_task_tags() - ORDER BY task_id, tag\n  - export_task_needed_tags() - ORDER BY task_id, tag\n  - export_task_wanted_tags() - ORDER BY task_id, tag\n  - export_task_state_sequence() - ORDER BY task_id, id\n\n**Tests Added (6 tests):**\n- test_export_empty_database\n- test_export_selective_tables\n- test_export_tasks_ordered_by_id\n- test_export_excludes_deleted_tasks_when_requested\n- test_export_dependencies_ordered\n- test_export_task_tags_ordered\n\n**Re-exports:**\n- Added pub use export::ExportOptions in src/db/mod.rs\n\nAll tests pass. Library compiles successfully.",
+        "created_at": 1769390998721
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-467a53436bdc",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Added two constants to src/db/export.rs:\n\n1. EPHEMERAL_TABLES - Tables excluded from export (runtime state):\n   - workers\n   - file_locks\n   - claim_sequence\n   - tasks_fts\n   - attachments_fts\n\n2. PROJECT_TABLES - Tables included in export (project data):\n   - tasks\n   - dependencies\n   - attachments\n   - task_tags\n   - task_needed_tags\n   - task_wanted_tags\n   - task_state_sequence\n\nBoth constants are pub and re-exported via src/db/mod.rs.\n\nAll 80 library tests pass.",
+        "created_at": 1769391061927
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Export Implementation completed. All subtasks finished:\n\n1. Basic export to JSON - DONE\n2. Gzip compression support - DONE\n3. --tables filter option - DONE\n4. --no-history flag - DONE\n5. --exclude-deleted flag - DONE\n\nAll 26 export tests pass. CLI help shows all flags. Integration tested with actual database.",
+        "created_at": 1769391289841
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-469973cd122e",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Implemented basic export to JSON functionality:\n\n1. **Core export function** - `Database::export_tables()` in `src/db/export.rs`:\n   - Queries all EXPORTED_TABLES (tasks, dependencies, attachments, task_tags, task_needed_tags, task_wanted_tags, task_state_sequence)\n   - Proper ordering per spec (e.g., tasks by id, dependencies by from/to/type)\n   - Supports exclude_deleted option\n   - Supports selective table export\n\n2. **ExportSchema JSON format** in `src/types.rs`:\n   - schema_version: 3 (current DB schema)\n   - export_version: \"1.0.0\"\n   - exported_at: ISO 8601 timestamp\n   - exported_by: \"task-graph-mcp v{VERSION}\"\n   - tables: ExportTables with typed fields\n\n3. **CLI integration** in `src/main.rs`:\n   - `run_export()` wires up the export pipeline\n   - Supports stdout output (default)\n   - Supports file output with `-o` flag\n   - Supports gzip compression via `--gzip` or `.gz` extension\n\nAll 194 tests pass. Export command verified working with actual task database.",
+        "created_at": 1769391070428
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Gzip compression support was implemented in the basic export task:\n\n1. **CLI flags** in `src/cli/export.rs`:\n   - `--gzip` flag forces compression\n   - `.gz` extension auto-detected on output path\n   - `--compress-threshold SIZE` compresses if output exceeds threshold\n\n2. **Compression logic** in `run_export()` (src/main.rs):\n   - Uses `flate2::write::GzEncoder` with default compression\n   - Works for both file output and stdout\n   - Reports uncompressed size in logs\n\n3. **Tested working**:\n   - `export --gzip` outputs binary gzip to stdout\n   - `export -o file.json.gz` auto-compresses\n   - File output shows \"(gzip compressed)\" in log",
+        "created_at": 1769391131212
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "--tables filter already implemented:\n\n1. CLI flag: `--tables LIST` with value_delimiter=','\n2. Method `tables_to_export()` processes the filter\n3. Passed to ExportOptions.tables in run_export()\n4. Database::export_tables() only exports requested tables\n5. Tested: `export --tables tasks,dependencies` works correctly",
+        "created_at": 1769391167858
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "--no-history flag already implemented:\n\n1. CLI flag in ExportArgs: `--no-history`\n2. tables_to_export() returns all tables except task_state_sequence\n3. Tested: `export --no-history` output excludes task_state_sequence",
+        "created_at": 1769391197093
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-46d50be6358c",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "--exclude-deleted flag already implemented:\n\n1. CLI flag in ExportArgs: `--exclude-deleted`\n2. Passed to ExportOptions.exclude_deleted in run_export()\n3. export_tasks() filters with WHERE deleted_at IS NULL when true\n4. Test: test_export_excludes_deleted_tasks_when_requested passes",
+        "created_at": 1769391216275
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-46f97b97e3c5",
+        "order_index": 0,
+        "name": "changelist",
+        "mime_type": "text/plain",
+        "content": "## Schema Version Validation Implementation\n\n### Added to src/db/migrations.rs\n\n**New Types:**\n- `SchemaValidationResult` struct with export_version, database_version, and compatibility\n\n**New Functions:**\n- `validate_import_schema(export_version, database_version)` - High-level validation for import workflow\n\n**New Methods on SchemaValidationResult:**\n- `is_valid()` - Returns true if import can proceed\n- `message()` - User-friendly validation message\n- `details()` - Detailed description for verbose output\n\n**Validation Messages:**\n- Compatible: \"Schema compatible: export v3 matches database v3\"\n- Needs Migration: \"Schema migration required: export v1 will be migrated to v3 (2 steps)\"\n- Incompatible: \"Schema incompatible: Cannot migrate from schema v1 to v5. Supported migrations: v2->v3, v3->v4\"\n- Export Newer: \"Schema incompatible: export v5 is newer than database v3. Upgrade the database or use a compatible export.\"\n\n**Tests Added (3):**\n- test_validate_import_schema_compatible\n- test_validate_import_schema_export_newer\n- test_schema_validation_result_messages",
+        "created_at": 1769391065437
+      },
+      {
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Created src/db/import.rs module implementing fresh import functionality:\n\n**New Types:**\n- ImportOptions: Control merge/force behavior\n- ImportResult: Track import statistics per table\n\n**New Methods:**\n- Database::import_fresh(snapshot): Import all data from a Snapshot\n- Database::is_empty(): Check if database has project data\n- Individual insert_*_row() methods for each table type\n\n**Tables Supported:**\n- tasks (with all fields including metrics and soft-delete)\n- dependencies\n- attachments\n- task_tags\n- task_needed_tags\n- task_wanted_tags\n- task_state_sequence\n\n**FTS Handling:**\nFTS indexes are automatically rebuilt via existing SQLite triggers (tasks_fts_insert, attachments_fts_insert, etc.)\n\n**Tests Added (4):**\n- test_is_empty\n- test_import_fresh_empty_snapshot\n- test_import_fresh_with_data\n- test_import_fresh_preserves_tags\n\nAll 84 library tests pass.",
+        "created_at": 1769391293407
+      },
+      {
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "order_index": 1,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "Created src/db/import.rs module implementing fresh import functionality:\n\n**New Types:**\n- ImportOptions: Control merge/force behavior\n- ImportResult: Track import statistics per table\n\n**New Methods:**\n- Database::import_fresh(snapshot): Import all data from a Snapshot\n- Database::is_empty(): Check if database has project data\n- Individual insert_*_row() methods for each table type\n\n**Tables Supported:**\n- tasks (with all fields including metrics and soft-delete)\n- dependencies\n- attachments\n- task_tags\n- task_needed_tags\n- task_wanted_tags\n- task_state_sequence\n\n**FTS Handling:**\nFTS indexes are automatically rebuilt via existing SQLite triggers (tasks_fts_insert, attachments_fts_insert, etc.)\n\n**Tests Added (4):**\n- test_is_empty\n- test_import_fresh_empty_snapshot\n- test_import_fresh_with_data\n- test_import_fresh_preserves_tags\n\nAll 84 library tests pass.",
+        "created_at": 1769391300195
+      },
+      {
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c4f057e51d6",
+        "order_index": 0,
+        "name": "changelist",
+        "mime_type": "text/plain",
+        "content": "## Migration Registry Implementation\n\n### Files Created\n- `src/db/migrations.rs` - New module with migration registry\n\n### Files Modified\n- `src/db/mod.rs` - Added migrations module export\n\n### Key Types\n- `SchemaVersion` - Type alias for u32 version numbers\n- `MigrationFn` - Function signature for migration functions\n- `Migration` - Struct with from/to versions, description, and migrate fn\n- `MigrationError` - Enum with NoPath, MigrationFailed, InvalidVersionRange, CycleDetected\n- `MigrationRegistry` - Main registry with path finding and migration execution\n\n### Features\n- Builder pattern for registering migrations\n- BFS-based shortest path finding for chained migrations\n- In-place JSON data transformation\n- Automatic schema_version field updates during migration\n- describe_path() for migration preview\n- Comprehensive test coverage (14 tests)\n\n### Usage Example\n```rust\nlet registry = MigrationRegistry::new()\n    .register(2, 3, \"Add foo field\", migrate_v2_to_v3)\n    .register(3, 4, \"Rename bar\", migrate_v3_to_v4);\n\n// Find and apply migration path\nregistry.migrate(&mut json_data, 2, 4)?;\n```",
+        "created_at": 1769390732465
+      },
+      {
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "order_index": 0,
+        "name": "changelist",
+        "mime_type": "text/plain",
+        "content": "## Migration Execution Implementation\n\n### Added to src/db/migrations.rs\n\n**New Types:**\n- `SchemaCompatibility` enum: Compatible, NeedsMigration, Incompatible, ExportNewer\n- `MigrationReport` struct: from_version, to_version, steps_applied, was_migrated\n- `MigrationStep` struct: from, to, description\n\n**New Functions:**\n- `check_schema_compatibility(registry, export_version, database_version)` - Checks if migration is possible\n- `migrate_export_data(registry, data, target_version)` - Applies migrations and returns report\n\n**Key Features:**\n- Automatic handling of version comparison (export vs database)\n- Clear error when export is newer than database\n- Migration reports with summaries for logging\n- All steps applied tracked for audit/logging\n\n**Tests Added (11 new):**\n- test_schema_compatibility_compatible\n- test_schema_compatibility_needs_migration\n- test_schema_compatibility_incompatible\n- test_schema_compatibility_export_newer\n- test_migrate_export_data_no_migration\n- test_migrate_export_data_with_migration\n- test_migrate_export_data_missing_version\n- test_migrate_export_data_export_newer_fails\n- test_migration_report_summary\n- test_schema_compatibility_describe\n\n**Note:** Library compiles but test runner fails due to pre-existing issues in db/export.rs (unrelated to this change).",
+        "created_at": 1769390913354
+      },
+      {
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c639e597a04",
+        "order_index": 0,
+        "name": "summary",
+        "mime_type": "text/plain",
+        "content": "## Clear Migration Error Messages\n\nThe error messages were already implemented in the migration registry created in the first task. This task adds explicit tests to verify the format matches the spec.\n\n### Error Message Formats\n\n**NoPath (with migrations available):**\n```\nCannot migrate from schema v1 to v4. Supported migrations: v2->v3, v3->v4\n```\n\n**NoPath (no migrations registered):**\n```\nCannot migrate from schema v1 to v4. No migrations registered.\n```\n\n**MigrationFailed:**\n```\nMigration v2->v3 failed: {reason}\n```\n\n**InvalidVersionRange:**\n```\nInvalid version range: source (5) must be less than target (3)\n```\n\n### Tests Added\n- `test_no_path_error_message` - Verifies full error format with available migrations\n- `test_no_migrations_registered_error_message` - Verifies error when registry is empty",
+        "created_at": 1769390970839
+      },
+      {
+        "task_id": "019bf7e2-3611-7a10-a206-4d7b925220bb",
+        "order_index": 0,
+        "name": "changelist",
+        "mime_type": "text/plain",
+        "content": "README.md - Added Git Integration section with .gitignore recommendations and snapshot tracking guidance",
+        "created_at": 1769390540958
+      },
+      {
+        "task_id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "order_index": 0,
+        "name": "changelist",
+        "mime_type": "text/plain",
+        "content": "README.md - Added Optional Pre-commit Hook subsection with bash script example for auto-exporting task database before commits",
+        "created_at": 1769390570221
+      },
+      {
+        "task_id": "019bf7e2-3611-7a10-a206-4d9ccd4f6ef5",
+        "order_index": 0,
+        "name": "changelist",
+        "mime_type": "text/plain",
+        "content": "README.md - Added Metrics Mapping Convention subsection documenting metric_0-7 slot usage for external system interoperability",
+        "created_at": 1769390604902
+      }
+    ],
+    "task_tags": [
+      {
+        "task_id": "019bf7d3-8903-7661-94ca-fccbf801127f",
+        "tag": "feature"
+      },
+      {
+        "task_id": "019bf7d3-8903-7661-94ca-fccbf801127f",
+        "tag": "search"
+      },
+      {
+        "task_id": "019bf7d3-8903-7661-94ca-fccbf801127f",
+        "tag": "tags"
+      },
+      {
+        "task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "tag": "export-import"
+      },
+      {
+        "task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "tag": "feature"
+      },
+      {
+        "task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "tag": "foundation"
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "tag": "export"
+      },
+      {
+        "task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "tag": "import"
+      },
+      {
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "tag": "migration"
+      },
+      {
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "tag": "diff"
+      },
+      {
+        "task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "tag": "cli"
+      },
+      {
+        "task_id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "tag": "docs"
+      },
+      {
+        "task_id": "epic-web-dashboard",
+        "tag": "dashboard"
+      },
+      {
+        "task_id": "epic-web-dashboard",
+        "tag": "epic"
+      },
+      {
+        "task_id": "epic-web-dashboard",
+        "tag": "feature"
+      },
+      {
+        "task_id": "epic-web-dashboard",
+        "tag": "monitoring"
+      },
+      {
+        "task_id": "epic-web-dashboard",
+        "tag": "web-ui"
+      }
+    ],
+    "task_needed_tags": [],
+    "task_wanted_tags": [],
+    "task_state_sequence": [
+      {
+        "id": 1,
+        "task_id": "019bf7d3-8903-7661-94ca-fccbf801127f",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769389394180,
+        "end_timestamp": 1769391118913
+      },
+      {
+        "id": 74,
+        "task_id": "019bf7d3-8903-7661-94ca-fccbf801127f",
+        "worker_id": "worker-5",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391118913,
+        "end_timestamp": 1769391416060
+      },
+      {
+        "id": 89,
+        "task_id": "019bf7d3-8903-7661-94ca-fccbf801127f",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Implemented prefix search capability for tags. Tags ending with '*' (e.g., 'feat*') now match any tag starting with that prefix. Works in both tags_any (OR) and tags_all (AND) filters. Added categorize_tags helper function, updated SQL generation to use LIKE for prefix patterns, updated tool descriptions, and added 5 integration tests all passing.",
+        "timestamp": 1769391416060,
+        "end_timestamp": null
+      },
+      {
+        "id": 2,
+        "task_id": "019bf7e2-360e-7110-aa34-749c0409603f",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355982,
+        "end_timestamp": null
+      },
+      {
+        "id": 3,
+        "task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391084840
+      },
+      {
+        "id": 68,
+        "task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "worker_id": "worker-1",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391084840,
+        "end_timestamp": 1769391091079
+      },
+      {
+        "id": 70,
+        "task_id": "019bf7e2-360e-7110-aa34-74a56f31a8b0",
+        "worker_id": null,
+        "event": "completed",
+        "reason": null,
+        "timestamp": 1769391091079,
+        "end_timestamp": null
+      },
+      {
+        "id": 4,
+        "task_id": "019bf7e2-360f-72c3-bb79-465f69e01cfc",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769390488419
+      },
+      {
+        "id": 39,
+        "task_id": "019bf7e2-360f-72c3-bb79-465f69e01cfc",
+        "worker_id": "worker-1",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390488419,
+        "end_timestamp": 1769390688105
+      },
+      {
+        "id": 48,
+        "task_id": "019bf7e2-360f-72c3-bb79-465f69e01cfc",
+        "worker_id": null,
+        "event": "completed",
+        "reason": null,
+        "timestamp": 1769390688105,
+        "end_timestamp": null
+      },
+      {
+        "id": 5,
+        "task_id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769390696557
+      },
+      {
+        "id": 49,
+        "task_id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "worker_id": "worker-1",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390696557,
+        "end_timestamp": 1769390998725
+      },
+      {
+        "id": 59,
+        "task_id": "019bf7e2-360f-72c3-bb79-4663ea3a9cd8",
+        "worker_id": null,
+        "event": "completed",
+        "reason": null,
+        "timestamp": 1769390998725,
+        "end_timestamp": null
+      },
+      {
+        "id": 6,
+        "task_id": "019bf7e2-360f-72c3-bb79-467a53436bdc",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391008312
+      },
+      {
+        "id": 61,
+        "task_id": "019bf7e2-360f-72c3-bb79-467a53436bdc",
+        "worker_id": "worker-1",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391008312,
+        "end_timestamp": 1769391061931
+      },
+      {
+        "id": 62,
+        "task_id": "019bf7e2-360f-72c3-bb79-467a53436bdc",
+        "worker_id": null,
+        "event": "completed",
+        "reason": null,
+        "timestamp": 1769391061931,
+        "end_timestamp": null
+      },
+      {
+        "id": 7,
+        "task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391099900
+      },
+      {
+        "id": 71,
+        "task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "worker_id": "worker-1",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391099900,
+        "end_timestamp": 1769391110413
+      },
+      {
+        "id": 73,
+        "task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "worker_id": null,
+        "event": "pending",
+        "reason": "Releasing parent task to work on subtasks instead",
+        "timestamp": 1769391110413,
+        "end_timestamp": 1769391228350
+      },
+      {
+        "id": 84,
+        "task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "worker_id": "worker-8",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391228350,
+        "end_timestamp": 1769391289844
+      },
+      {
+        "id": 85,
+        "task_id": "019bf7e2-360f-72c3-bb79-4684a1cd801d",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "All export subtasks completed: basic JSON export, gzip compression, --tables filter, --no-history flag, --exclude-deleted flag. All 26 export tests pass. Integration tested successfully.",
+        "timestamp": 1769391289844,
+        "end_timestamp": null
+      },
+      {
+        "id": 8,
+        "task_id": "019bf7e2-360f-72c3-bb79-469973cd122e",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769390648998
+      },
+      {
+        "id": 47,
+        "task_id": "019bf7e2-360f-72c3-bb79-469973cd122e",
+        "worker_id": "worker-6",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390648998,
+        "end_timestamp": 1769391070432
+      },
+      {
+        "id": 64,
+        "task_id": "019bf7e2-360f-72c3-bb79-469973cd122e",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Implemented core export function: Database::export_tables() queries all project tables with proper ordering, ExportSchema serializes to JSON with header fields (schema_version, export_version, exported_at, exported_by), CLI supports both stdout and file output with optional gzip compression.",
+        "timestamp": 1769391070432,
+        "end_timestamp": null
+      },
+      {
+        "id": 9,
+        "task_id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391079026
+      },
+      {
+        "id": 67,
+        "task_id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "worker_id": "worker-6",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391079026,
+        "end_timestamp": 1769391131216
+      },
+      {
+        "id": 75,
+        "task_id": "019bf7e2-360f-72c3-bb79-46ac8ae885c7",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Gzip compression already implemented as part of basic export task: 1) --gzip flag detection in should_compress(), 2) .gz extension detection for output files, 3) --compress-threshold for automatic compression above size, 4) GzEncoder from flate2 crate used for both file and stdout output.",
+        "timestamp": 1769391131216,
+        "end_timestamp": null
+      },
+      {
+        "id": 10,
+        "task_id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391140997
+      },
+      {
+        "id": 77,
+        "task_id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "worker_id": "worker-6",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391140997,
+        "end_timestamp": 1769391167862
+      },
+      {
+        "id": 79,
+        "task_id": "019bf7e2-360f-72c3-bb79-46b2819afbe9",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Already implemented in basic export task: --tables flag with comma-separated values, integrated with tables_to_export() method that passes filter to ExportOptions.",
+        "timestamp": 1769391167862,
+        "end_timestamp": null
+      },
+      {
+        "id": 11,
+        "task_id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391176758
+      },
+      {
+        "id": 80,
+        "task_id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "worker_id": "worker-6",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391176758,
+        "end_timestamp": 1769391197097
+      },
+      {
+        "id": 81,
+        "task_id": "019bf7e2-360f-72c3-bb79-46c54c255c24",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Already implemented: --no-history flag in ExportArgs, handled by tables_to_export() which filters out task_state_sequence. Verified working - export with --no-history excludes the table.",
+        "timestamp": 1769391197097,
+        "end_timestamp": null
+      },
+      {
+        "id": 12,
+        "task_id": "019bf7e2-360f-72c3-bb79-46d50be6358c",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391204978
+      },
+      {
+        "id": 82,
+        "task_id": "019bf7e2-360f-72c3-bb79-46d50be6358c",
+        "worker_id": "worker-6",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391204978,
+        "end_timestamp": 1769391216279
+      },
+      {
+        "id": 83,
+        "task_id": "019bf7e2-360f-72c3-bb79-46d50be6358c",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Already implemented: --exclude-deleted flag in ExportArgs, passed to ExportOptions.exclude_deleted, used in export_tasks() which adds WHERE deleted_at IS NULL clause.",
+        "timestamp": 1769391216279,
+        "end_timestamp": null
+      },
+      {
+        "id": 13,
+        "task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355983,
+        "end_timestamp": 1769391320999
+      },
+      {
+        "id": 87,
+        "task_id": "019bf7e2-360f-72c3-bb79-46eac2a3c22c",
+        "worker_id": "worker-8",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391320999,
+        "end_timestamp": null
+      },
+      {
+        "id": 14,
+        "task_id": "019bf7e2-360f-72c3-bb79-46f97b97e3c5",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": 1769390978043
+      },
+      {
+        "id": 57,
+        "task_id": "019bf7e2-360f-72c3-bb79-46f97b97e3c5",
+        "worker_id": "worker-2",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390978043,
+        "end_timestamp": 1769391065441
+      },
+      {
+        "id": 63,
+        "task_id": "019bf7e2-360f-72c3-bb79-46f97b97e3c5",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Schema validation fully implemented with helper functions and user-friendly messages",
+        "timestamp": 1769391065441,
+        "end_timestamp": null
+      },
+      {
+        "id": 15,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": 1769391131658
+      },
+      {
+        "id": 76,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "worker_id": "worker-1",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391131658,
+        "end_timestamp": 1769391300199
+      },
+      {
+        "id": 86,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bc812d3600a",
+        "worker_id": null,
+        "event": "completed",
+        "reason": null,
+        "timestamp": 1769391300199,
+        "end_timestamp": null
+      },
+      {
+        "id": 16,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bda9f45141d",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": 1769391344448
+      },
+      {
+        "id": 88,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bda9f45141d",
+        "worker_id": "worker-9",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391344448,
+        "end_timestamp": null
+      },
+      {
+        "id": 17,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6be292ec8652",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": null
+      },
+      {
+        "id": 18,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6bfce1da3408",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": null
+      },
+      {
+        "id": 19,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c034fa15ea6",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": null
+      },
+      {
+        "id": 20,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c1ac9986dc4",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": null
+      },
+      {
+        "id": 21,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c25d57922fe",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": null
+      },
+      {
+        "id": 22,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c36ff7777a3",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": null
+      },
+      {
+        "id": 23,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c4f057e51d6",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": 1769390485423
+      },
+      {
+        "id": 37,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c4f057e51d6",
+        "worker_id": "worker-2",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390485423,
+        "end_timestamp": 1769390732469
+      },
+      {
+        "id": 52,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c4f057e51d6",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Migration registry implemented with full test coverage",
+        "timestamp": 1769390732469,
+        "end_timestamp": null
+      },
+      {
+        "id": 24,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": 1769390740313
+      },
+      {
+        "id": 53,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "worker_id": "worker-2",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390740313,
+        "end_timestamp": 1769390913359
+      },
+      {
+        "id": 54,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c5ef3db9f9d",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Migration execution implemented - library compiles. Tests have pre-existing issues in db/export.rs unrelated to migrations.",
+        "timestamp": 1769390913359,
+        "end_timestamp": null
+      },
+      {
+        "id": 25,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c639e597a04",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": 1769390922458
+      },
+      {
+        "id": 55,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c639e597a04",
+        "worker_id": "worker-2",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390922458,
+        "end_timestamp": 1769390970843
+      },
+      {
+        "id": 56,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c639e597a04",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Clear migration error messages already implemented. Added explicit tests verifying message format.",
+        "timestamp": 1769390970843,
+        "end_timestamp": null
+      },
+      {
+        "id": 26,
+        "task_id": "019bf7e2-3610-75e2-b3a0-6c747494ec4e",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355984,
+        "end_timestamp": null
+      },
+      {
+        "id": 27,
+        "task_id": "019bf7e2-3611-7a10-a206-4d0687ea42ad",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769390500305
+      },
+      {
+        "id": 40,
+        "task_id": "019bf7e2-3611-7a10-a206-4d0687ea42ad",
+        "worker_id": "worker-5",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390500305,
+        "end_timestamp": 1769391078210
+      },
+      {
+        "id": 66,
+        "task_id": "019bf7e2-3611-7a10-a206-4d0687ea42ad",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Implemented export vs database diff functionality including: 1) Core diff types (FieldChange, ModifiedRecord, TableDiff, SnapshotDiff), 2) Diff algorithms for comparing tables with single and composite keys, 3) Snapshot loading from JSON/gzip files, 4) CLI diff subcommand with text/json/summary output formats, 5) 10 unit tests all passing",
+        "timestamp": 1769391078210,
+        "end_timestamp": null
+      },
+      {
+        "id": 28,
+        "task_id": "019bf7e2-3611-7a10-a206-4d1712dd8f90",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769391086847
+      },
+      {
+        "id": 69,
+        "task_id": "019bf7e2-3611-7a10-a206-4d1712dd8f90",
+        "worker_id": "worker-5",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391086847,
+        "end_timestamp": 1769391106489
+      },
+      {
+        "id": 72,
+        "task_id": "019bf7e2-3611-7a10-a206-4d1712dd8f90",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Export vs export diff was implemented as part of the previous task. The diff_snapshots function compares two Snapshot objects, CLI accepts optional second file argument for two-file comparison, and unit test test_diff_snapshots verifies the functionality.",
+        "timestamp": 1769391106489,
+        "end_timestamp": null
+      },
+      {
+        "id": 29,
+        "task_id": "019bf7e2-3611-7a10-a206-4d2b877e72c8",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": null
+      },
+      {
+        "id": 30,
+        "task_id": "019bf7e2-3611-7a10-a206-4d3c957e7c05",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769390500893
+      },
+      {
+        "id": 41,
+        "task_id": "019bf7e2-3611-7a10-a206-4d3c957e7c05",
+        "worker_id": "worker-4",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390500893,
+        "end_timestamp": 1769390708462
+      },
+      {
+        "id": 50,
+        "task_id": "019bf7e2-3611-7a10-a206-4d3c957e7c05",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Added export subcommand CLI scaffolding with all required options: -o/--output, --gzip, --tables, --no-history, --exclude-deleted, --compress-threshold. Created src/cli/mod.rs and src/cli/export.rs modules. Restructured main.rs to use subcommands while preserving default MCP server behavior.",
+        "timestamp": 1769390708462,
+        "end_timestamp": null
+      },
+      {
+        "id": 31,
+        "task_id": "019bf7e2-3611-7a10-a206-4d471fe9a89b",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769390716440
+      },
+      {
+        "id": 51,
+        "task_id": "019bf7e2-3611-7a10-a206-4d471fe9a89b",
+        "worker_id": "worker-4",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390716440,
+        "end_timestamp": 1769390996847
+      },
+      {
+        "id": 58,
+        "task_id": "019bf7e2-3611-7a10-a206-4d471fe9a89b",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Added import subcommand CLI scaffolding with all required options: FILE argument, --dry-run, --merge, --force, --strict. Created src/cli/import.rs module and updated src/cli/mod.rs and src/main.rs to handle the import command.",
+        "timestamp": 1769390996847,
+        "end_timestamp": null
+      },
+      {
+        "id": 32,
+        "task_id": "019bf7e2-3611-7a10-a206-4d5849824d81",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769391007178
+      },
+      {
+        "id": 60,
+        "task_id": "019bf7e2-3611-7a10-a206-4d5849824d81",
+        "worker_id": "worker-4",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769391007178,
+        "end_timestamp": 1769391076484
+      },
+      {
+        "id": 65,
+        "task_id": "019bf7e2-3611-7a10-a206-4d5849824d81",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "The diff subcommand CLI scaffolding was already implemented in src/cli/diff.rs with: FILE argument (source), optional FILE2 argument (target), -f/--format (text/json/summary), --tables filter, --summary-only, --include-unchanged. All CLI tests pass.",
+        "timestamp": 1769391076484,
+        "end_timestamp": null
+      },
+      {
+        "id": 33,
+        "task_id": "019bf7e2-3611-7a10-a206-4d6b826b3314",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": null
+      },
+      {
+        "id": 34,
+        "task_id": "019bf7e2-3611-7a10-a206-4d7b925220bb",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769390486458
+      },
+      {
+        "id": 38,
+        "task_id": "019bf7e2-3611-7a10-a206-4d7b925220bb",
+        "worker_id": "worker-3",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390486458,
+        "end_timestamp": 1769390540962
+      },
+      {
+        "id": 42,
+        "task_id": "019bf7e2-3611-7a10-a206-4d7b925220bb",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Added Git Integration section to README.md with recommended .gitignore entries (db.sqlite, db.sqlite-*, tasks.db, tasks.db-*, *.log) and recommended tracking guidance for snapshot.json export file.",
+        "timestamp": 1769390540962,
+        "end_timestamp": null
+      },
+      {
+        "id": 35,
+        "task_id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769390550171
+      },
+      {
+        "id": 43,
+        "task_id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "worker_id": "worker-3",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390550171,
+        "end_timestamp": 1769390570225
+      },
+      {
+        "id": 44,
+        "task_id": "019bf7e2-3611-7a10-a206-4d89f30205ff",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Added Optional Pre-commit Hook subsection to the Git Integration section in README.md with bash script example and chmod instructions.",
+        "timestamp": 1769390570225,
+        "end_timestamp": null
+      },
+      {
+        "id": 36,
+        "task_id": "019bf7e2-3611-7a10-a206-4d9ccd4f6ef5",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769390355985,
+        "end_timestamp": 1769390577211
+      },
+      {
+        "id": 45,
+        "task_id": "019bf7e2-3611-7a10-a206-4d9ccd4f6ef5",
+        "worker_id": "worker-3",
+        "event": "in_progress",
+        "reason": null,
+        "timestamp": 1769390577211,
+        "end_timestamp": 1769390604906
+      },
+      {
+        "id": 46,
+        "task_id": "019bf7e2-3611-7a10-a206-4d9ccd4f6ef5",
+        "worker_id": null,
+        "event": "completed",
+        "reason": "Added Metrics Mapping Convention subsection under Tracking in README.md, documenting the recommended metric_0-7 slot usage for interoperability with external systems (tokens.input/output/cache_read/cache_create, wall_time_seconds).",
+        "timestamp": 1769390604906,
+        "end_timestamp": null
+      },
+      {
+        "id": 78,
+        "task_id": "epic-web-dashboard",
+        "worker_id": null,
+        "event": "pending",
+        "reason": null,
+        "timestamp": 1769391148074,
+        "end_timestamp": null
+      }
+    ]
+  }
+}

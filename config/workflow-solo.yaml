@@ -234,6 +234,22 @@ combos:
       - Verify test coverage
 
 # =============================================================================
+# GATES
+# =============================================================================
+# Solo workflows use warn gates for self-discipline. Since you're working alone,
+# gates serve as reminders rather than hard blocks. Use force=true with reason
+# when legitimately skipping.
+
+gates:
+  status:working:
+    - type: "gate/tests"
+      enforcement: warn
+      description: "Attach test results or explain why tests don't apply"
+    - type: "gate/commit"
+      enforcement: warn
+      description: "Attach commit hash or note why no commit needed"
+
+# =============================================================================
 # ATTACHMENT GUIDANCE
 # =============================================================================
 # Recommended attachment types for solo workflows. These types are pre-defined

@@ -278,6 +278,18 @@ swarm_prompts:
     - Identify collaboration opportunities
 
 # =============================================================================
+# GATES
+# =============================================================================
+# Swarm workflows use minimal lightweight gates to maximize throughput.
+# Heavy gates slow down the swarm - keep them advisory or warn-level only.
+
+gates:
+  status:working:
+    - type: "gate/summary"
+      enforcement: allow
+      description: "Brief summary for other agents (advisory)"
+
+# =============================================================================
 # ATTACHMENT GUIDANCE
 # =============================================================================
 # Recommended attachment types for swarm workflows. These types are pre-defined
