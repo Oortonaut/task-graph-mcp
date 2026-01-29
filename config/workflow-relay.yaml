@@ -151,6 +151,11 @@ states:
 
         Keep your thinking updated regularly using the `thinking` tool.
 
+        ### Heartbeat & Coordination
+        - Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
+        - Call `mark_updates(agent=your_id)` every 30-60s during long operations to check for handoff signals
+        - Stale workers (no heartbeat for 5+ min) get evicted automatically
+
         ### Valid Transitions
         - `completed` - Phase complete, ready for handoff
         - `failed` - Blocked, needs coordinator intervention

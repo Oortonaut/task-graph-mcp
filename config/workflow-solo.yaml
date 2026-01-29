@@ -36,6 +36,10 @@ states:
         - Self-review before completing
         - Attach results for your future self
 
+        ### Heartbeat
+        - Call `thinking(agent=your_id, thought="...")` periodically to maintain heartbeat
+        - Stale workers (no heartbeat for 5+ min) get evicted automatically
+
       exit: |
         Before completing:
         - [ ] Attach summary

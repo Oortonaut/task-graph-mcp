@@ -60,7 +60,7 @@ pub fn claim(
 
     // Use unified update which handles claiming when transitioning to timed state
     // Claim transitions TO a blocking state, so unblocked/auto_advanced will be empty
-    let (task, _unblocked, _auto_advanced) = db.update_task_unified(
+    let (task, _unblocked, _auto_advanced) = match db.update_task_unified(
         &task_id,
         &worker_id,
         None,               // assignee (not assigning to another agent)
@@ -79,7 +79,23 @@ pub fn claim(
         states_config,
         deps_config,
         auto_advance,
-    )?;
+    ) {
+        Ok(result) => result,
+        Err(e) => {
+            // Check if this is a dependency-blocked error and enrich with structured info
+            let err_msg = e.to_string();
+            if err_msg.contains("unsatisfied dependencies") {
+                // Query the actual blockers to provide structured info
+                let blockers = db
+                    .get_start_blockers(&task_id, deps_config)
+                    .unwrap_or_default();
+                if !blockers.is_empty() {
+                    return Err(ToolError::deps_not_satisfied(&blockers).into());
+                }
+            }
+            return Err(e);
+        }
+    };
 
     // Get transition prompts for claiming (with template expansion)
     let transition_prompt_list: Vec<String> = {

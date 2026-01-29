@@ -526,16 +526,22 @@ async fn run_server(
         level_filter,
     );
 
-    // Start the HTTP dashboard server if UI mode is Web
-    // This never fails - if the port is in use, it retries in the background
-    let _dashboard_handle = if config.server.ui.mode == UiMode::Web {
-        Some(dashboard::start_server_with_retry(
-            Arc::clone(&db),
-            &config.server.ui,
-            Arc::clone(&states_config),
-        ))
-    } else {
-        None
+    // Start the HTTP dashboard server only when UI mode is explicitly set to Web.
+    // When mode is "none", skip the dashboard entirely (bug fix: dashboard was
+    // previously starting regardless of the ui.mode config setting).
+    let _dashboard_handle = match config.server.ui.mode {
+        UiMode::Web => {
+            info!("Starting web dashboard on port {}", config.server.ui.port);
+            Some(dashboard::start_server_with_retry(
+                Arc::clone(&db),
+                &config.server.ui,
+                Arc::clone(&states_config),
+            ))
+        }
+        UiMode::None => {
+            info!("Web dashboard disabled (ui.mode = \"none\")");
+            None
+        }
     };
 
     // Run the stdio server

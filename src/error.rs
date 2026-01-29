@@ -146,6 +146,10 @@ pub struct ToolError {
     pub field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_by: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 impl ToolError {
@@ -155,6 +159,8 @@ impl ToolError {
             message: message.into(),
             field: None,
             details: None,
+            blocked_by: None,
+            suggestion: None,
         }
     }
 
@@ -165,6 +171,16 @@ impl ToolError {
 
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = Some(details.into());
+        self
+    }
+
+    pub fn with_blocked_by(mut self, blocked_by: Vec<String>) -> Self {
+        self.blocked_by = Some(blocked_by);
+        self
+    }
+
+    pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        self.suggestion = Some(suggestion.into());
         self
     }
 
@@ -230,7 +246,15 @@ impl ToolError {
     pub fn deps_not_satisfied(blockers: &[String]) -> Self {
         Self::new(
             ErrorCode::DependencyNotSatisfied,
-            format!("Task blocked by: {}", blockers.join(", ")),
+            format!(
+                "Task blocked by unsatisfied dependencies: {}",
+                blockers.join(", ")
+            ),
+        )
+        .with_blocked_by(blockers.to_vec())
+        .with_suggestion(
+            "Wait for blocking tasks to complete, or call thinking() regularly to maintain heartbeat"
+                .to_string(),
         )
     }
 

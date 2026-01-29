@@ -36,6 +36,12 @@ states:
 
         **Discipline:** ONE task at a time. `thinking()` updates for visibility.
 
+        ### Heartbeat & Coordination
+        - Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
+        - Call `mark_updates(agent=your_id)` every 30-60s during long operations to detect file conflicts
+        - Stale workers (no heartbeat for 5+ min) get evicted automatically
+        - In a swarm, frequent polling is critical -- multiple agents may target the same files
+
         Transitions: {{valid_exits}}
         Phase: {{current_phase}} (optional) | Valid: {{valid_phases}}
 

@@ -158,6 +158,12 @@ states:
       enter: |
         You are now actively working on this task. Keep your thinking updated regularly using the `thinking` tool to show progress and allow coordination with other agents.
 
+        ### Heartbeat & Coordination
+        - Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
+        - Call `mark_updates(agent=your_id)` every 30-60s during long operations to detect file conflicts
+        - Stale workers (no heartbeat for 5+ min) get evicted automatically
+        - The lead monitors worker heartbeats -- stay visible to avoid reassignment
+
         ## Valid Next States
 
         From `{{current_status}}` you can transition to:
