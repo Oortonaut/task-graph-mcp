@@ -5,7 +5,7 @@
 //! a non-timed state (ownership clears automatically).
 
 use super::{get_bool, get_string, make_tool_with_prompts};
-use crate::config::{AutoAdvanceConfig, DependenciesConfig, PhasesConfig, Prompts, StatesConfig};
+use crate::config::{AppConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::prompts::PromptContext;
@@ -38,13 +38,14 @@ pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> 
 
 pub fn claim(
     db: &Database,
-    states_config: &StatesConfig,
-    phases_config: &PhasesConfig,
-    deps_config: &DependenciesConfig,
-    auto_advance: &AutoAdvanceConfig,
+    config: &AppConfig,
     workflows: &crate::config::workflows::WorkflowsConfig,
     args: Value,
 ) -> Result<Value> {
+    let states_config = &config.states;
+    let phases_config = &config.phases;
+    let deps_config = &config.deps;
+    let auto_advance = &config.auto_advance;
     let worker_id =
         get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
@@ -97,17 +98,31 @@ pub fn claim(
         }
     };
 
-    // Get transition prompts for claiming (with template expansion)
+    // Pre-fetch worker info for context-sensitive prompts (must outlive ctx)
+    let worker_info = db.get_worker(&worker_id).ok().flatten();
+    let worker_role = worker_info
+        .as_ref()
+        .map(|w| workflows.match_role(&w.tags))
+        .unwrap_or(None);
+
+    // Get transition prompts for claiming (with context-sensitive template expansion)
     let mut transition_prompt_list: Vec<String> = {
         match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
             Ok((old_status, old_phase)) => {
-                // Create context for template expansion
-                let ctx = PromptContext::new(
+                // Create context with task and agent info for rich template expansion
+                let mut ctx = PromptContext::new(
                     &task.status,
                     task.phase.as_deref(),
                     states_config,
                     phases_config,
-                );
+                )
+                .with_task(&task.id, &task.title, task.priority, &task.tags);
+
+                // Add agent context if worker info is available
+                if let Some(ref worker) = worker_info {
+                    ctx = ctx.with_agent(&worker_id, worker_role.as_deref(), &worker.tags);
+                }
+
                 crate::prompts::get_transition_prompts_with_context(
                     old_status.as_deref().unwrap_or(""),
                     old_phase.as_deref(),
@@ -132,12 +147,17 @@ pub fn claim(
         }
     });
 
-    // Add role-specific claiming prompt if available
-    if let Ok(Some(worker)) = db.get_worker(&worker_id)
-        && let Some(role_name) = workflows.match_role(&worker.tags)
-        && let Some(claiming_prompt) = workflows.get_role_prompt(&role_name, "claiming")
-    {
-        transition_prompt_list.push(claiming_prompt.to_string());
+    // Add role-specific prompts: both "claiming" guidance and "reporting" guidance
+    // This gives the agent full context on how to work and communicate from the start
+    if let Some(ref role_name) = worker_role {
+        if let Some(claiming_prompt) = workflows.get_role_prompt(role_name, "claiming") {
+            transition_prompt_list.push(claiming_prompt.to_string());
+        }
+        // Also deliver the "reporting" prompt so the agent knows how to communicate
+        // progress from the moment they start working
+        if let Some(reporting_prompt) = workflows.get_role_prompt(role_name, "reporting") {
+            transition_prompt_list.push(reporting_prompt.to_string());
+        }
     }
 
     // Add prompts if any

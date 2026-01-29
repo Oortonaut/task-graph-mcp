@@ -1,0 +1,2574 @@
+{
+  "schema_version": 3,
+  "export_version": "1.0.0",
+  "exported_at": "2026-01-29T00:00:00+00:00",
+  "exported_by": "browser-phased template for relay workflow testing",
+  "tables": {
+    "tasks": [
+      {
+        "id": "browser",
+        "title": "Web Browser Engine",
+        "description": "Build a web browser engine with HTML parsing, CSS styling, JavaScript execution, DOM management, layout computation, rendering, networking, and event handling. Each component goes through relay phases: explore, design, implement, test.",
+        "status": "pending",
+        "priority": 10,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "engine"
+        ],
+        "points": 100,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "css-engine",
+        "title": "CSS Engine",
+        "description": "Component for parsing CSS stylesheets, computing cascaded and computed styles, and resolving selector specificity. Handles inheritance, shorthand properties, and media queries.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "css",
+          "styling",
+          "component"
+        ],
+        "points": 13,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "css-engine-design",
+        "title": "Design: CSS Engine",
+        "description": "Design the CSS engine: tokenizer, parser producing CSSOM, selector matching engine, cascade algorithm, specificity calculation. Define style struct layout and property value types.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "css",
+          "design"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "css-engine-explore",
+        "title": "Explore: CSS Engine",
+        "description": "Research CSS3 specification coverage priorities, selector matching algorithms, cascade resolution rules. Evaluate approaches for computed style caching and incremental recalculation.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "css",
+          "explore"
+        ],
+        "points": 2,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "css-engine-implement",
+        "title": "Implement: CSS Engine",
+        "description": "Implement CSS tokenizer, parser, CSSOM construction, selector matching with specificity, cascade resolution, and computed style calculation. Support shorthand expansion and inheritance.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "css",
+          "implement"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "css-engine-test",
+        "title": "Test: CSS Engine",
+        "description": "Test CSS parsing, selector matching, specificity calculation, cascade resolution, and computed style output. Verify shorthand expansion, inheritance, and media query evaluation.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "css",
+          "test"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      },
+      {
+        "id": "dom-tree",
+        "title": "DOM Tree",
+        "description": "Component for the Document Object Model tree structure. Manages node hierarchy, element attributes, text content, and provides traversal and manipulation APIs used by all other components.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "dom",
+          "tree",
+          "component"
+        ],
+        "points": 13,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "dom-tree-design",
+        "title": "Design: DOM Tree",
+        "description": "Design DOM tree data structure: node types (Element, Text, Comment, Document), arena allocator, parent/child/sibling navigation, attribute storage, and mutation API. Define interfaces for HTML parser and JS runtime integration.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "dom",
+          "design"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "dom-tree-explore",
+        "title": "Explore: DOM Tree",
+        "description": "Research DOM specification levels, arena-based vs reference-counted tree implementations, and mutation observer patterns. Evaluate memory management strategies for large documents.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "dom",
+          "explore"
+        ],
+        "points": 2,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "dom-tree-implement",
+        "title": "Implement: DOM Tree",
+        "description": "Implement DOM tree with arena-based allocation, node type hierarchy, attribute maps, tree traversal iterators, and mutation methods (appendChild, removeChild, insertBefore). Support document fragment operations.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "dom",
+          "implement"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "dom-tree-test",
+        "title": "Test: DOM Tree",
+        "description": "Test DOM tree operations: node creation, tree manipulation (insert, remove, replace), traversal correctness, attribute handling, and memory safety. Verify no dangling references after mutations.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "dom",
+          "test"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      },
+      {
+        "id": "event-handling",
+        "title": "Event Handling System",
+        "description": "Component for dispatching and processing user and system events. Implements event capture/bubble propagation, event listener management, input event translation, and focus management.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "events",
+          "input",
+          "component"
+        ],
+        "points": 13,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "event-handling-design",
+        "title": "Design: Event Handling System",
+        "description": "Design event system: Event base type hierarchy, EventTarget interface, capture/bubble dispatch algorithm, listener storage, hit testing integration with layout, and focus/blur management.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "events",
+          "design"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "event-handling-explore",
+        "title": "Explore: Event Handling System",
+        "description": "Research DOM event specification (capture, target, bubble phases), input event types (mouse, keyboard, touch, pointer), focus management models, and event delegation patterns.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "events",
+          "explore"
+        ],
+        "points": 2,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "event-handling-implement",
+        "title": "Implement: Event Handling System",
+        "description": "Implement EventTarget trait, event dispatch with capture/bubble phases, listener registration/removal, hit test coordinate mapping from layout tree, mouse/keyboard event translation, and focus management.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "events",
+          "implement"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "event-handling-test",
+        "title": "Test: Event Handling System",
+        "description": "Test event dispatch order (capture then bubble), stopPropagation behavior, preventDefault effects, listener add/remove during dispatch, hit testing accuracy, and focus management transitions.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "events",
+          "test"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      },
+      {
+        "id": "html-parser",
+        "title": "HTML Parser",
+        "description": "Component for parsing HTML documents into a token stream and building a parse tree. Handles tag nesting, self-closing elements, character entities, and malformed markup recovery.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "html",
+          "parser",
+          "component"
+        ],
+        "points": 13,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "html-parser-design",
+        "title": "Design: HTML Parser",
+        "description": "Design the HTML parser architecture: tokenizer state machine, tree construction algorithm, error recovery strategy. Define public API, data structures for parse tree nodes, and integration points with DOM.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "html",
+          "design"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "html-parser-explore",
+        "title": "Explore: HTML Parser",
+        "description": "Research HTML5 parsing specification, evaluate existing parser libraries, identify edge cases (malformed HTML, character encoding, void elements). Document parsing algorithm options and constraints.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "html",
+          "explore"
+        ],
+        "points": 2,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "html-parser-implement",
+        "title": "Implement: HTML Parser",
+        "description": "Implement the HTML tokenizer and tree builder per the design spec. Handle tag nesting, self-closing elements, character entity decoding, and malformed markup recovery. Integrate with DOM tree builder.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "html",
+          "implement"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "html-parser-test",
+        "title": "Test: HTML Parser",
+        "description": "Test HTML parsing against the html5lib test suite. Verify correct handling of well-formed documents, malformed markup recovery, character encoding detection, and void elements. Measure parsing performance.",
+        "status": "pending",
+        "priority": 9,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "html",
+          "test"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      },
+      {
+        "id": "js-runtime",
+        "title": "JavaScript Runtime",
+        "description": "Component for executing JavaScript code. Integrates a JS engine, provides DOM bindings, handles script loading order, and manages the event loop for async operations.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "javascript",
+          "runtime",
+          "component"
+        ],
+        "points": 21,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "js-runtime-design",
+        "title": "Design: JavaScript Runtime",
+        "description": "Design JS runtime integration: engine selection, DOM binding layer, global object setup, script loading pipeline, event loop architecture, and security sandbox boundaries.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "javascript",
+          "design"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "js-runtime-explore",
+        "title": "Explore: JavaScript Runtime",
+        "description": "Research embeddable JS engines (V8, SpiderMonkey, QuickJS), DOM binding strategies, script execution ordering (defer, async, module), and event loop integration patterns.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "javascript",
+          "explore"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "js-runtime-implement",
+        "title": "Implement: JavaScript Runtime",
+        "description": "Implement JS runtime: embed chosen engine, create DOM binding layer with getter/setter proxies, implement script loader respecting defer/async/module ordering, build event loop with microtask queue.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "javascript",
+          "implement"
+        ],
+        "points": 8,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "js-runtime-test",
+        "title": "Test: JavaScript Runtime",
+        "description": "Test JS execution, DOM manipulation from scripts, event handler invocation, script loading order compliance, and event loop behavior. Verify security sandbox prevents unauthorized access.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "javascript",
+          "test"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      },
+      {
+        "id": "layout-engine",
+        "title": "Layout Engine",
+        "description": "Component for computing the visual layout of DOM elements. Implements box model calculations, block/inline flow, flexbox, and generates a layout tree with computed positions and dimensions.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "layout",
+          "engine",
+          "component"
+        ],
+        "points": 21,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "layout-engine-design",
+        "title": "Design: Layout Engine",
+        "description": "Design layout engine: layout tree structure, box model types, block flow algorithm, inline layout with line breaking, flexbox layout algorithm. Define interface with style system and paint system.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "layout",
+          "design"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "layout-engine-explore",
+        "title": "Explore: Layout Engine",
+        "description": "Research CSS layout algorithms: block formatting context, inline formatting, flexbox specification, box model edge cases. Study how Servo and WebKit approach incremental layout.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "layout",
+          "explore"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "layout-engine-implement",
+        "title": "Implement: Layout Engine",
+        "description": "Implement layout tree construction from styled DOM, box model calculations (margin collapsing, padding, border), block flow layout, inline layout with line breaking, and basic flexbox support.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "layout",
+          "implement"
+        ],
+        "points": 8,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "layout-engine-test",
+        "title": "Test: Layout Engine",
+        "description": "Test layout calculations: box model dimensions, margin collapsing, block flow positioning, inline text wrapping, flexbox distribution. Compare output against reference renderings.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "layout",
+          "test"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      },
+      {
+        "id": "networking",
+        "title": "Networking Layer",
+        "description": "Component for fetching resources over the network. Implements HTTP/HTTPS client, connection pooling, request scheduling, caching, and cookie management.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "networking",
+          "http",
+          "component"
+        ],
+        "points": 13,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "networking-design",
+        "title": "Design: Networking Layer",
+        "description": "Design networking layer: async HTTP client, connection pool manager, request priority queue, disk cache with eviction policy, cookie jar with domain/path scoping, and resource loader API.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "networking",
+          "design"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "networking-explore",
+        "title": "Explore: Networking Layer",
+        "description": "Research HTTP/2 and HTTP/3 protocols, TLS libraries, connection pooling strategies, cache validation (ETag, Last-Modified), and cookie specification compliance requirements.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "networking",
+          "explore"
+        ],
+        "points": 2,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "networking-implement",
+        "title": "Implement: Networking Layer",
+        "description": "Implement async HTTP client with connection pooling, TLS support, request prioritization, disk-backed cache with LRU eviction, cookie storage, and redirect following. Integrate with resource loader.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "networking",
+          "implement"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "networking-test",
+        "title": "Test: Networking Layer",
+        "description": "Test HTTP request/response handling, connection pooling behavior, cache hit/miss/validation, cookie domain scoping, HTTPS certificate validation, and redirect chains. Use mock server for determinism.",
+        "status": "pending",
+        "priority": 8,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "networking",
+          "test"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      },
+      {
+        "id": "rendering",
+        "title": "Rendering Pipeline",
+        "description": "Component for painting the layout tree to a display surface. Implements paint order, layer compositing, text rendering, image decoding and display, and display list generation.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "rendering",
+          "paint",
+          "component"
+        ],
+        "points": 13,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": null
+      },
+      {
+        "id": "rendering-design",
+        "title": "Design: Rendering Pipeline",
+        "description": "Design rendering pipeline: display list generation from layout tree, paint order (background, border, content, outline), layer tree for compositing, text glyph rendering, and image display.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "rendering",
+          "design"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "design"
+      },
+      {
+        "id": "rendering-explore",
+        "title": "Explore: Rendering Pipeline",
+        "description": "Research rendering approaches: immediate-mode vs retained-mode, GPU acceleration options, display list optimization, text shaping libraries (HarfBuzz), and image format decoding.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "designer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "rendering",
+          "explore"
+        ],
+        "points": 2,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "explore"
+      },
+      {
+        "id": "rendering-implement",
+        "title": "Implement: Rendering Pipeline",
+        "description": "Implement display list builder, paint operations (rect, text, image, border), layer compositor, text renderer with font fallback, and image decoder integration. Support basic CSS backgrounds and borders.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "implementer"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "rendering",
+          "implement"
+        ],
+        "points": 5,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "implement"
+      },
+      {
+        "id": "rendering-test",
+        "title": "Test: Rendering Pipeline",
+        "description": "Test rendering output: paint order correctness, text glyph positioning, image display, border rendering, layer compositing. Use pixel-comparison reference tests for visual correctness.",
+        "status": "pending",
+        "priority": 7,
+        "worker_id": null,
+        "claimed_at": null,
+        "needed_tags": [
+          "tester"
+        ],
+        "wanted_tags": [],
+        "tags": [
+          "browser",
+          "rendering",
+          "test"
+        ],
+        "points": 3,
+        "time_estimate_ms": null,
+        "time_actual_ms": null,
+        "started_at": null,
+        "completed_at": null,
+        "current_thought": null,
+        "cost_usd": 0.0,
+        "metrics": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "created_at": 1769724000000,
+        "updated_at": 1769724000000,
+        "phase": "test"
+      }
+    ],
+    "dependencies": [
+      {
+        "from_task_id": "browser",
+        "to_task_id": "css-engine",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "browser",
+        "to_task_id": "dom-tree",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "browser",
+        "to_task_id": "event-handling",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "browser",
+        "to_task_id": "html-parser",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "browser",
+        "to_task_id": "js-runtime",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "browser",
+        "to_task_id": "layout-engine",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "browser",
+        "to_task_id": "networking",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "browser",
+        "to_task_id": "rendering",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "css-engine",
+        "to_task_id": "css-engine-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "css-engine",
+        "to_task_id": "css-engine-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "css-engine",
+        "to_task_id": "css-engine-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "css-engine",
+        "to_task_id": "css-engine-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "css-engine-design",
+        "to_task_id": "css-engine-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "css-engine-implement",
+        "to_task_id": "css-engine-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "css-engine-implement",
+        "to_task_id": "layout-engine-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "css-engine-test",
+        "to_task_id": "css-engine-implement",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "dom-tree",
+        "to_task_id": "dom-tree-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "dom-tree",
+        "to_task_id": "dom-tree-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "dom-tree",
+        "to_task_id": "dom-tree-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "dom-tree",
+        "to_task_id": "dom-tree-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "dom-tree-design",
+        "to_task_id": "dom-tree-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "dom-tree-implement",
+        "to_task_id": "dom-tree-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "dom-tree-implement",
+        "to_task_id": "event-handling-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "dom-tree-implement",
+        "to_task_id": "html-parser-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "dom-tree-implement",
+        "to_task_id": "js-runtime-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "dom-tree-implement",
+        "to_task_id": "layout-engine-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "dom-tree-test",
+        "to_task_id": "dom-tree-implement",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "event-handling",
+        "to_task_id": "event-handling-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "event-handling",
+        "to_task_id": "event-handling-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "event-handling",
+        "to_task_id": "event-handling-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "event-handling",
+        "to_task_id": "event-handling-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "event-handling-design",
+        "to_task_id": "event-handling-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "event-handling-implement",
+        "to_task_id": "event-handling-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "event-handling-test",
+        "to_task_id": "event-handling-implement",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "html-parser",
+        "to_task_id": "html-parser-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "html-parser",
+        "to_task_id": "html-parser-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "html-parser",
+        "to_task_id": "html-parser-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "html-parser",
+        "to_task_id": "html-parser-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "html-parser-design",
+        "to_task_id": "html-parser-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "html-parser-implement",
+        "to_task_id": "html-parser-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "html-parser-test",
+        "to_task_id": "html-parser-implement",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "js-runtime",
+        "to_task_id": "js-runtime-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "js-runtime",
+        "to_task_id": "js-runtime-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "js-runtime",
+        "to_task_id": "js-runtime-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "js-runtime",
+        "to_task_id": "js-runtime-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "js-runtime-design",
+        "to_task_id": "js-runtime-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "js-runtime-implement",
+        "to_task_id": "js-runtime-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "js-runtime-test",
+        "to_task_id": "js-runtime-implement",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "layout-engine",
+        "to_task_id": "layout-engine-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "layout-engine",
+        "to_task_id": "layout-engine-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "layout-engine",
+        "to_task_id": "layout-engine-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "layout-engine",
+        "to_task_id": "layout-engine-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "layout-engine-design",
+        "to_task_id": "layout-engine-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "layout-engine-implement",
+        "to_task_id": "event-handling-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "layout-engine-implement",
+        "to_task_id": "layout-engine-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "layout-engine-implement",
+        "to_task_id": "rendering-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "layout-engine-test",
+        "to_task_id": "layout-engine-implement",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "networking",
+        "to_task_id": "networking-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "networking",
+        "to_task_id": "networking-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "networking",
+        "to_task_id": "networking-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "networking",
+        "to_task_id": "networking-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "networking-design",
+        "to_task_id": "networking-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "networking-implement",
+        "to_task_id": "html-parser-implement",
+        "dep_type": "blocks"
+      },
+      {
+        "from_task_id": "networking-implement",
+        "to_task_id": "networking-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "networking-test",
+        "to_task_id": "networking-implement",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "rendering",
+        "to_task_id": "rendering-design",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "rendering",
+        "to_task_id": "rendering-explore",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "rendering",
+        "to_task_id": "rendering-implement",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "rendering",
+        "to_task_id": "rendering-test",
+        "dep_type": "contains"
+      },
+      {
+        "from_task_id": "rendering-design",
+        "to_task_id": "rendering-explore",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "rendering-implement",
+        "to_task_id": "rendering-design",
+        "dep_type": "follows"
+      },
+      {
+        "from_task_id": "rendering-test",
+        "to_task_id": "rendering-implement",
+        "dep_type": "follows"
+      }
+    ],
+    "task_tags": [
+      {
+        "task_id": "browser",
+        "tag": "browser"
+      },
+      {
+        "task_id": "browser",
+        "tag": "engine"
+      },
+      {
+        "task_id": "css-engine",
+        "tag": "browser"
+      },
+      {
+        "task_id": "css-engine",
+        "tag": "component"
+      },
+      {
+        "task_id": "css-engine",
+        "tag": "css"
+      },
+      {
+        "task_id": "css-engine",
+        "tag": "styling"
+      },
+      {
+        "task_id": "css-engine-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "css-engine-design",
+        "tag": "css"
+      },
+      {
+        "task_id": "css-engine-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "css-engine-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "css-engine-explore",
+        "tag": "css"
+      },
+      {
+        "task_id": "css-engine-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "css-engine-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "css-engine-implement",
+        "tag": "css"
+      },
+      {
+        "task_id": "css-engine-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "css-engine-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "css-engine-test",
+        "tag": "css"
+      },
+      {
+        "task_id": "css-engine-test",
+        "tag": "test"
+      },
+      {
+        "task_id": "dom-tree",
+        "tag": "browser"
+      },
+      {
+        "task_id": "dom-tree",
+        "tag": "component"
+      },
+      {
+        "task_id": "dom-tree",
+        "tag": "dom"
+      },
+      {
+        "task_id": "dom-tree",
+        "tag": "tree"
+      },
+      {
+        "task_id": "dom-tree-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "dom-tree-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "dom-tree-design",
+        "tag": "dom"
+      },
+      {
+        "task_id": "dom-tree-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "dom-tree-explore",
+        "tag": "dom"
+      },
+      {
+        "task_id": "dom-tree-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "dom-tree-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "dom-tree-implement",
+        "tag": "dom"
+      },
+      {
+        "task_id": "dom-tree-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "dom-tree-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "dom-tree-test",
+        "tag": "dom"
+      },
+      {
+        "task_id": "dom-tree-test",
+        "tag": "test"
+      },
+      {
+        "task_id": "event-handling",
+        "tag": "browser"
+      },
+      {
+        "task_id": "event-handling",
+        "tag": "component"
+      },
+      {
+        "task_id": "event-handling",
+        "tag": "events"
+      },
+      {
+        "task_id": "event-handling",
+        "tag": "input"
+      },
+      {
+        "task_id": "event-handling-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "event-handling-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "event-handling-design",
+        "tag": "events"
+      },
+      {
+        "task_id": "event-handling-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "event-handling-explore",
+        "tag": "events"
+      },
+      {
+        "task_id": "event-handling-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "event-handling-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "event-handling-implement",
+        "tag": "events"
+      },
+      {
+        "task_id": "event-handling-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "event-handling-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "event-handling-test",
+        "tag": "events"
+      },
+      {
+        "task_id": "event-handling-test",
+        "tag": "test"
+      },
+      {
+        "task_id": "html-parser",
+        "tag": "browser"
+      },
+      {
+        "task_id": "html-parser",
+        "tag": "component"
+      },
+      {
+        "task_id": "html-parser",
+        "tag": "html"
+      },
+      {
+        "task_id": "html-parser",
+        "tag": "parser"
+      },
+      {
+        "task_id": "html-parser-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "html-parser-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "html-parser-design",
+        "tag": "html"
+      },
+      {
+        "task_id": "html-parser-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "html-parser-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "html-parser-explore",
+        "tag": "html"
+      },
+      {
+        "task_id": "html-parser-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "html-parser-implement",
+        "tag": "html"
+      },
+      {
+        "task_id": "html-parser-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "html-parser-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "html-parser-test",
+        "tag": "html"
+      },
+      {
+        "task_id": "html-parser-test",
+        "tag": "test"
+      },
+      {
+        "task_id": "js-runtime",
+        "tag": "browser"
+      },
+      {
+        "task_id": "js-runtime",
+        "tag": "component"
+      },
+      {
+        "task_id": "js-runtime",
+        "tag": "javascript"
+      },
+      {
+        "task_id": "js-runtime",
+        "tag": "runtime"
+      },
+      {
+        "task_id": "js-runtime-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "js-runtime-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "js-runtime-design",
+        "tag": "javascript"
+      },
+      {
+        "task_id": "js-runtime-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "js-runtime-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "js-runtime-explore",
+        "tag": "javascript"
+      },
+      {
+        "task_id": "js-runtime-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "js-runtime-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "js-runtime-implement",
+        "tag": "javascript"
+      },
+      {
+        "task_id": "js-runtime-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "js-runtime-test",
+        "tag": "javascript"
+      },
+      {
+        "task_id": "js-runtime-test",
+        "tag": "test"
+      },
+      {
+        "task_id": "layout-engine",
+        "tag": "browser"
+      },
+      {
+        "task_id": "layout-engine",
+        "tag": "component"
+      },
+      {
+        "task_id": "layout-engine",
+        "tag": "engine"
+      },
+      {
+        "task_id": "layout-engine",
+        "tag": "layout"
+      },
+      {
+        "task_id": "layout-engine-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "layout-engine-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "layout-engine-design",
+        "tag": "layout"
+      },
+      {
+        "task_id": "layout-engine-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "layout-engine-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "layout-engine-explore",
+        "tag": "layout"
+      },
+      {
+        "task_id": "layout-engine-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "layout-engine-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "layout-engine-implement",
+        "tag": "layout"
+      },
+      {
+        "task_id": "layout-engine-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "layout-engine-test",
+        "tag": "layout"
+      },
+      {
+        "task_id": "layout-engine-test",
+        "tag": "test"
+      },
+      {
+        "task_id": "networking",
+        "tag": "browser"
+      },
+      {
+        "task_id": "networking",
+        "tag": "component"
+      },
+      {
+        "task_id": "networking",
+        "tag": "http"
+      },
+      {
+        "task_id": "networking",
+        "tag": "networking"
+      },
+      {
+        "task_id": "networking-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "networking-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "networking-design",
+        "tag": "networking"
+      },
+      {
+        "task_id": "networking-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "networking-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "networking-explore",
+        "tag": "networking"
+      },
+      {
+        "task_id": "networking-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "networking-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "networking-implement",
+        "tag": "networking"
+      },
+      {
+        "task_id": "networking-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "networking-test",
+        "tag": "networking"
+      },
+      {
+        "task_id": "networking-test",
+        "tag": "test"
+      },
+      {
+        "task_id": "rendering",
+        "tag": "browser"
+      },
+      {
+        "task_id": "rendering",
+        "tag": "component"
+      },
+      {
+        "task_id": "rendering",
+        "tag": "paint"
+      },
+      {
+        "task_id": "rendering",
+        "tag": "rendering"
+      },
+      {
+        "task_id": "rendering-design",
+        "tag": "browser"
+      },
+      {
+        "task_id": "rendering-design",
+        "tag": "design"
+      },
+      {
+        "task_id": "rendering-design",
+        "tag": "rendering"
+      },
+      {
+        "task_id": "rendering-explore",
+        "tag": "browser"
+      },
+      {
+        "task_id": "rendering-explore",
+        "tag": "explore"
+      },
+      {
+        "task_id": "rendering-explore",
+        "tag": "rendering"
+      },
+      {
+        "task_id": "rendering-implement",
+        "tag": "browser"
+      },
+      {
+        "task_id": "rendering-implement",
+        "tag": "implement"
+      },
+      {
+        "task_id": "rendering-implement",
+        "tag": "rendering"
+      },
+      {
+        "task_id": "rendering-test",
+        "tag": "browser"
+      },
+      {
+        "task_id": "rendering-test",
+        "tag": "rendering"
+      },
+      {
+        "task_id": "rendering-test",
+        "tag": "test"
+      }
+    ],
+    "task_needed_tags": [
+      {
+        "task_id": "css-engine-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "css-engine-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "css-engine-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "css-engine-test",
+        "tag": "tester"
+      },
+      {
+        "task_id": "dom-tree-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "dom-tree-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "dom-tree-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "dom-tree-test",
+        "tag": "tester"
+      },
+      {
+        "task_id": "event-handling-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "event-handling-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "event-handling-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "event-handling-test",
+        "tag": "tester"
+      },
+      {
+        "task_id": "html-parser-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "html-parser-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "html-parser-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "html-parser-test",
+        "tag": "tester"
+      },
+      {
+        "task_id": "js-runtime-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "js-runtime-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "js-runtime-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "js-runtime-test",
+        "tag": "tester"
+      },
+      {
+        "task_id": "layout-engine-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "layout-engine-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "layout-engine-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "layout-engine-test",
+        "tag": "tester"
+      },
+      {
+        "task_id": "networking-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "networking-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "networking-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "networking-test",
+        "tag": "tester"
+      },
+      {
+        "task_id": "rendering-design",
+        "tag": "designer"
+      },
+      {
+        "task_id": "rendering-explore",
+        "tag": "designer"
+      },
+      {
+        "task_id": "rendering-implement",
+        "tag": "implementer"
+      },
+      {
+        "task_id": "rendering-test",
+        "tag": "tester"
+      }
+    ],
+    "task_wanted_tags": [],
+    "task_sequence": [],
+    "attachments": []
+  }
+}

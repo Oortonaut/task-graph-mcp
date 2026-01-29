@@ -1,6 +1,5 @@
 # SWARM WORKFLOW - Parallel generalists, fine-grained atomic tasks, pull coordination
 # Use for: many independent tasks, max throughput, pre-decomposed work
-# Coordination: claim tasks, mark files, broadcast thinking
 
 name: swarm
 description: Parallel generalists with fine-grained tasks for maximum throughput
@@ -20,61 +19,46 @@ states:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: Task assigned. Review and claim when ready.
+      enter: "Task assigned. Review and claim when ready."
 
   working:
     exits: [completed, failed, pending, consult]
     timed: true
     prompts:
       enter: |
-        **Swarm working.** Tasks are atomic - work fast, release fast.
+        **Swarm working.** Atomic tasks - work fast, release fast. ONE task at a time.
 
-        **File coordination:**
-        1. `mark_updates()` - check recent activity
-        2. `mark_file()` - signal intent before editing
-        3. Wait/coordinate if conflicts
-
-        **Discipline:** ONE task at a time. `thinking()` updates for visibility.
-
-        - **Never revert unfamiliar changes**: if you find unexpected modifications in a file, do NOT revert them. Another worker may have made those changes. Use `mark_updates()` or `list_marks()` to check, and coordinate before overwriting
-        - **Before editing**: call list_marks() to check if other workers have marked the same files. If conflicts found, coordinate or pick a different task
-        - **Estimate scope first**: if a task touches 5+ files or requires broad symbol renaming, decompose into subtasks before starting. Three focused subtasks are better than one sprawling change
-
-        ### Heartbeat & Coordination
-        - Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
-        - Call `mark_updates(agent=your_id)` every 30-60s during long operations to detect file conflicts
-        - Stale workers (no heartbeat for 5+ min) get evicted automatically
-        - In a swarm, frequent polling is critical -- multiple agents may target the same files
+        **File coordination:** `mark_updates()` -> `mark_file()` -> edit -> `unmark_file()`
+        - Never revert unfamiliar changes: check `mark_updates()` / `list_marks()` first
+        - `list_marks()` before editing; if conflicts, coordinate or pick different task
+        - 5+ files? Decompose into subtasks first
+        - `thinking()` frequently for heartbeat + visibility
+        - `mark_updates()` every 30-60s (critical in swarm - multiple agents target same files)
+        - Stale workers (5+ min no heartbeat) get evicted
+        - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release via `update(task="_lock:git-commit", status="pending")`
 
         Transitions: {{valid_exits}}
         Phase: {{current_phase}} (optional) | Valid: {{valid_phases}}
 
-      exit: |
-        Before completing:
-        - [ ] `unmark_file()` any marked files
-        - [ ] Attach results
-        - [ ] `log_metrics()`
+      exit: "`unmark_file()` all files, attach results, `log_metrics()`."
 
   completed:
     exits: [pending]
     timed: false
     prompts:
-      enter: Done. `list_tasks(ready=true)` for next task. Attach results for others.
+      enter: "Done. `list_tasks(ready=true)` for next task."
 
   failed:
     exits: [pending]
     timed: false
     prompts:
-      enter: |
-        Blocked. Document: attempted, blocker. Use `link(type="blocks")` if dependency issue. Release for others.
+      enter: "Blocked. Document: attempted, blocker. `link(type=\"blocks\")` if dep issue."
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: |
-        **Paused for human review.** Attach a note explaining what decision is needed.
-        A human must transition this back to `working` or `pending`.
+      enter: "**Paused for human review.** Attach note explaining decision needed."
 
   cancelled:
     exits: []
@@ -83,60 +67,121 @@ states:
 phases:
   explore:
     prompts:
-      enter: Quick exploration. Time-box it. Attach findings.
+      enter: "Quick exploration. Time-box. Attach findings."
+      exit: "Attach findings immediately. Deep dives = follow-up tasks."
 
   implement:
     prompts:
-      enter: |
-        **Implement.** Check `mark_updates()` first. Small, focused changes.
+      enter: "**Implement.** `mark_updates()` first. Small, focused changes."
+      exit: "`unmark_file()`, commit attached, build verified."
 
   review:
     prompts:
-      enter: Quick review. Core works? No regressions? Detailed review = separate task.
+      enter: "Quick review. Core works? No regressions? Detailed = separate task."
+      exit: "Attach verdict. Detailed findings = separate task."
 
   test:
     prompts:
-      enter: Atomic testing, matching atomic implementation.
+      enter: "Atomic testing matching atomic implementation."
+      exit: "Attach test results."
 
-  security: {}
-  deliver: {}
-  triage: {}
-  diagnose: {}
-  design: {}
-  plan: {}
-  doc: {}
-  integrate: {}
-  deploy: {}
-  monitor: {}
-  optimize: {}
+  triage:
+    prompts:
+      enter: "**Triage.** Quick categorization: tags, priority, scope. No deep-dive."
+
+  diagnose:
+    prompts:
+      enter: "**Diagnose.** Find root cause fast. Attach findings. Don't fix - create implement task."
+
+  design:
+    prompts:
+      enter: "**Design.** Quick design note. Just enough for another agent to implement."
+
+  plan:
+    prompts:
+      enter: "**Plan.** Decompose if complex. Many small tasks > one large task."
+
+  security:
+    prompts:
+      enter: "**Security.** Quick check: input validation, no secrets, safe deps."
+
+  doc:
+    prompts:
+      enter: "**Doc.** Update docs to match implementation. Brief and accurate."
+
+  integrate:
+    prompts:
+      enter: "**Integrate.** No conflicts with parallel work. Full test suite."
+
+  deliver:
+    prompts:
+      enter: "**Deliver.** Package for release. All tests, changelog."
+
+  deploy:
+    prompts:
+      enter: "**Deploy.** Build, deploy, monitor for immediate issues."
+
+  monitor:
+    prompts:
+      enter: "**Monitor.** Watch for issues. Time-box. Attach observations."
+
+  optimize:
+    prompts:
+      enter: "**Optimize.** Measure before/after. One change at a time."
 
 # State+Phase combos
 combos:
   working+implement:
     enter: |
       Swarm impl: `mark_updates()` -> `mark_file()` -> edit fast -> `unmark_file()`. Keep `thinking()` updated.
-
-      - **Before large refactorings** (touching 3+ files): search for ALL symbols/references first using find_referencing_symbols or grep, mark_file() ALL files you'll modify, then write a plan attachment before coding
+      - **3+ files**: search ALL symbols first, mark_file() ALL, plan attachment before coding
+      - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release
 
   working+explore:
-    enter: Time-boxed recon. Attach findings immediately. Deep dives = follow-up tasks.
+    enter: "Time-boxed recon. Attach findings immediately. Deep dives = follow-up tasks."
 
-# Swarm reference (loaded on demand)
-swarm_prompts:
-  claim_guidance: |
-    `list_tasks(ready=true)` -> pick ONE -> `claim()` -> work fast -> complete -> repeat.
-    Throughput = fast cycles.
+  working+review:
+    enter: "Quick review. Core correctness. Flag regressions. Detailed = separate tasks."
 
-  file_coordination: |
-    Check: `mark_updates()`, `list_marks(files=[...])`.
-    Signal: `mark_file(file=path, reason="...")`.
-    Conflict? Wait, coordinate, or split work.
-    Release: `unmark_file()`.
+  working+test:
+    enter: "Atomic test matching implementation scope. Attach results."
 
-  visibility: |
-    `thinking()` frequently. Others monitor to avoid conflicts and coordinate.
+  working+triage:
+    enter: "Quick triage: tag, prioritize, scope. Create subtasks if needed."
 
-# Gates (minimal for throughput - advisory/warn only)
+  working+diagnose:
+    enter: "Fast diagnosis: reproduce, narrow, attach findings. Create implement task for fix."
+
+  working+security:
+    enter: "Quick security scan: input validation, no secrets, safe deps. Attach findings."
+
+# Swarm roles (all agents are generalists)
+roles:
+  swarm_agent:
+    description: Generalist agent working in parallel with peers
+    tags: [worker, implementer, code]
+    max_claims: 2
+    can_assign: false
+    can_create_subtasks: true
+
+# Role prompts
+role_prompts:
+  swarm_agent:
+    claim_guidance: |
+      `list_tasks(ready=true)` -> pick ONE -> `claim()` -> work fast -> complete -> repeat.
+      Throughput = fast cycles. Don't hoard tasks.
+
+    file_coordination: |
+      Check: `mark_updates()`, `list_marks(files=[...])`.
+      Signal: `mark_file(file=path, reason="...")`.
+      Conflict? Wait, coordinate, or split. Release: `unmark_file()`.
+      **Always mark BEFORE editing.** Critical in swarm.
+
+    visibility: |
+      `thinking()` frequently. Your heartbeat is your only signal.
+      Silent agents get evicted and tasks returned to pool.
+
+# Gates (minimal for throughput)
 gates:
   status:working:
     - type: "gate/summary"
@@ -144,9 +189,9 @@ gates:
       description: "Brief summary for other agents (advisory)"
     - type: "gate/build"
       enforcement: warn
-      description: "Run cargo check (or equivalent build verification) before marking tasks complete"
+      description: "Run cargo check before completing"
 
-# Attachment types (brief, actionable)
+# Attachment types
 attachments:
   recommended:
     result: Completion data (JSON)

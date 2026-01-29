@@ -1,11 +1,10 @@
 # RELAY WORKFLOW - Sequential specialist handoffs, push coordination
 # Flow: Designer -> Implementer -> Reviewer -> Tester
-# Protocol: RECEIVE attachments -> PROCESS work -> DOCUMENT deliverables -> HANDOFF
+# Protocol: RECEIVE -> PROCESS -> DOCUMENT -> HANDOFF
 
 name: relay
 description: Specialists hand off work through phases like a relay race
 
-# Extend base settings
 settings:
   initial_state: pending
   disconnect_state: pending
@@ -20,23 +19,9 @@ roles:
     phases: [design, explore]
     prompts:
       claim: |
-        You are taking on a design task. Your deliverable is a clear specification.
-
-        ## Design Deliverables
-        - [ ] Clear problem statement
-        - [ ] Proposed solution approach
-        - [ ] Interface definitions (if applicable)
-        - [ ] Edge cases identified
-        - [ ] Acceptance criteria defined
-
-        Attach your design document when complete for handoff to implementer.
-
-      handoff: |
-        Prepare handoff to implementer:
-        - [ ] Design spec attached
-        - [ ] Implementation notes added
-        - [ ] Questions/blockers documented
-        - [ ] Acceptance criteria explicit
+        Design task. Deliver: problem statement, solution approach, interfaces, edge cases, acceptance criteria.
+        Attach design doc for implementer handoff.
+      handoff: "Ensure design spec attached, impl notes added, acceptance criteria explicit."
 
   implementer:
     description: Implements features based on designs
@@ -44,25 +29,9 @@ roles:
     phases: [implement, integrate]
     prompts:
       claim: |
-        You are implementing a design. Review the design spec first.
-
-        ## Implementation Checklist
-        - [ ] Read and understand the design spec
-        - [ ] Identify files to modify (use mark_file)
-        - [ ] **Never revert unfamiliar changes** in files - another worker may own those. Check mark_updates() first
-        - [ ] Follow existing patterns
-        - [ ] Write unit tests alongside code
-        - [ ] Document public APIs
-
-        Ask the designer for clarification before guessing.
-
-      handoff: |
-        Prepare handoff to reviewer:
-        - [ ] All code committed
-        - [ ] Unit tests passing
-        - [ ] Self-review completed
-        - [ ] Implementation notes attached
-        - [ ] Deviations from design documented
+        Read design spec first. `mark_file()` before editing. Follow patterns. Tests alongside code.
+        Never revert unfamiliar changes - check `mark_updates()`. Ask designer before guessing.
+      handoff: "Ensure code committed, tests passing, self-reviewed, design deviations documented."
 
   reviewer:
     description: Reviews implementations for quality and correctness
@@ -70,25 +39,9 @@ roles:
     phases: [review, security]
     prompts:
       claim: |
-        You are reviewing an implementation. Focus on correctness and quality.
-
-        ## Review Checklist
-        - [ ] Read the original design spec
-        - [ ] Review implementation against spec
-        - [ ] Check test coverage
-        - [ ] Look for edge cases
-        - [ ] Verify error handling
-        - [ ] Check for security issues
-
-        Document findings before approval or rejection.
-
-      handoff: |
-        Prepare handoff to tester:
-        - [ ] Review findings attached
-        - [ ] Approval/rejection decision clear
-        - [ ] If rejected: specific issues listed
-        - [ ] If approved: test focus areas noted
-        - [ ] Known limitations documented
+        Review against design spec. Check correctness, test coverage, edge cases, error handling, security.
+        Document findings before approval/rejection.
+      handoff: "Ensure approval/rejection clear. Rejected: list issues. Approved: note test focus areas."
 
   tester:
     description: Validates implementations through comprehensive testing
@@ -96,27 +49,11 @@ roles:
     phases: [test]
     prompts:
       claim: |
-        You are testing an implementation. Verify it meets requirements.
+        Read design spec + acceptance criteria + review notes. Run suite, test edges and errors.
+        Document results thoroughly.
+      handoff: "Ensure results attached, pass/fail clear, failures documented or coverage noted."
 
-        ## Testing Checklist
-        - [ ] Read design spec and acceptance criteria
-        - [ ] Review any review notes
-        - [ ] Run existing test suite
-        - [ ] Add integration tests if needed
-        - [ ] Test edge cases
-        - [ ] Verify error scenarios
-
-        Document test results thoroughly.
-
-      handoff: |
-        Finalize testing:
-        - [ ] Test results attached
-        - [ ] Pass/fail determination clear
-        - [ ] If failed: specific failures documented
-        - [ ] If passed: coverage metrics noted
-        - [ ] Recommended improvements listed (optional)
-
-# State configuration with relay-specific prompts
+# State configuration
 states:
   pending:
     exits: [assigned, working, cancelled]
@@ -126,390 +63,175 @@ states:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: |
-        A task has been assigned to you by the coordinator.
-
-        ## Before Claiming
-        - Review the task description
-        - Check for prerequisite attachments
-        - Verify you have the required expertise (check your role)
-
-        Claim when ready with `claim()` or reject back to pending if misrouted.
+      enter: "Assigned by coordinator. Review and claim when ready, or reject to pending."
 
   working:
     exits: [completed, failed, pending, consult]
     timed: true
     prompts:
       enter: |
-        You are now actively working on this task.
+        **Relay working.** Protocol: receive attachments -> process -> document -> handoff.
 
-        ## Relay Protocol
+        - Never revert unfamiliar changes: check `mark_updates()` / `list_marks()` first
+        - `list_marks()` before editing for conflicts
+        - 5+ files? Decompose first
+        - `thinking()` regularly for heartbeat; `mark_updates()` every 30-60s
+        - Stale workers (5+ min no heartbeat) get evicted
+        - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release via `update(task="_lock:git-commit", status="pending")`
 
-        1. **Receive**: Read all attachments from previous specialist
-        2. **Process**: Complete your phase's work
-        3. **Document**: Attach your deliverables
-        4. **Handoff**: Complete with clear notes for next specialist
+        Transitions: {{valid_exits}}
+        Phase: {{current_phase}} | Valid: {{valid_phases}}
 
-        Keep your thinking updated regularly using the `thinking` tool.
-
-        ### Heartbeat & Coordination
-        - Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
-        - Call `mark_updates(agent=your_id)` every 30-60s during long operations to check for handoff signals
-        - Stale workers (no heartbeat for 5+ min) get evicted automatically
-
-        ### Valid Transitions
-        - `completed` - Phase complete, ready for handoff
-        - `failed` - Blocked, needs coordinator intervention
-        - `pending` - Release for reassignment
-
-      exit: |
-        Before completing:
-        - [ ] Deliverables attached
-        - [ ] Handoff notes clear
-        - [ ] Files unmarked
-        - [ ] Costs logged with `log_metrics()`
+      exit: "Deliverables attached, handoff notes clear, files unmarked, `log_metrics()`."
 
   completed:
     exits: [pending]
     timed: false
     prompts:
-      enter: |
-        Phase completed. Your deliverables should be attached.
-
-        The coordinator will route this to the next specialist in the relay.
+      enter: "Phase complete. Coordinator routes to next specialist."
 
   failed:
     exits: [pending]
     timed: false
     prompts:
-      enter: |
-        Phase failed. Document clearly for coordinator:
-        - What was attempted
-        - What blocked progress
-        - Whether to retry or escalate
-        - Suggested next steps
+      enter: "Phase failed. Document: attempted, blocker, retry or escalate."
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: |
-        **Paused for human review.** This task needs human input before the relay can continue.
-        Attach a note explaining what decision is needed.
-        A human must transition this back to `working` or `pending`.
+      enter: "**Paused for human review.** Attach note explaining decision needed."
 
   cancelled:
     exits: []
     timed: false
 
-# Phase configuration for relay workflow
+# Phase configuration
 phases:
   design:
     prompts:
-      enter: |
-        ## Design Phase
-
-        Create a specification that implementers can follow.
-
-        **Inputs**: Requirements, context from explore phase
-        **Outputs**: Design document with acceptance criteria
-
-        Attach design doc before completing.
+      enter: "**Design.** Create spec for implementers. Output: design doc + testable acceptance criteria."
+      exit: "Ensure spec attached (`gate/spec`), criteria testable, handoff notes included."
 
   implement:
     prompts:
-      enter: |
-        ## Implementation Phase
-
-        Build what the design specifies.
-
-        **Inputs**: Design specification
-        **Outputs**: Working code with tests
-
-        Mark files before editing. Ask designer if spec unclear.
+      enter: "**Implement.** Build per design spec. `mark_file()` first. Ask designer if unclear."
+      exit: "Ensure commit attached (`gate/commit`), impl notes attached, tests pass, handoff notes included."
 
   review:
     prompts:
-      enter: |
-        ## Review Phase
-
-        Verify the implementation matches the design.
-
-        **Inputs**: Design spec, implementation code
-        **Outputs**: Review findings, approval/rejection
-
-        Be specific about issues found.
+      enter: "**Review.** Verify impl matches design. Be specific about issues."
+      exit: "Ensure approval attached (`gate/approval`). Rejected: list fixes. Approved: note test focus."
 
   test:
     prompts:
-      enter: |
-        ## Test Phase
-
-        Validate the implementation end-to-end.
-
-        **Inputs**: Design spec, implementation, review notes
-        **Outputs**: Test results, pass/fail determination
-
-        Document failures with reproduction steps.
+      enter: "**Test.** Validate end-to-end. Document failures with repro steps."
+      exit: "Ensure results attached (`gate/test-results`), pass/fail clear, coverage noted."
 
   explore:
     prompts:
-      enter: |
-        ## Explore Phase
-
-        Investigate options before design.
-
-        Attach findings for the designer.
+      enter: "**Explore.** Investigate options pre-design. Attach findings for designer."
+      exit: "Attach findings: constraints discovered, options evaluated."
 
   integrate:
     prompts:
-      enter: |
-        ## Integration Phase
-
-        Merge work with the broader system.
-
-        Coordinate with other implementers via mark_file.
+      enter: "**Integrate.** Merge with broader system. Coordinate via `mark_file()`."
+      exit: "Ensure full test suite passes, no conflicts."
 
   security:
     prompts:
-      enter: |
-        ## Security Review
+      enter: "**Security.** Input validation, auth/authz, secrets, dependency risks."
+      exit: "Ensure findings attached, critical issues block relay until resolved."
 
-        Check for vulnerabilities.
+  triage:
+    prompts:
+      enter: "**Triage.** Determine relay sequence, set tags for first specialist, capture requirements."
+      exit: "Ensure requirements captured, routed to first specialist."
 
-        - Input validation
-        - Auth/authz
-        - Secrets handling
-        - Dependency risks
+  diagnose:
+    prompts:
+      enter: "**Diagnose.** Reproduce, identify code paths, document fix approach for implementer."
+      exit: "Ensure root cause documented, fix approach attached."
 
-  # Phases without specific prompts
-  deliver: {}
-  triage: {}
-  diagnose: {}
-  plan: {}
-  doc: {}
-  deploy: {}
-  monitor: {}
-  optimize: {}
+  plan:
+    prompts:
+      enter: "**Plan.** Outline relay sequence: which phases, which gate artifacts at each handoff."
 
-# State+Phase combos for relay
+  doc:
+    prompts:
+      enter: "**Document.** Update API docs, README, comments. Verify examples match implementation."
+
+  deliver:
+    prompts:
+      enter: "**Deliver.** Verify all gate artifacts attached, full relay chain completed. Changelog if applicable."
+
+  deploy:
+    prompts:
+      enter: "**Deploy.** Build verified, tests green. Tag release if applicable. Monitor post-deploy."
+
+  monitor:
+    prompts:
+      enter: "**Monitor.** Watch for issues from delivered changes. Attach anomalies. Escalate regressions."
+
+  optimize:
+    prompts:
+      enter: "**Optimize.** Measure baseline, targeted changes, re-measure. Keep only demonstrated improvements."
+
+# State+Phase combos
 combos:
   working+design:
-    enter: |
-      Designing. Your deliverable is a spec the implementer can follow.
-      Make acceptance criteria explicit and testable.
+    enter: "Designing. Deliverable = spec implementer can follow. Testable acceptance criteria."
 
   working+implement:
     enter: |
-      Implementing. Follow the design spec exactly.
-      Ask the designer about unclear requirements before guessing.
-      Write tests as you go.
+      Implementing per design spec. Ask designer about unclear requirements. Tests as you go.
+      - **3+ files**: search ALL symbols first, mark_file() ALL, plan attachment before coding
+      - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release
 
   working+review:
-    enter: |
-      Reviewing. Check against the design spec.
-      Be constructive - explain why something is an issue.
-      Distinguish blocking issues from suggestions.
+    enter: "Reviewing against design spec. Constructive. Distinguish blocking from suggestions."
 
   working+test:
-    enter: |
-      Testing. Verify against acceptance criteria in the design.
-      Document exact reproduction steps for failures.
-      Note any untestable requirements.
+    enter: "Testing against acceptance criteria. Repro steps for failures. Note untestable requirements."
 
   assigned+design:
-    enter: |
-      Design task assigned. Review the requirements and context.
-      Check for any exploration findings to build on.
+    enter: "Design assigned. Check for exploration findings."
 
   assigned+implement:
-    enter: |
-      Implementation task assigned. The design spec should be attached.
-      Read it fully before claiming.
+    enter: "Implementation assigned. Design spec attached. Read fully before claiming."
 
   assigned+review:
-    enter: |
-      Review task assigned. Both design spec and implementation ready.
-      Familiarize yourself with the scope before claiming.
+    enter: "Review assigned. Design and impl ready. Familiarize before claiming."
 
   assigned+test:
-    enter: |
-      Test task assigned. Design, implementation, and review complete.
-      Check for any known issues from review phase.
+    enter: "Test assigned. Design, impl, review complete. Check review for known issues."
 
-# Handoff protocol for relay transitions
+  working+explore:
+    enter: "Exploring pre-design. Time-box. Attach findings for designer. Focus on constraints."
+
+  working+security:
+    enter: "Security review. Check against design spec. Document for downstream specialists."
+
+  working+integrate:
+    enter: "Integration: merge, full test suite, coordinate via mark_file()."
+
+  working+diagnose:
+    enter: "Diagnosing: reproduce, narrow root cause, attach findings. Fix goes to implementer."
+
+# Handoff protocol reference
 handoff_protocol:
-  description: |
-    The relay workflow uses explicit handoffs between specialists.
-    Each specialist completes their phase and hands off to the next.
-
   flow:
-    - from: designer
-      to: implementer
-      via: design spec attachment
-      notes: Include acceptance criteria, edge cases, interface definitions
+    - { from: designer, to: implementer, via: "design spec attachment" }
+    - { from: implementer, to: reviewer, via: "implementation + impl notes" }
+    - { from: reviewer, to: tester, via: "review findings + approval" }
+    - { from: tester, to: coordinator, via: "test results" }
 
-    - from: implementer
-      to: reviewer
-      via: implementation + implementation notes
-      notes: Document deviations from design, known limitations
-
-    - from: reviewer
-      to: tester
-      via: review findings + approval
-      notes: Highlight areas needing focus, known risks
-
-    - from: tester
-      to: coordinator
-      via: test results
-      notes: Pass/fail with evidence, improvement suggestions
-
-  attachment_conventions:
-    design_spec:
-      type: design
-      mime: text/markdown
-      required_for: [implement, review, test]
-
-    implementation_notes:
-      type: impl-notes
-      mime: text/markdown
-      required_for: [review]
-
-    review_findings:
-      type: review
-      mime: text/markdown
-      required_for: [test]
-
-    test_results:
-      type: test-results
-      mime: text/markdown
-      required_for: []
-
-# =============================================================================
-# ATTACHMENT GUIDANCE
-# =============================================================================
-# Recommended attachment types for relay workflows. These types are pre-defined
-# in config.yaml with appropriate MIME types and modes.
-#
-# Relay workflows depend heavily on attachments for handoff between specialists.
-# Each phase produces artifacts that downstream specialists consume.
-
-attachments:
-  # Phase-specific deliverables (use these type names for handoff)
-  phase_deliverables:
-    plan:
-      description: Design specification document (markdown, replaces)
-      when: Designer phase completion - the primary handoff artifact
-      example: |
-        attach(task=id, type="plan", content="## Design Spec\n### Problem\n...\n### Solution\n...\n### Acceptance Criteria\n...")
-
-    note:
-      description: Phase observations and guidance for next specialist (appends)
-      when: Each handoff - provide context the next specialist needs
-      example: |
-        # Designer -> Implementer
-        attach(task=id, type="note", content="Edge case: handle empty input gracefully per AC #3")
-        # Implementer -> Reviewer
-        attach(task=id, type="note", content="Deviated from design in auth flow - see comment in code")
-
-    result:
-      description: Phase outcome summary (JSON, replaces)
-      when: Phase completion - structured status for tracking
-      example: |
-        # Reviewer completion
-        attach(task=id, type="result", content='{"verdict": "approved", "issues_found": 2, "issues_resolved": 2}')
-        # Tester completion
-        attach(task=id, type="result", content='{"passed": true, "tests_run": 15, "coverage": "92%"}')
-
-  # Version control artifacts
-  code_artifacts:
-    commit:
-      description: Git commit hash (appends)
-      when: Implementer commits code, or after addressing review feedback
-      example: |
-        attach(task=id, type="commit", content="abc123f - Implement user auth per design spec")
-
-    diff:
-      description: Code changes for review (appends)
-      when: Implementer -> Reviewer handoff, showing what changed
-      example: |
-        attach(task=id, type="diff", content="--- a/src/auth.rs\n+++ b/src/auth.rs\n...")
-
-    changelist:
-      description: Files modified in this phase (appends)
-      when: Implementer completion - scope of changes
-      example: |
-        attach(task=id, type="changelist", content="src/auth.rs\nsrc/middleware.rs\ntests/auth_test.rs")
-
-  # Quality and testing
-  quality:
-    error:
-      description: Issues found during review or testing (appends)
-      when: Reviewer finds bugs, Tester finds failures
-      example: |
-        # Reviewer
-        attach(task=id, type="error", content="Missing null check in parse_input() - line 42")
-        # Tester
-        attach(task=id, type="error", content="Test failed: test_auth_timeout - expected 401, got 500")
-
-    output:
-      description: Test execution output (appends)
-      when: Tester phase - raw test results
-      example: |
-        attach(task=id, type="output", content="Running auth tests...\n✓ test_login_success\n✓ test_login_failure\n...")
-
-    log:
-      description: Phase activity log (appends)
-      when: Detailed audit trail for complex phases
-      example: |
-        attach(task=id, type="log", content="Review started 10:00\nFound issue #1 10:15\nDiscussed with impl 10:30\nResolved 10:45")
-
-  # Metadata and tracking
-  metadata:
-    meta:
-      description: Phase metrics and metadata (JSON, replaces)
-      when: Tracking time, effort, or custom phase data
-      example: |
-        attach(task=id, type="meta", content='{"phase": "review", "duration_minutes": 45, "issues_found": 3}')
-
-    context:
-      description: Essential context that must not be lost (replaces)
-      when: Critical information for downstream phases
-      example: |
-        attach(task=id, type="context", content="Auth uses JWT with 1h expiry - test must account for token refresh")
-
-  # Workflow gates (if configured)
-  gates:
-    gate/tests:
-      description: Evidence that tests pass
-      when: Before transitioning past test gate
-      example: |
-        attach(task=id, type="gate/tests", content="All 42 tests passing as of commit abc123f")
-
-    gate/review:
-      description: Evidence of review approval
-      when: Before transitioning past review gate
-      example: |
-        attach(task=id, type="gate/review", content="Approved by reviewer-agent after addressing 2 issues")
-
-    gate/commit:
-      description: Evidence of committed code
-      when: Before transitioning past commit gate
-      example: |
-        attach(task=id, type="gate/commit", content="abc123f - merged to main")
-
-# =============================================================================
-# GATES
-# =============================================================================
-# Relay workflows use reject gates to ensure proper handoff artifacts.
-# Each specialist must provide deliverables the next specialist needs.
-
+# Gates (reject = required handoff artifacts)
 gates:
-  # Phase-exit gates enforce handoff artifacts
   phase:design:
     - type: "gate/spec"
       enforcement: reject
-      description: "Design specification required for handoff to implementer"
+      description: "Design spec required for implementer handoff"
 
   phase:implement:
     - type: "gate/commit"
@@ -522,14 +244,14 @@ gates:
   phase:review:
     - type: "gate/approval"
       enforcement: reject
-      description: "Explicit approval or rejection with notes required"
+      description: "Explicit approval/rejection with notes required"
 
   phase:test:
     - type: "gate/test-results"
       enforcement: reject
-      description: "Comprehensive test results required"
+      description: "Test results required"
 
-# Task tree template for relay workflow
+# Task tree templates
 templates:
   feature:
     description: Standard feature development through relay phases
@@ -548,7 +270,7 @@ templates:
         - title: "Test: {{feature_name}}"
           needed_tags: [tester]
           tags: [test]
-    sibling_type: follows  # Sequential dependencies
+    sibling_type: follows
 
   bugfix:
     description: Bug fix through abbreviated relay
@@ -565,3 +287,21 @@ templates:
           needed_tags: [tester]
           tags: [test]
     sibling_type: follows
+
+# Attachment types (compact reference)
+attachments:
+  handoff_deliverables:
+    plan: Design spec (markdown, replaces)
+    note: Phase observations for next specialist (appends)
+    result: Phase outcome summary (JSON, replaces)
+  code_artifacts:
+    commit: Git commit hash (appends)
+    diff: Code changes for review (appends)
+    changelist: Files modified in phase (appends)
+  quality:
+    error: Issues found during review/testing (appends)
+    output: Test execution output (appends)
+    log: Phase activity log (appends)
+  metadata:
+    meta: Phase metrics (JSON, replaces)
+    context: Critical info for downstream phases (replaces)

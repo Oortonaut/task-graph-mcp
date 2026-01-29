@@ -25,6 +25,10 @@ use crate::config::workflows::WorkflowsConfig;
 use crate::config::{PhasesConfig, StatesConfig};
 
 /// Context for expanding template variables in prompts.
+///
+/// Provides both workflow context (status, phase, valid transitions) and
+/// situational context (task metadata, agent identity) for rich prompt
+/// template expansion.
 #[derive(Debug, Clone)]
 pub struct PromptContext<'a> {
     /// Current status of the task
@@ -35,10 +39,28 @@ pub struct PromptContext<'a> {
     pub states_config: &'a StatesConfig,
     /// Phases configuration for listing valid phases
     pub phases_config: &'a PhasesConfig,
+    /// Task ID (if available)
+    pub task_id: Option<&'a str>,
+    /// Task title (if available)
+    pub task_title: Option<&'a str>,
+    /// Task priority (if available)
+    pub task_priority: Option<i32>,
+    /// Task tags (if available)
+    pub task_tags: Option<&'a [String]>,
+    /// Agent/worker ID (if available)
+    pub agent_id: Option<&'a str>,
+    /// Agent's matched role name (if available)
+    pub agent_role: Option<&'a str>,
+    /// Agent's tags (if available)
+    pub agent_tags: Option<&'a [String]>,
 }
 
 impl<'a> PromptContext<'a> {
-    /// Create a new prompt context.
+    /// Create a new prompt context with workflow information only.
+    ///
+    /// For backwards compatibility -- callers that don't have task/agent
+    /// info can use this constructor. Use `with_task()` and `with_agent()`
+    /// to add situational context.
     pub fn new(
         status: &'a str,
         phase: Option<&'a str>,
@@ -50,7 +72,42 @@ impl<'a> PromptContext<'a> {
             phase,
             states_config,
             phases_config,
+            task_id: None,
+            task_title: None,
+            task_priority: None,
+            task_tags: None,
+            agent_id: None,
+            agent_role: None,
+            agent_tags: None,
         }
+    }
+
+    /// Add task context to the prompt context.
+    pub fn with_task(
+        mut self,
+        id: &'a str,
+        title: &'a str,
+        priority: i32,
+        tags: &'a [String],
+    ) -> Self {
+        self.task_id = Some(id);
+        self.task_title = Some(title);
+        self.task_priority = Some(priority);
+        self.task_tags = Some(tags);
+        self
+    }
+
+    /// Add agent context to the prompt context.
+    pub fn with_agent(
+        mut self,
+        agent_id: &'a str,
+        role: Option<&'a str>,
+        tags: &'a [String],
+    ) -> Self {
+        self.agent_id = Some(agent_id);
+        self.agent_role = role;
+        self.agent_tags = Some(tags);
+        self
     }
 }
 
@@ -64,12 +121,27 @@ pub fn load_prompt(trigger: &str, workflows: &WorkflowsConfig) -> Option<String>
 /// Expand template variables in a prompt string.
 ///
 /// Supported variables:
+///
+/// **Workflow context:**
 /// - `{{valid_exits}}` - markdown list of valid exit states
 /// - `{{current_phase}}` - current phase or "(none)" if not set
 /// - `{{valid_phases}}` - comma-separated list of valid phases
 /// - `{{current_status}}` - current status name
+///
+/// **Task context** (available when task info is provided):
+/// - `{{task_id}}` - task identifier
+/// - `{{task_title}}` - task title
+/// - `{{task_priority}}` - task priority (0-10)
+/// - `{{task_tags}}` - comma-separated task tags
+///
+/// **Agent context** (available when agent info is provided):
+/// - `{{agent_id}}` - agent/worker identifier
+/// - `{{agent_role}}` - matched role name or "(none)"
+/// - `{{agent_tags}}` - comma-separated agent tags
 pub fn expand_prompt(content: &str, ctx: &PromptContext) -> String {
     let mut result = content.to_string();
+
+    // === Workflow context ===
 
     // Expand {{current_status}}
     result = result.replace("{{current_status}}", ctx.status);
@@ -104,6 +176,69 @@ pub fn expand_prompt(content: &str, ctx: &PromptContext) -> String {
         phases.sort();
         let phases_str = phases.join(", ");
         result = result.replace("{{valid_phases}}", &phases_str);
+    }
+
+    // === Task context ===
+
+    if result.contains("{{task_id}}") {
+        let val = ctx.task_id.unwrap_or("_unknown_");
+        result = result.replace("{{task_id}}", val);
+    }
+
+    if result.contains("{{task_title}}") {
+        let val = ctx.task_title.unwrap_or("_untitled_");
+        result = result.replace("{{task_title}}", val);
+    }
+
+    if result.contains("{{task_priority}}") {
+        let val = ctx
+            .task_priority
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "_unset_".to_string());
+        result = result.replace("{{task_priority}}", &val);
+    }
+
+    if result.contains("{{task_tags}}") {
+        let val = ctx
+            .task_tags
+            .map(|tags| {
+                if tags.is_empty() {
+                    "_(none)_".to_string()
+                } else {
+                    tags.join(", ")
+                }
+            })
+            .unwrap_or_else(|| "_(none)_".to_string());
+        result = result.replace("{{task_tags}}", &val);
+    }
+
+    // === Agent context ===
+
+    if result.contains("{{agent_id}}") {
+        let val = ctx.agent_id.unwrap_or("_unknown_");
+        result = result.replace("{{agent_id}}", val);
+    }
+
+    if result.contains("{{agent_role}}") {
+        let val = ctx
+            .agent_role
+            .map(|r| format!("`{}`", r))
+            .unwrap_or_else(|| "_(none)_".to_string());
+        result = result.replace("{{agent_role}}", &val);
+    }
+
+    if result.contains("{{agent_tags}}") {
+        let val = ctx
+            .agent_tags
+            .map(|tags| {
+                if tags.is_empty() {
+                    "_(none)_".to_string()
+                } else {
+                    tags.join(", ")
+                }
+            })
+            .unwrap_or_else(|| "_(none)_".to_string());
+        result = result.replace("{{agent_tags}}", &val);
     }
 
     result
@@ -361,5 +496,148 @@ mod tests {
         assert!(prompts.contains(&"enter~working".to_string()));
         assert!(prompts.contains(&"exit~working".to_string()));
         assert!(prompts.contains(&"enter%implement".to_string()));
+    }
+
+    // === Tests for context-sensitive template variables ===
+
+    #[test]
+    fn test_expand_prompt_task_context() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let tags = vec!["backend".to_string(), "api".to_string()];
+        let ctx = PromptContext::new("working", Some("implement"), &states_config, &phases_config)
+            .with_task("fix-auth-bug", "Fix authentication bypass", 8, &tags);
+
+        let template = "Working on {{task_id}}: {{task_title}} (priority {{task_priority}}, tags: {{task_tags}})";
+        let result = expand_prompt(template, &ctx);
+
+        assert_eq!(
+            result,
+            "Working on fix-auth-bug: Fix authentication bypass (priority 8, tags: backend, api)"
+        );
+    }
+
+    #[test]
+    fn test_expand_prompt_task_context_empty_tags() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let tags: Vec<String> = vec![];
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config).with_task(
+            "my-task",
+            "Some task",
+            5,
+            &tags,
+        );
+
+        let template = "Tags: {{task_tags}}";
+        let result = expand_prompt(template, &ctx);
+
+        assert_eq!(result, "Tags: _(none)_");
+    }
+
+    #[test]
+    fn test_expand_prompt_task_context_missing() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        // No with_task() call - should use fallbacks
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config);
+
+        let template = "Task: {{task_id}} / {{task_title}} / {{task_priority}} / {{task_tags}}";
+        let result = expand_prompt(template, &ctx);
+
+        assert_eq!(result, "Task: _unknown_ / _untitled_ / _unset_ / _(none)_");
+    }
+
+    #[test]
+    fn test_expand_prompt_agent_context() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let agent_tags = vec!["worker".to_string(), "implement".to_string()];
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config).with_agent(
+            "worker-21",
+            Some("worker"),
+            &agent_tags,
+        );
+
+        let template = "Agent {{agent_id}} (role: {{agent_role}}, tags: {{agent_tags}})";
+        let result = expand_prompt(template, &ctx);
+
+        assert_eq!(
+            result,
+            "Agent worker-21 (role: `worker`, tags: worker, implement)"
+        );
+    }
+
+    #[test]
+    fn test_expand_prompt_agent_context_no_role() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let agent_tags = vec!["generic".to_string()];
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config).with_agent(
+            "worker-5",
+            None,
+            &agent_tags,
+        );
+
+        let template = "Role: {{agent_role}}";
+        let result = expand_prompt(template, &ctx);
+
+        assert_eq!(result, "Role: _(none)_");
+    }
+
+    #[test]
+    fn test_expand_prompt_agent_context_missing() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        // No with_agent() call
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config);
+
+        let template = "{{agent_id}} / {{agent_role}} / {{agent_tags}}";
+        let result = expand_prompt(template, &ctx);
+
+        assert_eq!(result, "_unknown_ / _(none)_ / _(none)_");
+    }
+
+    #[test]
+    fn test_expand_prompt_combined_context() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let task_tags = vec!["design".to_string()];
+        let agent_tags = vec!["worker".to_string(), "design".to_string()];
+        let ctx = PromptContext::new("working", Some("design"), &states_config, &phases_config)
+            .with_task(
+                "prompt-guidance",
+                "Context-sensitive prompts",
+                7,
+                &task_tags,
+            )
+            .with_agent("worker-21", Some("worker"), &agent_tags);
+
+        let template = "{{agent_id}} is working on {{task_id}} in phase {{current_phase}} with status {{current_status}}";
+        let result = expand_prompt(template, &ctx);
+
+        assert_eq!(
+            result,
+            "worker-21 is working on prompt-guidance in phase `design` with status working"
+        );
+    }
+
+    #[test]
+    fn test_prompt_context_builder_pattern() {
+        let states_config = StatesConfig::default();
+        let phases_config = PhasesConfig::default();
+        let task_tags = vec![];
+        let agent_tags = vec!["worker".to_string()];
+
+        // Verify builder pattern works correctly
+        let ctx = PromptContext::new("pending", None, &states_config, &phases_config)
+            .with_task("t1", "Title", 5, &task_tags)
+            .with_agent("w1", Some("worker"), &agent_tags);
+
+        assert_eq!(ctx.task_id, Some("t1"));
+        assert_eq!(ctx.task_title, Some("Title"));
+        assert_eq!(ctx.task_priority, Some(5));
+        assert_eq!(ctx.agent_id, Some("w1"));
+        assert_eq!(ctx.agent_role, Some("worker"));
     }
 }

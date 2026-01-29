@@ -44,6 +44,24 @@ pub struct ImportArgs {
     /// - Invalid status values
     #[arg(long)]
     pub strict: bool,
+
+    /// Generate fresh IDs and remap all references
+    ///
+    /// When enabled, every task receives a new petname ID and all
+    /// references (dependencies, attachments, tags, state history)
+    /// are updated to use the new IDs. This allows importing the
+    /// same snapshot multiple times without ID collisions.
+    #[arg(long)]
+    pub remap_ids: bool,
+
+    /// Attach imported tree under a parent task
+    ///
+    /// When provided, root tasks in the imported snapshot (those with
+    /// no "contains" dependency pointing to them) will be linked to
+    /// the given parent task via a "contains" dependency. This allows
+    /// importing a snapshot as a subtree of an existing task.
+    #[arg(long, value_name = "TASK_ID")]
+    pub parent: Option<String>,
 }
 
 impl ImportArgs {
@@ -62,6 +80,8 @@ impl ImportArgs {
             } else {
                 "merge-skip"
             }
+        } else if self.remap_ids {
+            "replace-remap"
         } else {
             "replace"
         }
@@ -80,6 +100,8 @@ mod tests {
             merge: false,
             force: false,
             strict: false,
+            remap_ids: false,
+            parent: None,
         };
         assert!(!args.is_gzipped());
 
@@ -89,6 +111,8 @@ mod tests {
             merge: false,
             force: false,
             strict: false,
+            remap_ids: false,
+            parent: None,
         };
         assert!(args.is_gzipped());
     }
@@ -102,6 +126,8 @@ mod tests {
             merge: false,
             force: false,
             strict: false,
+            remap_ids: false,
+            parent: None,
         };
         assert_eq!(args.import_mode(), "dry-run");
 
@@ -112,6 +138,8 @@ mod tests {
             merge: false,
             force: false,
             strict: false,
+            remap_ids: false,
+            parent: None,
         };
         assert_eq!(args.import_mode(), "replace");
 
@@ -122,6 +150,8 @@ mod tests {
             merge: true,
             force: false,
             strict: false,
+            remap_ids: false,
+            parent: None,
         };
         assert_eq!(args.import_mode(), "merge-skip");
 
@@ -132,7 +162,21 @@ mod tests {
             merge: true,
             force: true,
             strict: false,
+            remap_ids: false,
+            parent: None,
         };
         assert_eq!(args.import_mode(), "merge-overwrite");
+
+        // Remap IDs
+        let args = ImportArgs {
+            file: PathBuf::from("test.json"),
+            dry_run: false,
+            merge: false,
+            force: false,
+            strict: false,
+            remap_ids: true,
+            parent: None,
+        };
+        assert_eq!(args.import_mode(), "replace-remap");
     }
 }

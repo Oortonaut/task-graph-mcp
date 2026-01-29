@@ -3,10 +3,14 @@
 //! These tests verify the core database operations using an in-memory SQLite database.
 //! Tests are organized by module and functionality.
 
+use std::sync::Arc;
+use task_graph_mcp::config::workflows::WorkflowsConfig;
 use task_graph_mcp::config::{
-    AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, StatesConfig, TagsConfig,
+    AppConfig, AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig,
+    StatesConfig, TagsConfig,
 };
 use task_graph_mcp::db::Database;
+use task_graph_mcp::db::tasks::ListTasksQuery;
 use task_graph_mcp::types::PRIORITY_DEFAULT;
 
 /// Helper to create a fresh in-memory database for testing.
@@ -42,6 +46,20 @@ fn default_tags_config() -> TagsConfig {
 /// Helper to create a default IdsConfig for testing.
 fn default_ids_config() -> IdsConfig {
     IdsConfig::default()
+}
+
+/// Helper to create a default AppConfig for testing.
+fn default_app_config() -> AppConfig {
+    AppConfig::new(
+        Arc::new(StatesConfig::default()),
+        Arc::new(PhasesConfig::default()),
+        Arc::new(DependenciesConfig::default()),
+        Arc::new(AutoAdvanceConfig::default()),
+        Arc::new(AttachmentsConfig::default()),
+        Arc::new(TagsConfig::default()),
+        Arc::new(IdsConfig::default()),
+        Arc::new(WorkflowsConfig::default()),
+    )
 }
 
 mod agent_tests {
@@ -1045,10 +1063,16 @@ mod task_tests {
         .unwrap();
 
         let pending = db
-            .list_tasks(Some("pending"), None, None, None, None, 0, None, None)
+            .list_tasks(ListTasksQuery {
+                status: Some("pending"),
+                ..Default::default()
+            })
             .unwrap();
         let completed = db
-            .list_tasks(Some("completed"), None, None, None, None, 0, None, None)
+            .list_tasks(ListTasksQuery {
+                status: Some("completed"),
+                ..Default::default()
+            })
             .unwrap();
 
         assert_eq!(pending.len(), 1);
@@ -1065,9 +1089,7 @@ mod task_tests {
         use task_graph_mcp::tools::tasks::create;
 
         let db = setup_db();
-        let states_config = default_states_config();
-        let phases_config = default_phases_config();
-        let tags_config = default_tags_config();
+        let app_config = default_app_config();
 
         // Call the tool-level create function with needed_tags and wanted_tags
         let args = json!({
@@ -1076,15 +1098,7 @@ mod task_tests {
             "wanted_tags": ["testing", "senior"]
         });
 
-        let result = create(
-            &db,
-            &states_config,
-            &phases_config,
-            &tags_config,
-            &default_ids_config(),
-            args,
-        )
-        .expect("create should succeed");
+        let result = create(&db, &app_config, args).expect("create should succeed");
 
         // Extract the task ID from the result
         let task_id = result

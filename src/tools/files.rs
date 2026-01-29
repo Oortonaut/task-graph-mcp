@@ -1,4 +1,12 @@
-//! File coordination tools (advisory marks for file coordination).
+//! File coordination tools (advisory marks and exclusive locks).
+//!
+//! Supports two modes:
+//! - **Advisory marks** (default): warns if another agent holds a file mark.
+//! - **Exclusive locks** (`lock:` prefix): rejects with error if another agent holds the lock.
+//!
+//! The `lock:` namespace uses the same `file_locks` table but enforces mutual exclusion.
+//! Example: `mark_file(file="lock:git-commit")` acquires an exclusive lock on the
+//! resource "git-commit". Another agent attempting the same lock will receive an error.
 
 use super::{
     IdList, get_string, get_string_or_array, get_string_or_array_or_wildcard,
@@ -6,12 +14,16 @@ use super::{
 };
 use crate::config::Prompts;
 use crate::db::Database;
+use crate::db::locks::ExclusiveLockResult;
 use crate::error::ToolError;
 use crate::format::{OutputFormat, markdown_to_json};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
 use std::path::{Component, Path, PathBuf};
+
+/// The prefix that triggers exclusive lock semantics.
+const LOCK_PREFIX: &str = "lock:";
 
 /// Normalize a file path to an absolute, canonical form.
 ///
@@ -122,7 +134,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     vec![
         make_tool_with_prompts(
             "mark_file",
-            "Mark a file to signal intent to work on it (advisory, non-blocking). Returns warning if another agent has marked the file. Track changes via mark_updates.",
+            "Mark a file to signal intent to work on it (advisory, non-blocking). Returns warning if another agent has marked the file. Track changes via mark_updates.\n\nUse the `lock:` prefix for exclusive locks: `lock:resource-name` will reject (not just warn) if another agent holds the lock. Example: `mark_file(file=\"lock:git-commit\")` acquires a mutual-exclusion lock on the resource \"git-commit\".",
             json!({
                 "agent": {
                     "type": "string",
@@ -133,7 +145,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                         { "type": "string" },
                         { "type": "array", "items": { "type": "string" } }
                     ],
-                    "description": "Relative file path or array of file paths"
+                    "description": "Relative file path, array of file paths, or lock resource(s) with 'lock:' prefix (e.g. 'lock:git-commit' for exclusive locks)"
                 },
                 "task": {
                     "type": "string",
@@ -217,13 +229,51 @@ pub fn mark_file(db: &Database, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task");
     let reason = get_string(&args, "reason");
 
-    // Normalize all file paths to absolute canonical form
-    let normalized_paths = normalize_file_paths(file_paths);
+    // Separate lock: prefixed paths from regular file paths
+    let mut lock_paths: Vec<String> = Vec::new();
+    let mut regular_paths: Vec<String> = Vec::new();
+
+    for path in file_paths {
+        if path.starts_with(LOCK_PREFIX) {
+            // lock: namespace - store as-is (no path normalization)
+            lock_paths.push(path);
+        } else {
+            regular_paths.push(path);
+        }
+    }
+
+    // Normalize regular file paths to absolute canonical form
+    let normalized_regular = normalize_file_paths(regular_paths);
 
     let mut results = Vec::new();
     let mut warnings = Vec::new();
+    let mut locks_acquired = Vec::new();
 
-    for file_path in &normalized_paths {
+    // Process exclusive locks first - fail fast on conflicts
+    for lock_path in &lock_paths {
+        let result = db.lock_file_exclusive(
+            lock_path.clone(),
+            &worker_id,
+            reason.clone(),
+            task_id.clone(),
+        )?;
+
+        match result {
+            ExclusiveLockResult::HeldByOther(other_agent) => {
+                // Exclusive lock conflict - return error immediately
+                return Err(ToolError::lock_conflict(lock_path, &other_agent).into());
+            }
+            ExclusiveLockResult::Acquired => {
+                locks_acquired.push(lock_path.clone());
+            }
+            ExclusiveLockResult::AlreadyHeldBySelf => {
+                locks_acquired.push(lock_path.clone());
+            }
+        }
+    }
+
+    // Process advisory marks (existing behavior)
+    for file_path in &normalized_regular {
         let warning = db.lock_file(
             file_path.clone(),
             &worker_id,
@@ -244,6 +294,10 @@ pub fn mark_file(db: &Database, args: Value) -> Result<Value> {
         "success": true,
         "marked": results
     });
+
+    if !locks_acquired.is_empty() {
+        response["locks_acquired"] = json!(locks_acquired);
+    }
 
     if !warnings.is_empty() {
         response["warnings"] = json!(warnings);
@@ -287,10 +341,17 @@ pub fn unmark_file(db: &Database, args: Value) -> Result<Value> {
             }))
         }
         Some(IdList::Ids(files)) => {
-            // Normalize the file paths before unmarking
-            let normalized_files = normalize_file_paths(files);
-            // Specific files: unmark each one
-            let unmarked = db.unlock_files_verbose(normalized_files, &worker_id, reason)?;
+            // Separate lock: paths (no normalization) from regular paths (normalize)
+            let mut all_paths: Vec<String> = Vec::new();
+            for f in files {
+                if f.starts_with(LOCK_PREFIX) {
+                    all_paths.push(f);
+                } else {
+                    all_paths.push(normalize_file_path(&f));
+                }
+            }
+            // Unmark each one
+            let unmarked = db.unlock_files_verbose(all_paths, &worker_id, reason)?;
             Ok(json!({
                 "success": true,
                 "unmarked": unmarked.iter().map(|(f, w)| json!({
@@ -324,8 +385,19 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
         .into());
     }
 
-    // Normalize file paths in the filter if provided
-    let normalized_files = files.map(normalize_file_paths);
+    // Normalize file paths in the filter if provided (skip lock: prefixed paths)
+    let normalized_files = files.map(|paths| {
+        paths
+            .into_iter()
+            .map(|p| {
+                if p.starts_with(LOCK_PREFIX) {
+                    p
+                } else {
+                    normalize_file_path(&p)
+                }
+            })
+            .collect()
+    });
 
     let marks = db.get_file_locks(normalized_files, worker_id.as_deref(), task_id.as_deref())?;
     let now = crate::db::now_ms();
@@ -336,14 +408,20 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
             if marks.is_empty() {
                 md.push_str("No marks found.\n");
             } else {
-                md.push_str("| File | Agent | Task | Reason | Age |\n");
-                md.push_str("|------|-------|------|--------|-----|\n");
+                md.push_str("| File | Type | Agent | Task | Reason | Age |\n");
+                md.push_str("|------|------|-------|------|--------|-----|\n");
                 for (path, mark) in &marks {
                     let age_ms = now - mark.locked_at;
                     let age_str = format_duration(age_ms);
+                    let lock_type = if path.starts_with(LOCK_PREFIX) {
+                        "exclusive"
+                    } else {
+                        "advisory"
+                    };
                     md.push_str(&format!(
-                        "| {} | {} | {} | {} | {} |\n",
+                        "| {} | {} | {} | {} | {} | {} |\n",
                         path,
+                        lock_type,
                         mark.worker_id,
                         mark.task_id.as_deref().unwrap_or("-"),
                         mark.reason.as_deref().unwrap_or("-"),
@@ -357,9 +435,11 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
             let marks_json: Vec<Value> = marks
                 .into_iter()
                 .map(|(path, mark)| {
+                    let is_lock = path.starts_with(LOCK_PREFIX);
                     let age_ms = now - mark.locked_at;
                     json!({
                         "file": path,
+                        "is_lock": is_lock,
                         "agent": mark.worker_id,
                         "task_id": mark.task_id,
                         "reason": mark.reason,

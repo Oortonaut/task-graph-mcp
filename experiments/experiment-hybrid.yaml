@@ -1,0 +1,403 @@
+# Hybrid Coordination Experiment
+#
+# Pattern: Lead pushes top-level tasks, workers pull subtasks.
+# The lead agent decomposes work and assigns top-level tasks to workers
+# via push (update with assignee=), while workers autonomously pull
+# subtasks from the ready queue once their parent is assigned.
+#
+# Comparison targets: pure-pull (swarm) and pure-push (hierarchical with
+# mandatory assignment). The hybrid blends both to test whether combining
+# strategic push at the top with autonomous pull at the bottom yields
+# better throughput, lower coordination overhead, or higher completion
+# rates than either pure mode alone.
+
+name: hybrid
+description: Lead pushes top-level tasks, workers pull subtasks autonomously
+
+# ---------------------------------------------------------------------------
+# Experiment metadata
+# ---------------------------------------------------------------------------
+experiment:
+  id: hybrid-coordination-001
+  version: "1.0.0"
+  created: "2026-01-29"
+  hypothesis: >
+    A hybrid coordination pattern where a lead agent pushes top-level
+    decomposed tasks to workers, but workers autonomously pull subtasks
+    within their assigned scope, will achieve higher throughput and lower
+    coordination overhead than pure-push (hierarchical with full assignment)
+    while maintaining better task distribution than pure-pull (swarm).
+  variables:
+    independent:
+      - coordination_mode: "hybrid"     # lead pushes top-level, workers pull subtasks
+      - agent_count: 5                  # 1 lead + 4 workers
+      - task_template: "browser-parallel.json"
+    controlled:
+      - task_set: "identical across all three experiments"
+      - agent_capabilities: "same model, same tags"
+      - stale_timeout: 900              # 15 minutes
+      - max_claims_per_worker: 2
+    dependent:
+      - wall_clock_duration_ms
+      - total_cost_usd
+      - tasks_per_hour
+      - completion_rate_pct
+      - blocking_ratio_pct
+      - rework_rate_pct
+      - avg_queue_wait_ms
+      - coordination_overhead_pct       # time lead spends assigning vs workers working
+      - subtask_pull_latency_ms         # time from subtask becoming ready to being claimed
+      - push_assignment_latency_ms      # time from lead creating assignment to worker claiming
+
+# ---------------------------------------------------------------------------
+# Workflow configuration (extends hierarchical with hybrid behavior)
+# ---------------------------------------------------------------------------
+workflow: hierarchical
+
+workflow_overrides:
+  # The hierarchical workflow already supports both push (assignee) and pull
+  # (list_tasks ready=true). The hybrid experiment configures the lead to
+  # push only top-level tasks and lets workers pull subtasks.
+  roles:
+    lead:
+      description: >
+        Decomposes root tasks into top-level components and pushes them
+        to workers via assignee. Does NOT assign subtasks -- workers
+        create and pull those autonomously within their assigned scope.
+      tags: [lead, coordinator]
+      max_claims: 5
+      can_assign: true
+      can_create_subtasks: true
+      behavior:
+        push_scope: "top-level only"    # only push direct children of root
+        subtask_delegation: "worker-owned"  # workers own subtask lifecycle
+
+    worker:
+      description: >
+        Receives top-level task assignments from lead. Decomposes into
+        subtasks and pulls them from the queue autonomously. Reports
+        completion of top-level task back to lead.
+      tags: [worker, implementer, code]
+      max_claims: 2
+      can_assign: false
+      can_create_subtasks: true         # workers can create subtasks (key difference from pure-push)
+      behavior:
+        pull_scope: "own-subtasks"      # pull only subtasks of assigned parent
+        auto_decompose: true            # workers decompose their own assigned tasks
+
+# ---------------------------------------------------------------------------
+# Agent configuration
+# ---------------------------------------------------------------------------
+agents:
+  total: 5
+  definitions:
+    - id: "lead"
+      role: lead
+      tags: [lead, coordinator]
+      workflow: hierarchical
+      prompt: >
+        You are the lead coordinator in a hybrid experiment. Your job is to
+        decompose root tasks into top-level components and PUSH them to
+        workers using update(assignee="worker-N"). Do NOT decompose further.
+        Let workers handle their own subtask breakdown. Monitor progress
+        via list_agents() and list_tasks(). Only intervene if a worker is
+        stuck (stale >5 min) or failed tasks need reassignment.
+
+    - id: "worker-1"
+      role: worker
+      tags: [worker, implementer, code]
+      workflow: hierarchical
+      prompt: >
+        You are a worker in a hybrid experiment. Wait for task assignments
+        from the lead (status=assigned). Once you receive one, decompose
+        it into subtasks via create_tree(), then PULL subtasks from the
+        ready queue autonomously. Complete each subtask, then mark the
+        parent complete when all children are done.
+
+    - id: "worker-2"
+      role: worker
+      tags: [worker, implementer, code]
+      workflow: hierarchical
+      prompt: >
+        You are a worker in a hybrid experiment. Wait for task assignments
+        from the lead (status=assigned). Once you receive one, decompose
+        it into subtasks via create_tree(), then PULL subtasks from the
+        ready queue autonomously. Complete each subtask, then mark the
+        parent complete when all children are done.
+
+    - id: "worker-3"
+      role: worker
+      tags: [worker, implementer, code]
+      workflow: hierarchical
+      prompt: >
+        You are a worker in a hybrid experiment. Wait for task assignments
+        from the lead (status=assigned). Once you receive one, decompose
+        it into subtasks via create_tree(), then PULL subtasks from the
+        ready queue autonomously. Complete each subtask, then mark the
+        parent complete when all children are done.
+
+    - id: "worker-4"
+      role: worker
+      tags: [worker, implementer, code]
+      workflow: hierarchical
+      prompt: >
+        You are a worker in a hybrid experiment. Wait for task assignments
+        from the lead (status=assigned). Once you receive one, decompose
+        it into subtasks via create_tree(), then PULL subtasks from the
+        ready queue autonomously. Complete each subtask, then mark the
+        parent complete when all children are done.
+
+# ---------------------------------------------------------------------------
+# Task template
+# ---------------------------------------------------------------------------
+template:
+  source: "experiments/templates/browser-parallel.json"
+  description: >
+    Uses the browser-parallel template which has independent top-level
+    components suitable for push assignment, each containing subtasks
+    that workers can pull autonomously.
+
+# ---------------------------------------------------------------------------
+# Execution protocol
+# ---------------------------------------------------------------------------
+protocol:
+  setup:
+    - step: "Reset database"
+      command: "python scripts/run_experiment.py --reset-only"
+
+    - step: "Import task template"
+      command: >
+        python scripts/run_experiment.py
+        --template experiments/templates/browser-parallel.json
+        --import-only
+
+  launch:
+    - step: "Start lead agent"
+      command: >
+        claude --task "Connect to the task-graph as lead with
+        workflow=hierarchical and tags=[lead,coordinator]. You are in a
+        HYBRID experiment: decompose root tasks into top-level components
+        and PUSH them to workers via update(assignee='worker-N'). Do NOT
+        assign subtasks. Let workers pull those. Monitor and reassign on
+        failure."
+
+    - step: "Start worker agents (run each in separate terminal)"
+      commands:
+        - >
+          claude --task "Connect as worker-1 with workflow=hierarchical
+          and tags=[worker,implementer,code]. HYBRID mode: wait for
+          assigned tasks, decompose into subtasks, pull subtasks
+          autonomously. Complete parent when children done."
+        - >
+          claude --task "Connect as worker-2 with workflow=hierarchical
+          and tags=[worker,implementer,code]. HYBRID mode: wait for
+          assigned tasks, decompose into subtasks, pull subtasks
+          autonomously. Complete parent when children done."
+        - >
+          claude --task "Connect as worker-3 with workflow=hierarchical
+          and tags=[worker,implementer,code]. HYBRID mode: wait for
+          assigned tasks, decompose into subtasks, pull subtasks
+          autonomously. Complete parent when children done."
+        - >
+          claude --task "Connect as worker-4 with workflow=hierarchical
+          and tags=[worker,implementer,code]. HYBRID mode: wait for
+          assigned tasks, decompose into subtasks, pull subtasks
+          autonomously. Complete parent when children done."
+
+  monitor:
+    - step: "Wait for completion and export results"
+      command: >
+        python scripts/run_experiment.py
+        --wait --poll-interval 30 --timeout 7200
+        --output experiments/results/hybrid-001
+
+  export:
+    - step: "Export metrics"
+      command: >
+        python scripts/run_experiment.py
+        --export-only --output experiments/results/hybrid-001
+
+# ---------------------------------------------------------------------------
+# Metrics and measurement
+# ---------------------------------------------------------------------------
+metrics:
+  primary:
+    - name: wall_clock_duration_ms
+      source: "summary.json -> wall_clock_ms"
+      description: "Total time from first task start to last task completion"
+      compare: lower_is_better
+
+    - name: total_cost_usd
+      source: "summary.json -> total_cost_usd"
+      description: "Total API cost across all agents"
+      compare: lower_is_better
+
+    - name: tasks_per_hour
+      source: "computed from completed tasks / wall clock hours"
+      description: "Throughput: completed tasks per wall-clock hour"
+      compare: higher_is_better
+
+    - name: completion_rate_pct
+      source: "computed from completed / (completed + failed + working)"
+      description: "Percentage of claimed tasks that reached completion"
+      compare: higher_is_better
+
+  coordination:
+    - name: blocking_ratio_pct
+      source: "transitions.json -> blocked time / total tracked time"
+      description: >
+        Fraction of time tasks spent in pending/assigned vs working.
+        Higher blocking means more coordination overhead.
+      compare: lower_is_better
+
+    - name: avg_queue_wait_ms
+      source: "tasks.json -> avg(started_at - created_at)"
+      description: "Average time tasks wait in queue before being claimed"
+      compare: lower_is_better
+
+    - name: push_assignment_latency_ms
+      source: "transitions.json -> time in assigned state for top-level tasks"
+      description: >
+        Time between lead assigning a top-level task and a worker
+        claiming it. Measures push-side responsiveness.
+      compare: lower_is_better
+
+    - name: subtask_pull_latency_ms
+      source: "transitions.json -> time in pending state for subtasks only"
+      description: >
+        Time between a subtask becoming ready (pending) and a worker
+        pulling it. Measures pull-side responsiveness within worker scope.
+      compare: lower_is_better
+
+    - name: coordination_overhead_pct
+      source: "agent lead -> time_actual_ms / total wall_clock_ms"
+      description: >
+        Fraction of total wall-clock time the lead spends on coordination
+        vs workers doing productive work. Lower means less overhead.
+      compare: lower_is_better
+
+  quality:
+    - name: rework_rate_pct
+      source: "transitions.json -> tasks with >1 working period"
+      description: "Percentage of tasks that required rework"
+      compare: lower_is_better
+
+    - name: first_pass_success_pct
+      source: "computed from 100 - rework_rate_pct"
+      description: "Percentage of tasks completed on first attempt"
+      compare: higher_is_better
+
+  token_efficiency:
+    - name: total_billable_tokens
+      source: "tasks.json -> sum(metric_0 + metric_1 + metric_3)"
+      description: "Total billable tokens (input + output + thinking)"
+      compare: lower_is_better
+
+    - name: tokens_per_completed_task
+      source: "total_billable_tokens / completed tasks"
+      description: "Average token consumption per completed task"
+      compare: lower_is_better
+
+    - name: cache_hit_rate_pct
+      source: "tasks.json -> metric_2 / (metric_0 + metric_2)"
+      description: "Prompt cache hit rate"
+      compare: higher_is_better
+
+# ---------------------------------------------------------------------------
+# Comparison plan
+# ---------------------------------------------------------------------------
+comparison:
+  experiments:
+    - label: "pure-pull"
+      config: "experiments/experiment-pure-pull.yaml"
+      workflow: swarm
+      description: >
+        All agents are generalists. No lead. Tasks sit in a shared queue
+        and workers pull from it autonomously. No push assignments.
+
+    - label: "pure-push"
+      config: "experiments/experiment-pure-push.yaml"
+      workflow: hierarchical
+      description: >
+        Lead decomposes ALL tasks (top-level AND subtasks) and pushes
+        every assignment to specific workers. Workers do not pull or
+        create subtasks -- they only work on what is assigned.
+
+    - label: "hybrid"
+      config: "experiments/experiment-hybrid.yaml"
+      workflow: hierarchical
+      description: >
+        Lead pushes top-level tasks only. Workers decompose and pull
+        subtasks within their assigned scope. Combines strategic
+        coordination with autonomous execution.
+
+  analysis:
+    tool: "python scripts/compare_experiments.py"
+    command: >
+      python scripts/compare_experiments.py
+      experiments/results/pure-pull-001/tasks.db
+      experiments/results/pure-push-001/tasks.db
+      experiments/results/hybrid-001/tasks.db
+      --labels "pure-pull,pure-push,hybrid"
+      --charts
+      --output experiments/results/comparison
+
+  hypotheses:
+    throughput: >
+      Hybrid should achieve higher tasks_per_hour than pure-push (less
+      bottleneck at lead) and similar or better than pure-pull (strategic
+      initial distribution avoids duplicate work).
+
+    cost: >
+      Hybrid should have lower total_cost_usd than pure-push (lead does
+      less micro-management) but potentially higher than pure-pull (lead
+      agent still consumes tokens for top-level coordination).
+
+    coordination_overhead: >
+      Hybrid blocking_ratio_pct should be lower than pure-push (workers
+      don't wait for all assignments) and similar to pure-pull (workers
+      pull independently for subtasks).
+
+    quality: >
+      Hybrid rework_rate_pct should be lower than pure-pull (lead provides
+      initial structure) and similar to pure-push (structured decomposition
+      at the top level).
+
+    latency: >
+      Hybrid push_assignment_latency_ms should be similar to pure-push
+      (same mechanism). subtask_pull_latency_ms should be similar to
+      pure-pull (same mechanism). avg_queue_wait_ms should be lower than
+      both pure modes (parallel push+pull reduces wait).
+
+  expected_tradeoffs:
+    advantages:
+      - "Reduced lead bottleneck vs pure-push (lead only handles top-level)"
+      - "Better initial work distribution vs pure-pull (strategic push)"
+      - "Workers have autonomy for subtask scheduling (no lead bottleneck)"
+      - "Lower rework than pure-pull (lead catches structural issues early)"
+      - "Parallelism within assigned scope (workers don't block on each other)"
+    disadvantages:
+      - "Still has single lead as potential bottleneck for initial push"
+      - "Workers creating subtasks may duplicate decomposition effort"
+      - "More complex coordination logic than either pure mode"
+      - "Lead cost overhead exists even though it does less than pure-push"
+    key_question: >
+      Does the reduction in coordination overhead from hybrid mode outweigh
+      the added complexity of supporting both push and pull patterns?
+
+# ---------------------------------------------------------------------------
+# Success criteria
+# ---------------------------------------------------------------------------
+success_criteria:
+  minimum:
+    completion_rate_pct: ">= 80"
+    wall_clock_duration_ms: "< 2x pure-pull duration"
+    total_cost_usd: "< 2x pure-pull cost"
+  target:
+    tasks_per_hour: "> max(pure-pull, pure-push) tasks_per_hour"
+    blocking_ratio_pct: "< min(pure-pull, pure-push) blocking_ratio"
+    coordination_overhead_pct: "< pure-push coordination_overhead"
+  stretch:
+    completion_rate_pct: ">= 95"
+    rework_rate_pct: "< 10"
+    first_pass_success_pct: ">= 90"

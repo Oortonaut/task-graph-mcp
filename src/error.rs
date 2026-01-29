@@ -23,6 +23,7 @@ pub enum ErrorCode {
     // Conflict errors
     AlreadyClaimed,
     AlreadyExists,
+    LockConflict,
     DependencyCycle,
     TagMismatch,
     NotOwner,
@@ -212,6 +213,21 @@ impl ToolError {
         )
     }
 
+    pub fn lock_conflict(resource: &str, held_by: &str) -> Self {
+        Self::new(
+            ErrorCode::LockConflict,
+            format!(
+                "Lock '{}' is exclusively held by agent '{}'",
+                resource, held_by
+            ),
+        )
+        .with_field("file")
+        .with_details(format!("held_by: {}", held_by))
+        .with_suggestion(
+            "Wait for the lock to be released, or coordinate with the holding agent".to_string(),
+        )
+    }
+
     pub fn already_claimed(task_id: &str, owner: &str) -> Self {
         Self::new(
             ErrorCode::AlreadyClaimed,
@@ -253,19 +269,37 @@ impl ToolError {
         )
         .with_blocked_by(blockers.to_vec())
         .with_suggestion(
-            "Wait for blocking tasks to complete, or call thinking() regularly to maintain heartbeat"
+            "Wait for blocking tasks to complete. Meanwhile: (1) call list_tasks(ready=true) to find unblocked work, (2) use scan(task=<id>, direction=\"before\") to inspect the dependency chain, (3) call thinking() regularly to maintain heartbeat while waiting."
                 .to_string(),
         )
     }
 
     pub fn gates_not_satisfied(status: &str, gates: &[String]) -> Self {
+        let gate_list = gates.join(", ");
+        let how_to_fix: Vec<String> = gates
+            .iter()
+            .map(|g| {
+                // Extract the gate type from "gate_type (description)" format
+                let gate_type = g.split(" (").next().unwrap_or(g);
+                format!(
+                    "  - Satisfy '{}': attach(task=<id>, type=\"{}\", content=\"...\")",
+                    gate_type, gate_type
+                )
+            })
+            .collect();
         Self::new(
             ErrorCode::GatesNotSatisfied,
             format!(
                 "Cannot exit '{}': unsatisfied gates: {}",
-                status,
-                gates.join(", ")
+                status, gate_list
             ),
+        )
+        .with_details(format!(
+            "How to satisfy:\n{}\n\nOr use force=true with a reason to skip warn-level gates.",
+            how_to_fix.join("\n")
+        ))
+        .with_suggestion(
+            "Attach the required artifacts, then retry the transition. For warn-level gates, you can use update(..., force=true, reason=\"...\") to proceed.".to_string(),
         )
     }
 

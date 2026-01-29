@@ -2,12 +2,14 @@
 //!
 //! This module contains all the configuration types used throughout the application.
 
+use crate::config::workflows::WorkflowsConfig;
 use crate::format::OutputFormat;
 use anyhow::{Result, anyhow};
 use heck::{ToKebabCase, ToLowerCamelCase, ToSnakeCase, ToTitleCase, ToUpperCamelCase};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Default port for the web dashboard.
 pub const DEFAULT_UI_PORT: u16 = 31994;
@@ -1336,6 +1338,49 @@ impl Prompts {
     /// Get a tool description override if available.
     pub fn get_tool_description(&self, name: &str) -> Option<&str> {
         self.tools.get(name).map(|t| t.description.as_str())
+    }
+}
+
+/// Consolidated application configuration.
+///
+/// Bundles all individual config types behind `Arc` so that they can be shared
+/// cheaply across tool handlers, resource handlers, and option structs.
+/// Instead of passing 8+ individual `Arc<XxxConfig>` parameters, callers pass
+/// a single `&AppConfig`.
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub states: Arc<StatesConfig>,
+    pub phases: Arc<PhasesConfig>,
+    pub deps: Arc<DependenciesConfig>,
+    pub auto_advance: Arc<AutoAdvanceConfig>,
+    pub attachments: Arc<AttachmentsConfig>,
+    pub tags: Arc<TagsConfig>,
+    pub ids: Arc<IdsConfig>,
+    pub workflows: Arc<WorkflowsConfig>,
+}
+
+impl AppConfig {
+    /// Create a new `AppConfig` from individually wrapped configs.
+    pub fn new(
+        states: Arc<StatesConfig>,
+        phases: Arc<PhasesConfig>,
+        deps: Arc<DependenciesConfig>,
+        auto_advance: Arc<AutoAdvanceConfig>,
+        attachments: Arc<AttachmentsConfig>,
+        tags: Arc<TagsConfig>,
+        ids: Arc<IdsConfig>,
+        workflows: Arc<WorkflowsConfig>,
+    ) -> Self {
+        Self {
+            states,
+            phases,
+            deps,
+            auto_advance,
+            attachments,
+            tags,
+            ids,
+            workflows,
+        }
     }
 }
 

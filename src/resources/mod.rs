@@ -9,8 +9,7 @@ pub mod stats;
 pub mod tasks;
 pub mod workflows;
 
-use crate::config::workflows::WorkflowsConfig;
-use crate::config::{DependenciesConfig, PhasesConfig, StatesConfig, TagsConfig};
+use crate::config::AppConfig;
 use crate::db::Database;
 use anyhow::Result;
 use rmcp::model::{Annotated, RawResource, RawResourceTemplate, Resource, ResourceTemplate};
@@ -20,38 +19,33 @@ use std::sync::Arc;
 /// Resource handler that processes MCP resource requests.
 pub struct ResourceHandler {
     pub db: Arc<Database>,
-    pub states_config: Arc<StatesConfig>,
-    pub phases_config: Arc<PhasesConfig>,
-    pub deps_config: Arc<DependenciesConfig>,
-    pub tags_config: Arc<TagsConfig>,
-    pub workflows_config: Arc<WorkflowsConfig>,
+    /// Consolidated application configuration.
+    pub config: AppConfig,
     /// Directory for skill overrides (e.g., `.task-graph/skills/`)
     pub skills_dir: Option<std::path::PathBuf>,
+    /// Directory containing documentation markdown files (e.g., `docs/`)
+    pub docs_dir: Option<std::path::PathBuf>,
 }
 
 impl ResourceHandler {
-    pub fn new(
-        db: Arc<Database>,
-        states_config: Arc<StatesConfig>,
-        phases_config: Arc<PhasesConfig>,
-        deps_config: Arc<DependenciesConfig>,
-        tags_config: Arc<TagsConfig>,
-        workflows_config: Arc<WorkflowsConfig>,
-    ) -> Self {
+    pub fn new(db: Arc<Database>, config: AppConfig) -> Self {
         Self {
             db,
-            states_config,
-            phases_config,
-            deps_config,
-            tags_config,
-            workflows_config,
+            config,
             skills_dir: None,
+            docs_dir: None,
         }
     }
 
     /// Set the skills override directory.
     pub fn with_skills_dir(mut self, dir: std::path::PathBuf) -> Self {
         self.skills_dir = Some(dir);
+        self
+    }
+
+    /// Set the documentation directory.
+    pub fn with_docs_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.docs_dir = Some(dir);
         self
     }
 
@@ -270,6 +264,45 @@ impl ResourceHandler {
                 },
                 None,
             ),
+            // Documentation resources
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://index".into(),
+                    name: "Documentation Index".into(),
+                    title: None,
+                    description: Some("List all available documentation files".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://search/{query}".into(),
+                    name: "Documentation Search".into(),
+                    title: None,
+                    description: Some(
+                        "Full-text search across all documentation files. \
+                         Supports multi-term queries (space-separated, all terms must match). \
+                         Case-insensitive. Returns matching files with line-level context snippets."
+                            .into(),
+                    ),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://{path}".into(),
+                    name: "Documentation File".into(),
+                    title: None,
+                    description: Some("Get content of a specific documentation file (e.g., docs://GATES.md)".into()),
+                    mime_type: Some("text/markdown".into()),
+                    icons: None,
+                },
+                None,
+            ),
         ]
     }
 
@@ -477,6 +510,20 @@ impl ResourceHandler {
                 },
                 None,
             ),
+            // Documentation resources
+            Annotated::new(
+                RawResource {
+                    uri: "docs://index".into(),
+                    name: "Documentation Index".into(),
+                    title: None,
+                    description: Some("List all available documentation files".into()),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
         ]
     }
 
@@ -499,6 +546,8 @@ impl ResourceHandler {
             self.read_config_resource(uri).await
         } else if uri.starts_with("workflows://") {
             self.read_workflows_resource(uri).await
+        } else if uri.starts_with("docs://") {
+            self.read_docs_resource(uri).await
         } else {
             Err(anyhow::anyhow!("Unknown resource URI: {}", uri))
         }
@@ -509,8 +558,8 @@ impl ResourceHandler {
 
         match path {
             "all" => tasks::get_all_tasks(&self.db),
-            "ready" => tasks::get_ready_tasks(&self.db, &self.states_config, &self.deps_config),
-            "blocked" => tasks::get_blocked_tasks(&self.db, &self.states_config, &self.deps_config),
+            "ready" => tasks::get_ready_tasks(&self.db, &self.config.states, &self.config.deps),
+            "blocked" => tasks::get_blocked_tasks(&self.db, &self.config.states, &self.config.deps),
             "claimed" => tasks::get_claimed_tasks(&self.db, None),
             _ if path.starts_with("agent/") => {
                 let agent_id = path.strip_prefix("agent/").unwrap();
@@ -555,7 +604,7 @@ impl ResourceHandler {
         let path = uri.strip_prefix("stats://").unwrap_or("");
 
         match path {
-            "summary" => stats::get_stats_summary(&self.db, &self.states_config),
+            "summary" => stats::get_stats_summary(&self.db, &self.config.states),
             _ => Err(anyhow::anyhow!("Unknown stats resource: {}", path)),
         }
     }
@@ -576,10 +625,10 @@ impl ResourceHandler {
         match path {
             "current" => {
                 // Return all configuration in one response
-                let states = config::get_states_config(&self.states_config)?;
-                let phases = config::get_phases_config(&self.phases_config)?;
-                let dependencies = config::get_dependencies_config(&self.deps_config)?;
-                let tags = config::get_tags_config(&self.tags_config)?;
+                let states = config::get_states_config(&self.config.states)?;
+                let phases = config::get_phases_config(&self.config.phases)?;
+                let dependencies = config::get_dependencies_config(&self.config.deps)?;
+                let tags = config::get_tags_config(&self.config.tags)?;
 
                 Ok(serde_json::json!({
                     "states": states,
@@ -588,10 +637,10 @@ impl ResourceHandler {
                     "tags": tags,
                 }))
             }
-            "states" => config::get_states_config(&self.states_config),
-            "phases" => config::get_phases_config(&self.phases_config),
-            "dependencies" => config::get_dependencies_config(&self.deps_config),
-            "tags" => config::get_tags_config(&self.tags_config),
+            "states" => config::get_states_config(&self.config.states),
+            "phases" => config::get_phases_config(&self.config.phases),
+            "dependencies" => config::get_dependencies_config(&self.config.deps),
+            "tags" => config::get_tags_config(&self.config.tags),
             _ => Err(anyhow::anyhow!("Unknown config resource: {}", path)),
         }
     }
@@ -600,8 +649,27 @@ impl ResourceHandler {
         let path = uri.strip_prefix("workflows://").unwrap_or("");
 
         match path {
-            "list" => workflows::list_workflows(&self.workflows_config),
-            name => workflows::get_workflow(&self.workflows_config, name),
+            "list" => workflows::list_workflows(&self.config.workflows),
+            name => workflows::get_workflow(&self.config.workflows, name),
+        }
+    }
+
+    async fn read_docs_resource(&self, uri: &str) -> Result<Value> {
+        let path = uri.strip_prefix("docs://").unwrap_or("");
+        let docs_dir = self.docs_dir.as_deref();
+
+        match path {
+            "index" => docs::list_docs(docs_dir),
+            _ if path.starts_with("search/") => {
+                let query = path.strip_prefix("search/").unwrap_or("");
+                // URL-decode the query string
+                let query = urlencoding::decode(query)
+                    .unwrap_or_else(|_| query.into())
+                    .into_owned();
+                docs::search_docs(docs_dir, &query, None, None)
+            }
+            // Individual doc file (e.g., "GATES.md" or "diagrams/README.md")
+            doc_path => docs::get_doc_resource(docs_dir, doc_path),
         }
     }
 }

@@ -2,15 +2,22 @@
 
 use super::{get_bool, get_i32, get_string, get_string_array, make_tool_with_prompts};
 use crate::config::workflows::WorkflowsConfig;
-use crate::config::{
-    DependenciesConfig, IdsConfig, PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig,
-};
+use crate::config::{AppConfig, Prompts, ServerPaths, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{OutputFormat, ToolResult, format_workers_markdown};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
+
+/// Options for connecting a worker to the task graph.
+pub struct ConnectOptions<'a> {
+    pub db: &'a Database,
+    pub server_paths: &'a ServerPaths,
+    pub config: &'a AppConfig,
+    /// Per-connect workflow (may differ from config.workflows for named workflows).
+    pub workflows: &'a WorkflowsConfig,
+}
 
 pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     vec![
@@ -121,17 +128,20 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     ]
 }
 
-pub fn connect(
-    db: &Database,
-    server_paths: &ServerPaths,
-    states_config: &StatesConfig,
-    phases_config: &PhasesConfig,
-    deps_config: &DependenciesConfig,
-    tags_config: &TagsConfig,
-    ids_config: &IdsConfig,
-    workflows: &WorkflowsConfig,
-    args: Value,
-) -> Result<Value> {
+pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
+    let ConnectOptions {
+        db,
+        server_paths,
+        config,
+        workflows,
+    } = opts;
+
+    let states_config = &config.states;
+    let phases_config = &config.phases;
+    let deps_config = &config.deps;
+    let tags_config = &config.tags;
+    let ids_config = &config.ids;
+
     let worker_id = get_string(&args, "worker_id");
     let tags = get_string_array(&args, "tags").unwrap_or_default();
     let force = get_bool(&args, "force").unwrap_or(false);
@@ -367,7 +377,8 @@ pub fn list_agents(
                     "current_thought": w.current_thought,
                     "registered_at": w.registered_at,
                     "last_heartbeat": w.last_heartbeat,
-                    "heartbeat_age_ms": now - w.last_heartbeat
+                    "heartbeat_age_ms": now - w.last_heartbeat,
+                    "workflow": w.workflow
                 })).collect::<Vec<_>>()
             });
 

@@ -1,121 +1,10 @@
-# ============================================================================
-# HIERARCHICAL WORKFLOW CONFIGURATION
-# ============================================================================
-#
-# OVERVIEW
-# --------
-# The hierarchical topology implements a classic lead-worker pattern where a
-# coordinating agent (lead) manages and distributes work to a pool of worker
-# agents. This creates a tree-like structure of delegation with clear lines
-# of responsibility.
-#
-# WHEN TO USE HIERARCHICAL
-# ------------------------
-# - Medium to large teams (3-10+ agents) where coordination overhead justifies
-#   a dedicated lead
-# - Projects requiring strategic decomposition of complex goals
-# - When you need clear accountability and progress monitoring
-# - Situations where some agents have specialized skills (use `needed_tags`)
-# - When work items vary in granularity (coarse strategic vs fine atomic tasks)
-#
-# NOT RECOMMENDED FOR
-# -------------------
-# - Solo work (use workflow-solo.yaml)
-# - Fully independent parallel tasks with no coordination needs (use swarm)
-# - Strictly sequential specialist handoffs (use relay)
-# - Very small teams (2-3 agents) where overhead exceeds benefit
-#
-# LEAD/WORKER DYNAMICS
-# --------------------
-# Lead Agent:
-#   - Connects with `tags: [lead, coordinator]`
-#   - Receives or claims high-level goals
-#   - Decomposes complex tasks into atomic subtasks using `create_tree()`
-#   - Pushes tasks to workers via `update(assignee="worker-id")`
-#   - Monitors progress with `list_agents()` and `list_tasks(status="working")`
-#   - Handles escalations, blockers, and reassignments
-#   - Sets priorities and adjusts plans dynamically
-#
-# Worker Agents:
-#   - Connect with `tags: [worker]` (plus any specialty tags)
-#   - Pull available work with `list_tasks(ready=true, agent="worker-id")`
-#   - Can also receive pushed assignments (status="assigned")
-#   - Focus on atomic, well-defined subtasks (1-2 at a time)
-#   - Report progress via `thinking()` and `attach()` for notes
-#   - Complete tasks with `update(status="completed")`
-#
-# DELEGATION PATTERNS
-# -------------------
-# 1. Decomposition: Lead breaks down a feature into subtasks
-#    ```yaml
-#    create_tree:
-#      tree:
-#        title: "Implement User Auth"
-#        children:
-#          - title: "Design auth schema"
-#            points: 2
-#          - title: "Implement login endpoint"
-#            points: 3
-#          - title: "Write auth tests"
-#            points: 2
-#      sibling_type: "follows"  # Sequential execution
-#    ```
-#
-# 2. Push Assignment: Lead assigns task to specific worker
-#    ```yaml
-#    update:
-#      task: "auth-tests-task"
-#      assignee: "worker-security"  # Worker with security expertise
-#    ```
-#
-# 3. Pull Coordination: Workers claim from available pool
-#    ```yaml
-#    list_tasks:
-#      ready: true
-#      agent: "worker-3"  # Filters by worker's tags
-#    claim:
-#      worker_id: "worker-3"
-#      task: "task-id"
-#    ```
-#
-# 4. Contains Hierarchy: Parent tasks track subtask completion
-#    - Default `parent_child: contains` dependency
-#    - Parent auto-tracks child progress
-#    - Useful for rollup metrics and completion tracking
-#
-# COORDINATION FLOW
-# -----------------
-#                   +-----------+
-#                   |   Lead    |
-#                   | (decompose|
-#                   |  & assign)|
-#                   +-----+-----+
-#                         |
-#          +--------------+--------------+
-#          |              |              |
-#          v              v              v
-#     +--------+    +--------+    +--------+
-#     |Worker 1|    |Worker 2|    |Worker 3|
-#     | (pull) |    | (push) |    | (pull) |
-#     +--------+    +--------+    +--------+
-#
-# KEY CONFIGURATION POINTS
-# ------------------------
-# - `roles.lead.max_claims`: Higher limit (5) for tracking multiple work streams
-# - `roles.worker.max_claims`: Lower limit (2) to encourage focus
-# - `roles.lead.can_assign`: Only leads can push tasks to workers
-# - `hierarchical.lead_settings.require_estimates`: Enforce estimation discipline
-# - `hierarchical.worker_settings.require_file_marks`: Prevent edit conflicts
-# - `hierarchical.thresholds`: Alerts for stale tasks and overloaded workers
-#
-# ============================================================================
-
-# Lead agent delegates to worker pool with mixed push/pull coordination
+# HIERARCHICAL WORKFLOW - Lead agent delegates to worker pool
+# Use for: medium-large teams (3-10+), strategic decomposition, specialized skills
+# Coordination: lead decomposes & assigns, workers pull or receive tasks
 
 name: hierarchical
 description: Lead agent delegates to worker pool
 
-# Inherit base settings, override as needed
 settings:
   initial_state: pending
   disconnect_state: pending
@@ -127,18 +16,18 @@ roles:
   lead:
     description: Coordinates work, decomposes tasks, monitors progress
     tags: [lead, coordinator]
-    max_claims: 5           # Can hold multiple top-level tasks
-    can_assign: true        # Can push tasks to workers
+    max_claims: 5
+    can_assign: true
     can_create_subtasks: true
 
   worker:
     description: Claims and completes atomic subtasks
     tags: [worker]
-    max_claims: 2           # Focus on 1-2 tasks at a time
+    max_claims: 2
     can_assign: false
     can_create_subtasks: false
 
-# States with role-specific prompts
+# States with prompts
 states:
   pending:
     exits: [assigned, working, cancelled]
@@ -148,66 +37,46 @@ states:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: |
-        A task has been assigned to you by the lead. Review and claim when ready.
+      enter: Task assigned by lead. Review and claim when ready.
 
   working:
     exits: [completed, failed, pending, consult]
     timed: true
     prompts:
       enter: |
-        You are now actively working on this task. Keep your thinking updated regularly using the `thinking` tool to show progress and allow coordination with other agents.
+        **Hierarchical working.** `thinking()` regularly for heartbeat + visibility.
 
-        ### Heartbeat & Coordination
-        - Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
-        - Call `mark_updates(agent=your_id)` every 30-60s during long operations to detect file conflicts
-        - Stale workers (no heartbeat for 5+ min) get evicted automatically
-        - The lead monitors worker heartbeats -- stay visible to avoid reassignment
+        - Never revert unfamiliar changes: check `mark_updates()` / `list_marks()` first
+        - `list_marks()` before editing to check conflicts
+        - 5+ files? Decompose into subtasks first
+        - `mark_updates()` every 30-60s during long ops
+        - Stale workers (5+ min no heartbeat) get evicted
+        - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release via `update(task="_lock:git-commit", status="pending")`
 
-        ## Valid Next States
+        Transitions: {{valid_exits}}
+        Phase: {{current_phase}} | Valid: {{valid_phases}}
 
-        From `{{current_status}}` you can transition to:
-        {{valid_exits}}
-
-        Use `update(status="completed")` when done, `update(status="failed")` if blocked, or `update(status="pending")` to release without completing.
-
-        ## Phase
-
-        Current phase: {{current_phase}}
-
-        Valid phases: {{valid_phases}}
-
-        Set a phase with `update(phase="implement")` to categorize the type of work you're doing.
-      exit: |
-        Before leaving working state:
-        - [ ] Unmark any files you marked
-        - [ ] Attach results or notes
-        - [ ] Log costs with `log_metrics()`
+      exit: "Unmark files, attach results, `log_metrics()`."
 
   completed:
     exits: [pending]
     timed: false
     prompts:
-      enter: |
-        Task completed. Results should be attached.
+      enter: Task completed. Results should be attached.
 
   failed:
     exits: [pending]
     timed: false
     prompts:
       enter: |
-        Task failed. Please document:
-        - What was attempted
-        - What blocked progress
-        - Suggested next steps
+        Task failed. Document: what was attempted, what blocked, suggested next steps.
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
       enter: |
-        **Paused for human review.** This task needs human input before work can continue.
-        Attach a note explaining what decision or review is needed.
+        **Paused for human review.** Attach a note explaining what decision is needed.
         A human (or lead) must transition this back to `working` or `pending`.
 
   cancelled:
@@ -218,350 +87,201 @@ states:
 phases:
   explore:
     prompts:
-      exit: |
-        Capture exploration findings before moving on.
-        Attach discoveries to parent task for sibling agents.
+      enter: "**Explore.** Read code, docs, related tasks. Identify constraints. Attach findings for lead/siblings."
+      exit: "Attach exploration findings to parent task."
 
   plan:
     prompts:
-      enter: |
-        Planning phase. For leads: decompose work into subtasks.
+      enter: "**Plan.** Decompose via `create_tree()`. Set `needed_tags`, estimates, and dependencies."
+      exit: "Ensure subtasks created with descriptions, deps set, estimates assigned."
+
+  design:
+    prompts:
+      enter: "**Design.** Document approach, interfaces, key decisions, and rejected alternatives. Attach as plan note."
+      exit: "Ensure design doc attached with rationale."
 
   implement:
     prompts:
-      enter: |
-        Implementation phase. Mark files before editing.
+      enter: "**Implement.** `mark_file()` first. Follow codebase patterns. Tests alongside code. Atomic commits."
+      exit: "Ensure: compiles, tests pass, commit attached."
 
   review:
     prompts:
-      enter: |
-        ## Code Review Checklist
-        - [ ] Tests pass
-        - [ ] No new warnings
-        - [ ] Documentation updated
+      enter: "**Review.** Tests pass, no warnings, docs updated."
+      exit: "Ensure findings documented, blockers escalated, approval attached."
 
   test:
     prompts:
-      enter: |
-        Testing phase. Verify the implementation works correctly.
+      enter: "**Test.** Run existing tests, add new ones, cover edge cases and error paths."
+      exit: "Ensure test results attached, all passing, edges covered."
 
   security:
     prompts:
-      enter: |
-        ## Security Review
-        - [ ] Input validation
-        - [ ] Auth/authz checks
-        - [ ] No secrets in code
+      enter: "**Security.** Input validation, auth/authz, no secrets in code."
+      exit: "Ensure findings attached, critical issues escalated."
 
-  # Phases without prompts
-  deliver: {}
-  triage: {}
-  diagnose: {}
-  design: {}
-  doc: {}
-  integrate: {}
-  deploy: {}
-  monitor: {}
-  optimize: {}
+  triage:
+    prompts:
+      enter: "**Triage.** Classify (bug/feature/refactor/chore), set priority 0-10, assess scope, route via `update(assignee=...)`."
+      exit: "Ensure tags/priority set, description clear, assigned or ready."
 
-# State+Phase specific prompts
+  diagnose:
+    prompts:
+      enter: "**Diagnose.** Reproduce, narrow to module/function, attach findings, create implement subtask."
+      exit: "Ensure root cause documented, fix approach outlined."
+
+  doc:
+    prompts:
+      enter: "**Document.** Update README, API docs, inline comments. Verify examples."
+      exit: "Ensure doc changes committed."
+
+  integrate:
+    prompts:
+      enter: "**Integrate.** Full test suite. Check conflicts via `mark_updates()`. Coordinate with lead on merges."
+
+  deliver:
+    prompts:
+      enter: "**Deliver.** All tests green, build clean. Version bumps and changelog if applicable."
+
+  deploy:
+    prompts:
+      enter: "**Deploy.** Release build. Tag if applicable. Monitor initial deployment."
+
+  monitor:
+    prompts:
+      enter: "**Monitor.** Check errors and performance. Time-box. Attach observations."
+
+  optimize:
+    prompts:
+      enter: "**Optimize.** Measure baseline, change one thing, re-measure. Keep only measurable improvements."
+
+# State+Phase combos
 combos:
   working+implement:
     enter: |
-      You're implementing. Focus on:
-      - Follow existing patterns
-      - Write tests alongside code
-      - Keep commits atomic
+      Implementing. Follow patterns, tests alongside, atomic commits.
+      - **3+ files**: search ALL symbols first, mark_file() ALL, plan attachment before coding
+      - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> `update(task="_lock:git-commit", status="pending")`
 
   working+review:
-    enter: |
-      Code review in progress:
-      - Check for correctness
-      - Look for edge cases
-      - Verify test coverage
+    enter: "Review: correctness, edge cases, test coverage."
 
   working+plan:
-    enter: |
-      Planning phase active. Focus on:
-      - Breaking down complex work into atomic subtasks
-      - Identifying dependencies between subtasks
-      - Estimating effort for each subtask
+    enter: "Planning: decompose into atomic subtasks, set deps, estimate effort."
+
+  working+explore:
+    enter: "Exploring: read code/docs, attach findings. Time-box then move to design/plan."
+
+  working+test:
+    enter: "Testing: run suite, add tests, verify edges. Attach results."
+
+  working+triage:
+    enter: "Triaging: categorize, prioritize, assess scope. Route or decompose."
+
+  working+diagnose:
+    enter: "Diagnosing: reproduce, narrow down, root cause. Attach findings before fix tasks."
+
+  working+security:
+    enter: "Security: input validation, auth, secrets, deps. Attach findings. Escalate critical."
+
+  assigned+implement:
+    enter: "Implementation assigned. Read task description and attached context before claiming."
+
+  assigned+review:
+    enter: "Review assigned. Read implementation and design context before claiming."
+
+  assigned+test:
+    enter: "Test assigned. Check implementation and review notes before claiming."
 
 # Role-specific prompts
 role_prompts:
   lead:
-    # Decomposition prompts
     decomposition: |
-      ## Task Decomposition Guidelines
+      Decompose into atomic, independent, testable subtasks via `create_tree()`.
+      Set `time_estimate_ms` and `points` on each.
 
-      As the lead, break down high-level tasks into atomic subtasks:
-
-      1. **Analyze the goal**: Understand what needs to be accomplished
-      2. **Identify components**: What distinct pieces of work are needed?
-      3. **Define boundaries**: Each subtask should be:
-         - Atomic (completable in one work session)
-         - Independent (minimal dependencies on other subtasks)
-         - Testable (clear success criteria)
-      4. **Create subtasks**: Use `create_tree` with `contains` dependencies
-      5. **Set estimates**: Add `time_estimate_ms` and `points` to each subtask
-
-      Example decomposition:
-      ```
-      create_tree(tree={
-        "title": "Implement feature X",
-        "children": [
-          {"title": "Design API interface", "points": 2},
-          {"title": "Implement core logic", "points": 3},
-          {"title": "Write unit tests", "points": 2},
-          {"title": "Update documentation", "points": 1}
-        ]
-      }, sibling_type="follows")
-      ```
-
-    # Assignment prompts
     assignment: |
-      ## Task Assignment Guidelines
+      Assign via `update(task="id", assignee="worker-id")`.
+      Prefer workers with matching tags, lower claim counts, or related context.
 
-      Push high-level tasks to workers when:
-      - A worker has the required expertise (check tags)
-      - The task is well-defined and ready for work
-      - Dependencies are satisfied
-
-      To assign a task:
-      ```
-      update(task="task-id", assignee="worker-id")
-      ```
-
-      This sets the task status to `assigned` and notifies the worker.
-
-      Prefer pushing to:
-      - Workers with matching `needed_tags` requirements
-      - Workers with lower current claim counts
-      - Workers who have context from related tasks
-
-    # Monitoring prompts
     monitoring: |
-      ## Progress Monitoring Guidelines
-
-      As lead, regularly monitor worker progress:
-
-      1. **Check active workers**: `list_agents()` to see who's working on what
-      2. **Review task status**: `list_tasks(status="working")` for active work
-      3. **Identify blockers**: Look for `failed` or stalled tasks
-      4. **Track metrics**: `project_history()` for velocity insights
-
-      Warning signs to watch:
-      - Tasks in `working` state too long (check `claimed_at`)
-      - Workers with many claimed tasks (overloaded)
-      - Subtasks blocked on dependencies
-      - Failed tasks that need reassignment
-
-      When issues arise:
-      - Check worker thinking: Are they stuck?
-      - Offer guidance via task attachments
-      - Reassign if worker is unavailable: `update(task="id", assignee="other-worker", force=true)`
+      Monitor: `list_agents()` for active workers, `list_tasks(status="working")` for active work.
+      Watch for long-running tasks, overloaded workers, blocked deps.
+      Reassign: `update(task="id", assignee="other-worker", force=true)`.
 
   worker:
-    # Claiming prompts
     claiming: |
-      ## Task Claiming Guidelines
+      1. `list_tasks(ready=true, agent="your-id")` - find qualified tasks by priority
+      2. `claim(task="id", worker_id="your-id")`
+      3. `mark_file()` before editing
+      4. Never revert unfamiliar changes - check `mark_updates()` first
+      Claim one at a time. Check attachments for lead context.
 
-      As a worker, find and claim available subtasks:
-
-      1. **Find ready tasks**: `list_tasks(ready=true, agent="your-id")`
-         - This filters for tasks you're qualified to claim
-         - Tasks are sorted by priority
-      2. **Check dependencies**: Ensure blocking tasks are complete
-      3. **Claim the task**: `claim(task="task-id", worker_id="your-id")`
-      4. **Mark files**: Before editing, mark files you'll touch
-      5. **Never revert unfamiliar changes**: if you find unexpected modifications in a file, do NOT revert them. Another worker may have made those changes. Use `mark_updates()` or `list_marks()` to check, and coordinate before overwriting
-
-      Best practices:
-      - Claim one task at a time unless parallel work is possible
-      - Check task attachments for context from the lead
-      - Verify you understand the success criteria before starting
-
-    # Completing prompts
     completing: |
-      ## Task Completion Guidelines
+      Before completing:
+      1. Verify success criteria met
+      2. Run tests
+      3. `attach(type="result", content="...")` - document work done
+      4. `unmark_file()` - release files
+      5. `log_metrics(cost_usd=...)` - record cost
+      6. `update(status="completed")`
 
-      Before marking a task complete:
-
-      1. **Verify success criteria**: Does the work meet requirements?
-      2. **Run tests**: Ensure nothing is broken
-      3. **Attach results**: Document what was done
-         ```
-         attach(task="task-id", type="result", content="Description of work done")
-         ```
-      4. **Unmark files**: Release any marked files
-      5. **Log metrics**: Record time and cost
-         ```
-         log_metrics(task="task-id", agent="your-id", cost_usd=0.05)
-         ```
-      6. **Complete the task**:
-         ```
-         update(task="task-id", status="completed", reason="Work completed successfully")
-         ```
-
-    # Reporting prompts
     reporting: |
-      ## Reporting Guidelines
-
-      Keep the lead informed of your progress:
-
-      1. **Regular thinking updates**: Use `thinking(thought="...")` frequently
-         - What you're currently doing
-         - Any blockers or questions
-         - Estimated time remaining
-
-      2. **Attach progress notes**: For longer tasks
-         ```
-         attach(task="task-id", type="progress", content="50% complete, working on X")
-         ```
-
-      3. **Report blockers immediately**: If you can't proceed
-         ```
-         update(task="task-id", status="failed", reason="Blocked because...")
-         ```
-
-      4. **Ask questions via attachments**:
-         ```
-         attach(task="task-id", type="question", content="Need clarification on...")
-         ```
+      Use `thinking(thought="...")` frequently with status, blockers, ETA.
+      Longer tasks: `attach(type="progress", content="...")`.
+      Blocked: `update(status="failed", reason="...")`.
+      Questions: `attach(type="question", content="...")`.
 
 # Hierarchical-specific settings
 hierarchical:
-  # Lead behavior
   lead_settings:
-    auto_decompose: false       # Lead manually decomposes (not auto)
-    min_subtask_points: 1       # Minimum story points for subtask
-    max_subtask_points: 5       # Maximum story points for subtask
-    require_estimates: true     # Subtasks must have estimates
+    auto_decompose: false
+    min_subtask_points: 1
+    max_subtask_points: 5
+    require_estimates: true
 
-  # Worker behavior
   worker_settings:
-    max_concurrent_claims: 2    # Workers can claim up to 2 tasks
-    auto_claim_priority: true   # Prefer higher priority tasks
-    require_file_marks: true    # Must mark files before editing
+    max_concurrent_claims: 2
+    auto_claim_priority: true
+    require_file_marks: true
 
-  # Dependency defaults
   dependency_defaults:
-    parent_child: contains      # Parent contains children
-    sibling: null               # Siblings are parallel by default
-    milestone: blocks           # Milestones block dependent work
+    parent_child: contains
+    sibling: null
+    milestone: blocks
 
-  # Metrics thresholds
   thresholds:
-    stale_task_hours: 4         # Warn if task claimed > 4 hours
-    max_worker_claims: 3        # Alert if worker has > 3 claims
-    velocity_window_days: 7     # Calculate velocity over 7 days
+    stale_task_hours: 4
+    max_worker_claims: 3
+    velocity_window_days: 7
 
-# =============================================================================
-# GATES
-# =============================================================================
-# Hierarchical workflows use bidirectional gates for lead-worker communication.
-# Workers report results up to leads; leads provide specs down to workers.
-
+# Gates (bidirectional lead-worker communication)
 gates:
-  # Workers must attach results for lead visibility
   status:working:
     - type: "gate/results"
       enforcement: warn
       description: "Attach results for lead visibility"
 
-  # Lead should provide task specification before worker claims
   status:assigned:
     - type: "gate/spec"
       enforcement: warn
       description: "Lead should provide task specification"
 
-# =============================================================================
-# ATTACHMENT GUIDANCE
-# =============================================================================
-# Recommended attachment types for hierarchical workflows. These types are
-# pre-defined in config.yaml with appropriate MIME types and modes.
-#
-# Hierarchical workflows involve lead-worker communication. Attachments serve
-# as the primary channel for context passing, progress reporting, and results.
-
+# Attachment types (compact reference)
 attachments:
-  # Lead -> Worker communication
   lead_to_worker:
-    context:
-      description: Essential background info workers need (replaces)
-      when: Task creation or when providing guidance
-      example: |
-        # Lead attaches context when creating subtask
-        attach(task=subtask_id, type="context", content="Parent feature uses Repository pattern. Follow existing conventions in src/repos/")
-
-    plan:
-      description: Decomposition details and approach (markdown, replaces)
-      when: Complex tasks requiring structured guidance
-      example: |
-        attach(task=id, type="plan", content="## Implementation Plan\n1. Add interface\n2. Implement adapter\n3. Wire up DI")
-
-    note:
-      description: Clarifications or additional instructions (appends)
-      when: Responding to worker questions or adding guidance
-      example: |
-        attach(task=id, type="note", content="Re: your question - use the existing ErrorKind enum")
-
-  # Worker -> Lead reporting
+    context: Essential background info (replaces)
+    plan: Decomposition details and approach (markdown, replaces)
+    note: Clarifications or additional instructions (appends)
   worker_to_lead:
-    result:
-      description: Structured completion data (JSON, replaces)
-      when: Task completion - summarize what was done
-      example: |
-        attach(task=id, type="result", content='{"status": "complete", "tests_added": 5, "coverage": "87%"}')
-
-    note:
-      description: Progress updates, questions, observations (appends)
-      when: Throughout work - keep lead informed
-      example: |
-        attach(task=id, type="note", content="Found existing utility that handles this - reusing instead of new impl")
-
-    error:
-      description: Blockers or failures needing lead attention (appends)
-      when: Unable to proceed - explain what's blocking
-      example: |
-        attach(task=id, type="error", content="Blocked: need DB schema migration before this can proceed")
-
-  # Version control integration
+    result: Structured completion data (JSON, replaces)
+    note: Progress updates, questions, observations (appends)
+    error: Blockers or failures needing lead attention (appends)
   code_artifacts:
-    commit:
-      description: Git commit hash linking task to code (appends)
-      when: After committing changes
-      example: |
-        attach(task=id, type="commit", content="abc123f")
-
-    diff:
-      description: Code changes for review or context (appends)
-      when: Sharing changes without committing, or for lead review
-      example: |
-        attach(task=id, type="diff", content="--- a/src/api.rs\n+++ b/src/api.rs\n@@ -10,3 +10,8 @@...")
-
-    changelist:
-      description: List of files modified (appends)
-      when: Summarizing scope of changes
-      example: |
-        attach(task=id, type="changelist", content="src/api.rs\nsrc/models/user.rs\ntests/api_test.rs")
-
-  # Operational tracking
+    commit: Git commit hash (appends)
+    diff: Code changes for review (appends)
+    changelist: Files modified (appends)
   operations:
-    log:
-      description: Chronological work record (appends)
-      when: Long-running tasks - audit trail
-      example: |
-        attach(task=id, type="log", content="10:30 - Started implementation\n11:15 - Hit issue with X\n11:45 - Resolved, continuing")
-
-    output:
-      description: Command or test output (appends)
-      when: Test results, build logs, or diagnostic info
-      example: |
-        attach(task=id, type="output", content="cargo test auth:: -- 12 passed, 0 failed")
-
-    meta:
-      description: Structured metadata (JSON, replaces)
-      when: Tracking estimates, actuals, or custom metrics
-      example: |
-        attach(task=id, type="meta", content='{"estimated_points": 3, "actual_hours": 2.5}')
+    log: Chronological work record (appends)
+    output: Command/test output (appends)
+    meta: Structured metadata (JSON, replaces)

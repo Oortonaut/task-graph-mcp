@@ -1,0 +1,8 @@
+server:
+  default_format: markdown
+
+dependencies:
+  definitions:
+    motivates:
+      display: horizontal
+      blocks: none

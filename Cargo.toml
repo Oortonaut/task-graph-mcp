@@ -33,6 +33,7 @@ thiserror = "2"
 anyhow = "1"
 base64 = "0.22"
 regex-lite = "0.1"
+urlencoding = "2"
 flate2 = "1"
 
 # Logging

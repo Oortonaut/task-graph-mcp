@@ -330,9 +330,15 @@ fn default_state_workflows() -> HashMap<String, StateWorkflow> {
                 enter: Some(
                     r#"You are now actively working on this task. Keep your thinking updated regularly using the `thinking` tool to show progress and allow coordination with other agents.
 
+### Heartbeat & Coordination
+- Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
+- Call `mark_updates(agent=your_id)` every 30-60s during long operations to detect file conflicts
+- Stale workers (no heartbeat for 5+ min) get evicted automatically
+- The lead monitors worker heartbeats -- stay visible to avoid reassignment
+
 ## Valid Next States
 
-From `{{current_status}}` you can transition to:
+From `working` you can transition to:
 {{valid_exits}}
 
 Use `update(status="completed")` when done, `update(status="failed")` if blocked, or `update(status="pending")` to release without completing.
@@ -343,15 +349,12 @@ Current phase: {{current_phase}}
 
 Valid phases: {{valid_phases}}
 
-Set a phase with `update(phase="implement")` to categorize the type of work you're doing."#
+Set a phase with `update(phase="implement")` to categorize the type of work you're doing.
+"#
                         .to_string(),
                 ),
                 exit: Some(
-                    r#"Before leaving working state:
-- [ ] Unmark any files you marked
-- [ ] Attach results or notes
-- [ ] Log costs with `log_metrics()`"#
-                        .to_string(),
+                    "Before completing:\n- [ ] Unmark files\n- [ ] Attach results or notes\n- [ ] `log_metrics()`".to_string(),
                 ),
             },
         },
@@ -376,10 +379,7 @@ Set a phase with `update(phase="implement")` to categorize the type of work you'
             timed: false,
             prompts: TransitionPrompts {
                 enter: Some(
-                    r#"Task failed. Please document:
-- What was attempted
-- What blocked progress
-- Suggested next steps"#
+                    "Task failed. Document: what was attempted, what blocked, suggested next steps."
                         .to_string(),
                 ),
                 exit: None,
@@ -430,13 +430,7 @@ fn default_phase_workflows() -> HashMap<String, PhaseWorkflow> {
         "review".to_string(),
         PhaseWorkflow {
             prompts: TransitionPrompts {
-                enter: Some(
-                    r#"## Code Review Checklist
-- [ ] Tests pass
-- [ ] No new warnings
-- [ ] Documentation updated"#
-                        .to_string(),
-                ),
+                enter: Some("Review: tests pass, no new warnings, docs updated.".to_string()),
                 exit: None,
             },
         },
@@ -459,11 +453,7 @@ fn default_phase_workflows() -> HashMap<String, PhaseWorkflow> {
         PhaseWorkflow {
             prompts: TransitionPrompts {
                 enter: Some(
-                    r#"## Security Review
-- [ ] Input validation
-- [ ] Auth/authz checks
-- [ ] No secrets in code"#
-                        .to_string(),
+                    "Security: input validation, auth/authz, no secrets in code.".to_string(),
                 ),
                 exit: None,
             },

@@ -1,76 +1,59 @@
-# SOLO WORKFLOW - Single agent, coarse-grained tasks, pull coordination
+# SOLO WORKFLOW - Single agent, coarse-grained tasks
 # Use for: individual work, prototyping, personal task management
-# Key: explore -> design -> implement -> test -> review phases
 
 name: solo
 description: Single agent working alone with coarse-grained, independent tasks
 
-# Override base settings for solo work
 settings:
   initial_state: pending
   disconnect_state: pending
   blocking_states: [pending, assigned, working]
   unknown_phase: warn
 
-# Solo-specific state prompts
 states:
   pending:
     exits: [working, cancelled]
     timed: false
     prompts:
-      enter: |
-        Task available. Review and begin when ready.
+      enter: "Task available. Review and begin when ready."
 
-  # Solo worker skips 'assigned' - directly claims work
   working:
     exits: [completed, failed, pending, consult]
     timed: true
     prompts:
       enter: |
-        **Solo working.** Focus deeply; attach notes for context continuity.
-
-        Transitions: {{valid_exits}}
-        Phase: {{current_phase}} | Valid: {{valid_phases}}
+        **Solo working.** Focus deeply. Attach notes for context continuity.
 
         - Progress phases via `update(phase="...")`
         - Self-review before completing
         - Attach results for your future self
-        - **Never revert unfamiliar changes**: if you find unexpected modifications in a file, do NOT revert them. Another worker may have made those changes. Use `mark_updates()` or `list_marks()` to check, and coordinate before overwriting
-        - **Before editing**: call list_marks() to check if other workers have marked the same files. If conflicts found, coordinate or pick a different task
-        - **Estimate scope first**: if a task touches 5+ files or requires broad symbol renaming, decompose into subtasks before starting. Three focused subtasks are better than one sprawling change
+        - Never revert unfamiliar changes: check `mark_updates()` / `list_marks()` first
+        - `list_marks()` before editing for conflicts
+        - 5+ files? Decompose into subtasks first
+        - `thinking()` periodically for heartbeat (5+ min stale = eviction)
 
-        ### Heartbeat
-        - Call `thinking(agent=your_id, thought="...")` periodically to maintain heartbeat
-        - Stale workers (no heartbeat for 5+ min) get evicted automatically
+        Transitions: {{valid_exits}}
+        Phase: {{current_phase}} | Valid: {{valid_phases}}
 
-      exit: |
-        Before completing:
-        - [ ] Attach summary
-        - [ ] Note follow-up work
-        - [ ] `log_metrics()`
+      exit: "Attach summary, note follow-ups, `log_metrics()`."
 
   completed:
     exits: [pending]
     timed: false
     prompts:
-      enter: |
-        Done. Results attached? Follow-up tasks needed?
+      enter: "Done. Results attached? Follow-up tasks needed?"
 
   failed:
     exits: [pending]
     timed: false
     prompts:
-      enter: |
-        Blocked. Document: attempted, blocker, resources needed. Set `pending` to retry.
+      enter: "Blocked. Document: attempted, blocker, resources needed. Set `pending` to retry."
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: |
-        **Paused for human review.** This task requires human input before proceeding.
-        Attach a note explaining what decision or review is needed.
-        A human must transition this task back to `working` or `pending`.
+      enter: "**Paused for human review.** Attach note explaining decision or review needed."
 
   cancelled:
     exits: []
@@ -80,73 +63,115 @@ states:
 phases:
   explore:
     prompts:
-      enter: |
-        **Explore.** Read code/docs, understand patterns, identify constraints. Attach findings.
-      exit: |
-        Attach exploration summary before moving on.
+      enter: "**Explore.** Read code/docs, understand patterns, identify constraints. Attach findings."
+      exit: "Attach exploration summary."
 
   design:
     prompts:
-      enter: |
-        **Design.** Outline solution, consider alternatives, identify risks.
+      enter: "**Design.** Outline solution, consider alternatives, identify risks."
+      exit: "Ensure design documented, alternatives noted, edge cases identified."
 
   implement:
     prompts:
-      enter: |
-        **Implement.** Follow patterns, write tests, keep commits small, `mark_file` before editing.
+      enter: "**Implement.** Follow patterns, write tests, small commits, `mark_file` first."
+      exit: "Ensure compiles, tests pass, commit attached."
 
   test:
     prompts:
-      enter: |
-        **Test.** Run existing tests, add new ones, cover edge cases.
+      enter: "**Test.** Run existing tests, add new ones, cover edge cases."
+      exit: "Ensure all pass, results attached, edges covered."
 
   review:
     prompts:
-      enter: |
-        **Self-review checklist:**
-        - [ ] Code matches design?
-        - [ ] Edge cases handled?
-        - [ ] Tests comprehensive?
-        - [ ] Documentation updated?
+      enter: "**Self-review:** code matches design? Edge cases? Tests comprehensive? Docs updated?"
+      exit: "Ensure findings documented, blocking issues resolved."
 
   doc:
     prompts:
-      enter: |
-        **Document.** Update README, add comments, API docs, examples as needed.
+      enter: "**Document.** README, comments, API docs, examples as needed."
+      exit: "Ensure doc changes committed, examples tested."
 
   security:
     prompts:
-      enter: |
-        **Security checklist:**
-        - [ ] Input validation
-        - [ ] Auth/authz
-        - [ ] No secrets in code
-        - [ ] Dependencies checked
+      enter: "**Security:** input validation, auth/authz, no secrets, deps checked."
+      exit: "Ensure findings attached, critical issues flagged."
 
-  deliver: {}
-  triage: {}
-  diagnose: {}
-  plan: {}
-  integrate: {}
-  deploy: {}
-  monitor: {}
-  optimize: {}
+  triage:
+    prompts:
+      enter: "**Triage.** Categorize (bug/feature/refactor/chore), prioritize, assess scope. Set tags and priority."
+      exit: "Ensure tags/priority set, description has 'why', scope assessed."
+
+  plan:
+    prompts:
+      enter: "**Plan.** Outline approach, identify files/symbols, note risks. Attach plan note."
+      exit: "Ensure plan attached, subtasks created if needed."
+
+  diagnose:
+    prompts:
+      enter: "**Diagnose.** Reproduce, check logs/errors, narrow to module/function. Attach findings."
+      exit: "Ensure root cause identified, fix approach outlined."
+
+  integrate:
+    prompts:
+      enter: "**Integrate.** Full test suite. Check conflicts via `mark_updates()`. Verify no regressions."
+
+  deliver:
+    prompts:
+      enter: "**Deliver.** All tests pass, version bumps, release notes, docs current."
+      exit: "Ensure tests green, docs updated, commits clear."
+
+  deploy:
+    prompts:
+      enter: "**Deploy.** `cargo check`, `cargo build --release`. Tag if applicable. Monitor post-deploy."
+      exit: "Ensure build succeeded, deployment verified."
+
+  monitor:
+    prompts:
+      enter: "**Monitor.** Check errors, performance, logs. Time-box. Attach observations."
+
+  optimize:
+    prompts:
+      enter: "**Optimize.** Measure baseline, change one thing, re-measure. Keep only improvements."
+      exit: "Ensure baseline/improvement metrics attached, no regressions."
 
 # State+Phase combos
 combos:
   working+explore:
-    enter: Explore thoroughly. Attach notes as you learn.
+    enter: "Explore thoroughly. Attach notes as you learn."
 
   working+implement:
     enter: |
-      Execute with full context. Follow patterns, test alongside code, atomic commits.
-
-      - **Before large refactorings** (touching 3+ files): search for ALL symbols/references first using find_referencing_symbols or grep, mark_file() ALL files you'll modify, then write a plan attachment before coding
+      Execute with full context. Follow patterns, test alongside, atomic commits.
+      - **3+ files**: search ALL symbols first, mark_file() ALL, plan attachment before coding
 
   working+review:
-    enter: Self-review mode. Check bugs, edge cases, test coverage.
+    enter: "Self-review: bugs, edge cases, test coverage."
 
-# Gates (warn = self-discipline reminders, use force=true with reason to skip)
+  working+test:
+    enter: "Full test suite. Add missing tests. Attach results."
+
+  working+triage:
+    enter: "Categorize, prioritize, assess scope. Set tags/priority before plan or implement."
+
+  working+diagnose:
+    enter: "Reproduce, narrow root cause, document findings. Then implement phase."
+
+  working+design:
+    enter: "Document approach, alternatives, risks. Attach design note before implementing."
+
+  working+plan:
+    enter: "Break down work. Create subtasks if complex. Identify unknowns. Attach plan."
+
+  working+security:
+    enter: "Systematic: inputs, auth, secrets, deps. Attach findings."
+
+  working+deploy:
+    enter: "Build, tag, ship. Monitor post-deploy. Note rollback plan."
+
+  working+optimize:
+    enter: "Measure baseline. One change at a time. Measure after. Keep only what helps."
+
+# Gates (self-discipline reminders)
 gates:
   status:working:
     - type: "gate/tests"
@@ -157,9 +182,9 @@ gates:
       description: "Attach commit hash or note why no commit needed"
     - type: "gate/build"
       enforcement: warn
-      description: "Run cargo check (or equivalent build verification) before marking tasks complete"
+      description: "Run cargo check before completing"
 
-# Attachment types (document for future context)
+# Attachment types
 attachments:
   recommended:
     note: Observations, decisions, reasoning (appends)

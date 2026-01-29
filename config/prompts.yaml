@@ -4,12 +4,39 @@
 # Create prompts.yaml in:
 #   - task-graph/prompts.yaml (project-level)
 #   - ~/.task-graph/prompts.yaml (user-level)
-
-# Server instructions shown to the LLM
+#
+# Server instructions shown to the LLM at MCP initialization.
+# This is the FIRST thing an LLM sees. Make it count.
 # instructions: |
-#   Custom instructions for your project...
+#   Task graph for multi-agent coordination.
+#   Start: connect() -> list_tasks(ready=true) -> claim() -> work -> update(status="completed").
+#   Use get_skill("basics") for full documentation.
+#   Use get_skill("worker") or get_skill("coordinator") for role-specific guidance.
+#   Available workflows: solo, swarm, relay, hierarchical. Pass workflow="name" to connect().
 
 # Tool description overrides
+# These override the compiled-in descriptions and are always visible to the LLM.
+# Use them to add project-specific behavioral hints.
+#
 # tools:
-#   create_task:
-#     description: "Custom description for create_task tool"
+#   thinking:
+#     description: |
+#       Broadcast status + heartbeat. Call every 2-5 minutes while working.
+#       Silent agents get evicted after 5 minutes. Your thought is visible to
+#       coordinators and other agents for real-time coordination.
+#   mark_file:
+#     description: |
+#       Mark files BEFORE editing. Advisory lock that signals intent to other agents.
+#       Always mark all files upfront, not one at a time. Returns warnings if
+#       another agent has already marked the file -- coordinate or pick different work.
+#   claim:
+#     description: |
+#       Claim a task to start working on it. Sets status to working and starts the timer.
+#       After claiming: read attachments for context, mark_file() before editing,
+#       call thinking() regularly for heartbeat. Use list_tasks(ready=true) to find
+#       claimable tasks filtered by your tags.
+#   attach:
+#     description: |
+#       Add artifacts to a task. Use for: results, notes, commit hashes, test output,
+#       gate artifacts. Gate types (gate/tests, gate/commit, etc.) satisfy workflow gates.
+#       Use type="note" for general observations, type="result" for structured outcomes.

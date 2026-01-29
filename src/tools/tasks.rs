@@ -5,10 +5,10 @@ use super::{
     make_tool_with_prompts,
 };
 use crate::config::{
-    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, GateEnforcement, IdsConfig,
-    PhasesConfig, Prompts, StatesConfig, TagsConfig, UnknownKeyBehavior,
+    AppConfig, DependenciesConfig, GateEnforcement, Prompts, StatesConfig, UnknownKeyBehavior,
 };
 use crate::db::Database;
+use crate::db::tasks::{CreateTreeOptions, ListTasksQuery};
 use crate::error::ToolError;
 use crate::format::{
     OutputFormat, format_scan_result_markdown, format_task_markdown, format_tasks_markdown,
@@ -21,6 +21,14 @@ use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
 use tracing::warn;
+
+/// Options for the task update tool, grouping config references.
+pub struct UpdateOptions<'a> {
+    pub db: &'a Database,
+    pub config: &'a AppConfig,
+    /// Per-update workflow (may differ from config.workflows for per-worker workflows).
+    pub workflows: &'a crate::config::workflows::WorkflowsConfig,
+}
 
 pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
     // Generate state enum from config
@@ -372,14 +380,11 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
     ]
 }
 
-pub fn create(
-    db: &Database,
-    states_config: &StatesConfig,
-    phases_config: &PhasesConfig,
-    tags_config: &TagsConfig,
-    ids_config: &IdsConfig,
-    args: Value,
-) -> Result<Value> {
+pub fn create(db: &Database, config: &AppConfig, args: Value) -> Result<Value> {
+    let states_config = &config.states;
+    let phases_config = &config.phases;
+    let tags_config = &config.tags;
+    let ids_config = &config.ids;
     let id = get_string(&args, "id");
     let title = get_string(&args, "title");
     let description = get_string(&args, "description");
@@ -467,14 +472,11 @@ pub fn create(
     Ok(response)
 }
 
-pub fn create_tree(
-    db: &Database,
-    states_config: &StatesConfig,
-    phases_config: &PhasesConfig,
-    tags_config: &TagsConfig,
-    ids_config: &IdsConfig,
-    args: Value,
-) -> Result<Value> {
+pub fn create_tree(db: &Database, config: &AppConfig, args: Value) -> Result<Value> {
+    let states_config = &config.states;
+    let phases_config = &config.phases;
+    let tags_config = &config.tags;
+    let ids_config = &config.ids;
     let tree: TaskTreeInput = serde_json::from_value(
         args.get("tree")
             .cloned()
@@ -484,16 +486,17 @@ pub fn create_tree(
     let child_type = get_string(&args, "child_type");
     let sibling_type = get_string(&args, "sibling_type");
 
-    let (root_id, all_ids, phase_warnings, tag_warnings) = db.create_task_tree(
-        tree,
-        parent_id,
-        child_type,
-        sibling_type,
-        states_config,
-        phases_config,
-        tags_config,
-        ids_config,
-    )?;
+    let (root_id, all_ids, phase_warnings, tag_warnings) =
+        db.create_task_tree(CreateTreeOptions {
+            input: tree,
+            parent_id,
+            child_type,
+            sibling_type,
+            states_config,
+            phases_config,
+            tags_config,
+            ids_config,
+        })?;
 
     // Fetch the root task to return full details
     let root_task = db.get_task(&root_id)?.ok_or_else(|| {
@@ -707,16 +710,16 @@ pub fn list_tasks(
                 let status = status_vec
                     .as_ref()
                     .and_then(|v| v.first().map(|s| s.as_str()));
-                db.list_tasks(
+                db.list_tasks(ListTasksQuery {
                     status,
-                    phase.as_deref(),
-                    owner.as_deref(),
+                    phase: phase.as_deref(),
+                    owner: owner.as_deref(),
                     parent_id,
                     limit,
-                    0, // offset
-                    sort_by.as_deref(),
-                    sort_order.as_deref(),
-                )?
+                    offset: 0,
+                    sort_by: sort_by.as_deref(),
+                    sort_order: sort_order.as_deref(),
+                })?
             }
         };
 
@@ -756,17 +759,20 @@ pub fn list_tasks(
     }
 }
 
-pub fn update(
-    db: &Database,
-    attachments_config: &AttachmentsConfig,
-    states_config: &StatesConfig,
-    phases_config: &PhasesConfig,
-    deps_config: &DependenciesConfig,
-    auto_advance: &AutoAdvanceConfig,
-    tags_config: &TagsConfig,
-    workflows: &crate::config::workflows::WorkflowsConfig,
-    args: Value,
-) -> Result<Value> {
+pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
+    let UpdateOptions {
+        db,
+        config,
+        workflows,
+    } = opts;
+
+    let attachments_config = &config.attachments;
+    let states_config = &config.states;
+    let phases_config = &config.phases;
+    let deps_config = &config.deps;
+    let auto_advance = &config.auto_advance;
+    let tags_config = &config.tags;
+
     let worker_id =
         get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
@@ -971,7 +977,17 @@ pub fn update(
                             .collect();
 
                         if !force {
-                            // Cannot proceed without force flag
+                            // Cannot proceed without force flag - include actionable guidance
+                            let how_to_fix: Vec<String> = warn_gates
+                                .iter()
+                                .map(|g| {
+                                    let gate_type = g.split(" (").next().unwrap_or(g);
+                                    format!(
+                                        "  - attach(task=\"{}\", type=\"{}\", content=\"...\")",
+                                        task_id, gate_type
+                                    )
+                                })
+                                .collect();
                             return Err(ToolError::new(
                                 crate::error::ErrorCode::GatesNotSatisfied,
                                 format!(
@@ -979,6 +995,13 @@ pub fn update(
                                     current_task.status,
                                     warn_gates.join(", ")
                                 ),
+                            )
+                            .with_details(format!(
+                                "Satisfy these gates by attaching the required artifacts:\n{}\n\nOr pass force=true with a reason to skip warn-level gates.",
+                                how_to_fix.join("\n")
+                            ))
+                            .with_suggestion(
+                                "Attach the required gate artifacts and retry, or use update(..., force=true, reason=\"why skipping\") to proceed.".to_string(),
                             )
                             .into());
                         }
@@ -1050,6 +1073,16 @@ pub fn update(
                             .filter(|g| g.enforcement == GateEnforcement::Reject)
                             .map(|g| format!("{} ({})", g.gate_type, g.description))
                             .collect();
+                        let how_to_fix: Vec<String> = gate_names
+                            .iter()
+                            .map(|g| {
+                                let gate_type = g.split(" (").next().unwrap_or(g);
+                                format!(
+                                    "  - attach(task=\"{}\", type=\"{}\", content=\"...\")",
+                                    task_id, gate_type
+                                )
+                            })
+                            .collect();
                         return Err(ToolError::new(
                             crate::error::ErrorCode::GatesNotSatisfied,
                             format!(
@@ -1057,6 +1090,14 @@ pub fn update(
                                 current_phase,
                                 gate_names.join(", ")
                             ),
+                        )
+                        .with_details(format!(
+                            "These are reject-level gates and cannot be skipped. Satisfy them:\n{}",
+                            how_to_fix.join("\n")
+                        ))
+                        .with_suggestion(
+                            "Attach the required gate artifacts, then retry the phase transition."
+                                .to_string(),
                         )
                         .into());
                     }
@@ -1070,7 +1111,17 @@ pub fn update(
                             .collect();
 
                         if !force {
-                            // Cannot proceed without force flag
+                            // Cannot proceed without force flag - include actionable guidance
+                            let how_to_fix: Vec<String> = warn_gates
+                                .iter()
+                                .map(|g| {
+                                    let gate_type = g.split(" (").next().unwrap_or(g);
+                                    format!(
+                                        "  - attach(task=\"{}\", type=\"{}\", content=\"...\")",
+                                        task_id, gate_type
+                                    )
+                                })
+                                .collect();
                             return Err(ToolError::new(
                                     crate::error::ErrorCode::GatesNotSatisfied,
                                     format!(
@@ -1078,6 +1129,13 @@ pub fn update(
                                         current_phase,
                                         warn_gates.join(", ")
                                     ),
+                                )
+                                .with_details(format!(
+                                    "Satisfy these gates by attaching the required artifacts:\n{}\n\nOr pass force=true with a reason to skip warn-level gates.",
+                                    how_to_fix.join("\n")
+                                ))
+                                .with_suggestion(
+                                    "Attach the required gate artifacts and retry, or use update(..., force=true, reason=\"why skipping\") to proceed.".to_string(),
                                 )
                                 .into());
                         }
@@ -1171,20 +1229,38 @@ pub fn update(
         auto_advance,
     )?;
 
+    // Pre-fetch worker info for context-sensitive prompts (must outlive ctx)
+    let worker_info_for_prompts = db.get_worker(&worker_id).ok().flatten();
+    let worker_role_for_prompts = worker_info_for_prompts
+        .as_ref()
+        .map(|w| workflows.match_role(&w.tags))
+        .unwrap_or(None);
+
     // Get transition prompts if status or phase may have changed
     // We update the worker's last seen state and get any matching prompts
     let mut transition_prompt_list: Vec<String> = {
         // Update worker state and get old state for prompt calculation
         match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
             Ok((old_status, old_phase)) => {
-                // Create context for template expansion
-                let ctx = PromptContext::new(
+                // Create context with task and agent info for rich template expansion
+                let mut ctx = PromptContext::new(
                     &task.status,
                     task.phase.as_deref(),
                     states_config,
                     phases_config,
-                );
-                // Get prompts for this transition with template expansion
+                )
+                .with_task(&task.id, &task.title, task.priority, &task.tags);
+
+                // Add agent context if worker info is available
+                if let Some(ref worker) = worker_info_for_prompts {
+                    ctx = ctx.with_agent(
+                        &worker_id,
+                        worker_role_for_prompts.as_deref(),
+                        &worker.tags,
+                    );
+                }
+
+                // Get prompts for this transition with context-sensitive template expansion
                 crate::prompts::get_transition_prompts_with_context(
                     old_status.as_deref().unwrap_or(""),
                     old_phase.as_deref(),
@@ -1233,16 +1309,15 @@ pub fn update(
             map.insert("gate_warnings".to_string(), json!(gate_warnings));
         }
         // Add role-specific prompt based on the new status
-        if let Ok(Some(worker)) = db.get_worker(&worker_id)
-            && let Some(role_name) = workflows.match_role(&worker.tags)
-        {
+        // Uses pre-fetched worker info to avoid redundant DB lookups
+        if let Some(ref role_name) = worker_role_for_prompts {
             // Map status transitions to role prompt keys
             let prompt_key = match task.status.as_str() {
                 "completed" => Some("completing"),
                 _ => None,
             };
             if let Some(key) = prompt_key
-                && let Some(prompt) = workflows.get_role_prompt(&role_name, key)
+                && let Some(prompt) = workflows.get_role_prompt(role_name, key)
             {
                 transition_prompt_list.push(prompt.to_string());
             }

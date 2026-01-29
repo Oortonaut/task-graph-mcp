@@ -14,5 +14,6 @@ pub mod logging;
 pub mod paths;
 pub mod prompts;
 pub mod resources;
+pub mod subscriptions;
 pub mod tools;
 pub mod types;

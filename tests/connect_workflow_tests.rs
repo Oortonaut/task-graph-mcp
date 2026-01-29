@@ -5,32 +5,32 @@
 
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::Arc;
 use task_graph_mcp::config::workflows::WorkflowsConfig;
 use task_graph_mcp::config::{
-    DependenciesConfig, IdsConfig, PhasesConfig, ServerPaths, StatesConfig, TagsConfig,
+    AppConfig, AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig,
+    ServerPaths, StatesConfig, TagsConfig,
 };
 use task_graph_mcp::db::Database;
-use task_graph_mcp::tools::agents;
+use task_graph_mcp::tools::agents::{self, ConnectOptions};
 
 /// Helper to create a fresh in-memory database for testing.
 fn setup_db() -> Database {
     Database::open_in_memory().expect("Failed to create in-memory database")
 }
 
-/// Helper to create default configs for testing.
-fn default_configs() -> (
-    StatesConfig,
-    PhasesConfig,
-    DependenciesConfig,
-    TagsConfig,
-    IdsConfig,
-) {
-    (
-        StatesConfig::default(),
-        PhasesConfig::default(),
-        DependenciesConfig::default(),
-        TagsConfig::default(),
-        IdsConfig::default(),
+/// Helper to create a default AppConfig for testing.
+fn default_app_config() -> AppConfig {
+    let workflows = Arc::new(WorkflowsConfig::default());
+    AppConfig::new(
+        Arc::new(StatesConfig::default()),
+        Arc::new(PhasesConfig::default()),
+        Arc::new(DependenciesConfig::default()),
+        Arc::new(AutoAdvanceConfig::default()),
+        Arc::new(AttachmentsConfig::default()),
+        Arc::new(TagsConfig::default()),
+        Arc::new(IdsConfig::default()),
+        workflows,
     )
 }
 
@@ -48,17 +48,15 @@ fn test_server_paths() -> ServerPaths {
 fn connect_without_workflow_returns_null_workflow() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     let result = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "test-worker-no-workflow"
         }),
@@ -74,17 +72,15 @@ fn connect_without_workflow_returns_null_workflow() {
 fn connect_with_workflow_returns_workflow_in_response() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     let result = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "test-worker-with-workflow",
             "workflow": "swarm"
@@ -101,18 +97,16 @@ fn connect_with_workflow_returns_workflow_in_response() {
 fn connect_stores_workflow_in_database() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     // Connect with workflow
     agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "db-workflow-worker",
             "workflow": "coordinator"
@@ -133,18 +127,16 @@ fn connect_stores_workflow_in_database() {
 fn connect_stores_null_workflow_when_not_provided() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     // Connect without workflow
     agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "no-workflow-worker"
         }),
@@ -164,18 +156,16 @@ fn connect_stores_null_workflow_when_not_provided() {
 fn connect_with_force_updates_workflow() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     // First connect with workflow "alpha"
     let result1 = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "force-workflow-worker",
             "workflow": "alpha"
@@ -187,14 +177,12 @@ fn connect_with_force_updates_workflow() {
 
     // Reconnect with force=true and different workflow
     let result2 = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "force-workflow-worker",
             "workflow": "beta",
@@ -218,18 +206,16 @@ fn connect_with_force_updates_workflow() {
 fn connect_with_force_can_clear_workflow() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     // First connect with workflow
     agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "clear-workflow-worker",
             "workflow": "initial"
@@ -239,14 +225,12 @@ fn connect_with_force_can_clear_workflow() {
 
     // Reconnect with force but no workflow (should clear it)
     let result = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "clear-workflow-worker",
             "force": true
@@ -269,18 +253,16 @@ fn connect_with_force_can_clear_workflow() {
 fn connect_without_force_fails_for_existing_worker() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     // First connect
     agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "duplicate-worker",
             "workflow": "original"
@@ -290,14 +272,12 @@ fn connect_without_force_fails_for_existing_worker() {
 
     // Second connect without force should fail
     let result = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "duplicate-worker",
             "workflow": "different"
@@ -313,17 +293,15 @@ fn connect_without_force_fails_for_existing_worker() {
 fn connect_response_includes_all_expected_fields() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     let result = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "full-response-worker",
             "workflow": "test-workflow",
@@ -352,18 +330,16 @@ fn connect_response_includes_all_expected_fields() {
 fn connect_with_empty_workflow_string_stores_empty() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     // Connect with empty string workflow (not null/None)
     let result = agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "empty-workflow-worker",
             "workflow": ""
@@ -387,18 +363,16 @@ fn connect_with_empty_workflow_string_stores_empty() {
 fn list_workers_includes_workflow() {
     let db = setup_db();
     let server_paths = test_server_paths();
-    let (states, phases, deps, tags, ids) = default_configs();
+    let app_config = default_app_config();
 
     // Register workers with different workflows
     agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "worker-a",
             "workflow": "swarm"
@@ -407,14 +381,12 @@ fn list_workers_includes_workflow() {
     .expect("connect should succeed");
 
     agents::connect(
-        &db,
-        &server_paths,
-        &states,
-        &phases,
-        &deps,
-        &tags,
-        &ids,
-        &WorkflowsConfig::default(),
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
         json!({
             "worker_id": "worker-b"
         }),

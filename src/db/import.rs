@@ -12,10 +12,12 @@
 //!
 //! Rebuilds FTS indexes after import.
 
+use crate::config::IdsConfig;
 use crate::export::{CURRENT_SCHEMA_VERSION, Snapshot};
 use anyhow::{Context, Result, anyhow};
 use rusqlite::params;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use super::Database;
 
@@ -111,6 +113,10 @@ pub struct ImportResult {
     pub fts_rebuilt: bool,
     /// Any warnings encountered during import.
     pub warnings: Vec<String>,
+    /// ID remapping table (old_id -> new_id), populated when remap_ids is used.
+    pub id_remap: Option<HashMap<String, String>>,
+    /// Root task IDs that were attached to a parent (when parent_id option was used).
+    pub parent_linked_roots: Vec<String>,
 }
 
 impl ImportResult {
@@ -122,6 +128,8 @@ impl ImportResult {
             rows_skipped: std::collections::BTreeMap::new(),
             fts_rebuilt: false,
             warnings: Vec::new(),
+            id_remap: None,
+            parent_linked_roots: Vec::new(),
         }
     }
 
@@ -146,6 +154,14 @@ impl ImportResult {
 pub struct ImportOptions {
     /// Import mode (Fresh or Replace).
     pub mode: ImportMode,
+    /// Whether to remap all task IDs to fresh petname IDs.
+    /// When enabled, generates new IDs for every task and updates
+    /// all references (dependencies, attachments, tags, state history).
+    pub remap_ids: bool,
+    /// Optional parent task ID. When set, root tasks in the imported
+    /// snapshot (those with no incoming "contains" dependency) will be
+    /// attached to this parent via "contains" dependencies after import.
+    pub parent_id: Option<String>,
 }
 
 impl ImportOptions {
@@ -153,6 +169,8 @@ impl ImportOptions {
     pub fn fresh() -> Self {
         Self {
             mode: ImportMode::Fresh,
+            remap_ids: false,
+            parent_id: None,
         }
     }
 
@@ -160,6 +178,8 @@ impl ImportOptions {
     pub fn replace() -> Self {
         Self {
             mode: ImportMode::Replace,
+            remap_ids: false,
+            parent_id: None,
         }
     }
 
@@ -167,8 +187,217 @@ impl ImportOptions {
     pub fn merge() -> Self {
         Self {
             mode: ImportMode::Merge,
+            remap_ids: false,
+            parent_id: None,
         }
     }
+
+    /// Enable ID remapping on this options instance (builder pattern).
+    pub fn with_remap_ids(mut self) -> Self {
+        self.remap_ids = true;
+        self
+    }
+
+    /// Set parent task ID for attaching imported roots (builder pattern).
+    pub fn with_parent(mut self, parent_id: String) -> Self {
+        self.parent_id = Some(parent_id);
+        self
+    }
+}
+
+/// Generate a fresh petname ID for use in ID remapping.
+/// Uses the same approach as generate_task_id in db/tasks.rs.
+fn generate_remap_id(ids_config: &IdsConfig) -> String {
+    use petname::{Generator, Petnames};
+
+    let words = ids_config.task_id_words;
+    let case = ids_config.id_case;
+
+    let base = Petnames::medium()
+        .generate_one(words, "-")
+        .unwrap_or_else(|| format!("task-{}", chrono::Utc::now().timestamp_millis()));
+
+    case.convert(&base)
+}
+
+/// Remap all task IDs in a snapshot, generating fresh petname IDs for each task
+/// and updating all references (dependencies, attachments, tags, state history).
+///
+/// Returns a new snapshot with remapped IDs and the old->new ID mapping table.
+///
+/// # Arguments
+/// * `snapshot` - The original snapshot to remap
+/// * `ids_config` - ID generation configuration (word count, case style)
+///
+/// # Returns
+/// * `(Snapshot, HashMap<String, String>)` - The remapped snapshot and the old->new mapping
+pub fn remap_snapshot(
+    snapshot: &Snapshot,
+    ids_config: &IdsConfig,
+) -> Result<(Snapshot, HashMap<String, String>)> {
+    let mut remapped = snapshot.clone();
+    let mut id_map: HashMap<String, String> = HashMap::new();
+
+    // Phase 1: Build the old->new ID mapping from the tasks table.
+    // Generate a unique new ID for each task. If a collision occurs
+    // (extremely unlikely with petnames), retry.
+    if let Some(tasks) = snapshot.tables.get("tasks") {
+        let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for task_row in tasks {
+            if let Some(old_id) = task_row.get("id").and_then(|v| v.as_str()) {
+                let mut new_id = generate_remap_id(ids_config);
+                // Ensure uniqueness (retry on collision)
+                let mut attempts = 0;
+                while used_ids.contains(&new_id) {
+                    new_id = generate_remap_id(ids_config);
+                    attempts += 1;
+                    if attempts > 100 {
+                        return Err(anyhow!(
+                            "Failed to generate unique ID after 100 attempts. \
+                             Consider increasing ids.task_id_words in config."
+                        ));
+                    }
+                }
+                used_ids.insert(new_id.clone());
+                id_map.insert(old_id.to_string(), new_id);
+            }
+        }
+    }
+
+    // Helper closure: remap an ID field in a JSON object, returning the object unchanged
+    // if the old ID is not in the map (external reference).
+    let remap_field = |obj: &mut serde_json::Map<String, Value>, field: &str| {
+        if let Some(val) = obj.get(field) {
+            if let Some(old_id) = val.as_str() {
+                if let Some(new_id) = id_map.get(old_id) {
+                    obj.insert(field.to_string(), Value::String(new_id.clone()));
+                }
+                // If not in map, it's an external reference -- leave it unchanged
+            }
+        }
+    };
+
+    // Phase 2: Remap IDs in all tables.
+
+    // tasks: remap "id" field
+    if let Some(tasks) = remapped.tables.get_mut("tasks") {
+        for task_row in tasks.iter_mut() {
+            if let Some(obj) = task_row.as_object_mut() {
+                remap_field(obj, "id");
+            }
+        }
+    }
+
+    // dependencies: remap "from_task_id" and "to_task_id"
+    if let Some(deps) = remapped.tables.get_mut("dependencies") {
+        for dep_row in deps.iter_mut() {
+            if let Some(obj) = dep_row.as_object_mut() {
+                remap_field(obj, "from_task_id");
+                remap_field(obj, "to_task_id");
+            }
+        }
+    }
+
+    // attachments: remap "task_id"
+    if let Some(attachments) = remapped.tables.get_mut("attachments") {
+        for att_row in attachments.iter_mut() {
+            if let Some(obj) = att_row.as_object_mut() {
+                remap_field(obj, "task_id");
+            }
+        }
+    }
+
+    // task_tags: remap "task_id"
+    if let Some(tags) = remapped.tables.get_mut("task_tags") {
+        for tag_row in tags.iter_mut() {
+            if let Some(obj) = tag_row.as_object_mut() {
+                remap_field(obj, "task_id");
+            }
+        }
+    }
+
+    // task_needed_tags: remap "task_id"
+    if let Some(tags) = remapped.tables.get_mut("task_needed_tags") {
+        for tag_row in tags.iter_mut() {
+            if let Some(obj) = tag_row.as_object_mut() {
+                remap_field(obj, "task_id");
+            }
+        }
+    }
+
+    // task_wanted_tags: remap "task_id"
+    if let Some(tags) = remapped.tables.get_mut("task_wanted_tags") {
+        for tag_row in tags.iter_mut() {
+            if let Some(obj) = tag_row.as_object_mut() {
+                remap_field(obj, "task_id");
+            }
+        }
+    }
+
+    // task_sequence: remap "task_id"
+    if let Some(events) = remapped.tables.get_mut("task_sequence") {
+        for event_row in events.iter_mut() {
+            if let Some(obj) = event_row.as_object_mut() {
+                remap_field(obj, "task_id");
+            }
+        }
+    }
+
+    Ok((remapped, id_map))
+}
+
+/// Extract root task IDs from a snapshot.
+///
+/// Root tasks are those whose IDs do NOT appear as the `to_task_id` of any
+/// dependency with `dep_type = "contains"` within the snapshot. These are the
+/// top-level tasks that have no parent in the imported tree.
+///
+/// # Arguments
+/// * `snapshot` - The snapshot to analyze
+///
+/// # Returns
+/// A vector of task IDs that are root tasks in the snapshot.
+pub fn snapshot_root_task_ids(snapshot: &Snapshot) -> Vec<String> {
+    use std::collections::HashSet;
+
+    // Collect all task IDs from the snapshot
+    let all_task_ids: HashSet<String> = snapshot
+        .tables
+        .get("tasks")
+        .map(|tasks| {
+            tasks
+                .iter()
+                .filter_map(|row| row.get("id").and_then(|v| v.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Collect IDs that are children (targets of "contains" dependencies)
+    let child_ids: HashSet<String> = snapshot
+        .tables
+        .get("dependencies")
+        .map(|deps| {
+            deps.iter()
+                .filter_map(|row| {
+                    let dep_type = row.get("dep_type").and_then(|v| v.as_str())?;
+                    if dep_type == "contains" {
+                        row.get("to_task_id")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Root tasks = all tasks minus children
+    all_task_ids
+        .into_iter()
+        .filter(|id| !child_ids.contains(id))
+        .collect()
 }
 
 /// Tables in the order they should be imported (respecting foreign key constraints).
@@ -271,6 +500,32 @@ impl Database {
         // Rebuild FTS indexes
         self.rebuild_fts_indexes()?;
         result.fts_rebuilt = true;
+
+        // If a parent task ID is specified, attach root tasks from the snapshot
+        // under the parent with "contains" dependencies.
+        if let Some(ref parent_id) = options.parent_id {
+            // Verify parent task exists in the database
+            if !self.task_exists(parent_id)? {
+                return Err(anyhow!(
+                    "Parent task '{}' not found in database. Cannot attach imported roots.",
+                    parent_id
+                ));
+            }
+
+            let root_ids = snapshot_root_task_ids(snapshot);
+            if !root_ids.is_empty() {
+                self.with_conn(|conn| {
+                    for root_id in &root_ids {
+                        conn.execute(
+                            "INSERT OR IGNORE INTO dependencies (from_task_id, to_task_id, dep_type) VALUES (?1, ?2, ?3)",
+                            params![parent_id, root_id, "contains"],
+                        )?;
+                    }
+                    Ok(())
+                })?;
+                result.parent_linked_roots = root_ids;
+            }
+        }
 
         Ok(result)
     }
@@ -2633,5 +2888,633 @@ mod tests {
         assert_eq!(result.total_would_delete(), 8);
         assert_eq!(result.total_would_insert(), 2);
         assert_eq!(result.total_would_skip(), 1);
+    }
+
+    // ============================================================================
+    // ID remapping tests
+    // ============================================================================
+
+    #[test]
+    fn test_remap_snapshot_generates_new_ids() {
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({
+                    "id": "old-task-1",
+                    "title": "Task 1",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+                    "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+                json!({
+                    "id": "old-task-2",
+                    "title": "Task 2",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+                    "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+            ],
+        );
+
+        let ids_config = IdsConfig::default();
+        let (remapped, id_map) = remap_snapshot(&snapshot, &ids_config).unwrap();
+
+        // Should have 2 entries in the mapping
+        assert_eq!(id_map.len(), 2);
+        assert!(id_map.contains_key("old-task-1"));
+        assert!(id_map.contains_key("old-task-2"));
+
+        // New IDs should be different from old IDs
+        assert_ne!(id_map["old-task-1"], "old-task-1");
+        assert_ne!(id_map["old-task-2"], "old-task-2");
+
+        // New IDs should be unique
+        assert_ne!(id_map["old-task-1"], id_map["old-task-2"]);
+
+        // Remapped snapshot tasks should have the new IDs
+        let tasks = remapped.tables.get("tasks").unwrap();
+        let task1_id = tasks[0].get("id").unwrap().as_str().unwrap();
+        let task2_id = tasks[1].get("id").unwrap().as_str().unwrap();
+        assert_eq!(task1_id, id_map["old-task-1"]);
+        assert_eq!(task2_id, id_map["old-task-2"]);
+    }
+
+    #[test]
+    fn test_remap_snapshot_remaps_dependencies() {
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({
+                    "id": "parent",
+                    "title": "Parent",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+                    "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+                json!({
+                    "id": "child",
+                    "title": "Child",
+                    "description": null,
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+                    "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+            ],
+        );
+
+        // Add a contains dependency (parent -> child) and a blocks dependency
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            vec![
+                json!({
+                    "from_task_id": "parent",
+                    "to_task_id": "child",
+                    "dep_type": "contains"
+                }),
+                json!({
+                    "from_task_id": "child",
+                    "to_task_id": "parent",
+                    "dep_type": "blocks"
+                }),
+            ],
+        );
+
+        let ids_config = IdsConfig::default();
+        let (remapped, id_map) = remap_snapshot(&snapshot, &ids_config).unwrap();
+
+        let new_parent = &id_map["parent"];
+        let new_child = &id_map["child"];
+
+        // Verify dependencies reference the new IDs
+        let deps = remapped.tables.get("dependencies").unwrap();
+        assert_eq!(deps.len(), 2);
+
+        let dep0 = deps[0].as_object().unwrap();
+        assert_eq!(dep0["from_task_id"].as_str().unwrap(), new_parent.as_str());
+        assert_eq!(dep0["to_task_id"].as_str().unwrap(), new_child.as_str());
+        assert_eq!(dep0["dep_type"].as_str().unwrap(), "contains");
+
+        let dep1 = deps[1].as_object().unwrap();
+        assert_eq!(dep1["from_task_id"].as_str().unwrap(), new_child.as_str());
+        assert_eq!(dep1["to_task_id"].as_str().unwrap(), new_parent.as_str());
+        assert_eq!(dep1["dep_type"].as_str().unwrap(), "blocks");
+    }
+
+    #[test]
+    fn test_remap_snapshot_remaps_attachments_and_tags() {
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![json!({
+                "id": "my-task",
+                "title": "My Task",
+                "description": null,
+                "status": "pending",
+                "priority": "5",
+                "worker_id": null,
+                "claimed_at": null,
+                "needed_tags": null,
+                "wanted_tags": null,
+                "tags": "[]",
+                "points": null,
+                "time_estimate_ms": null,
+                "time_actual_ms": null,
+                "started_at": null,
+                "completed_at": null,
+                "current_thought": null,
+                "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+                "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+                "cost_usd": 0.0,
+                "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+                "created_at": 1700000000000_i64,
+                "updated_at": 1700000000000_i64
+            })],
+        );
+        snapshot.tables.insert(
+            "attachments".to_string(),
+            vec![json!({
+                "task_id": "my-task",
+                "attachment_type": "note",
+                "sequence": 1,
+                "name": "test-note",
+                "mime_type": "text/plain",
+                "content": "Hello world",
+                "file_path": null,
+                "created_at": 1700000000000_i64
+            })],
+        );
+        snapshot.tables.insert(
+            "task_tags".to_string(),
+            vec![json!({
+                "task_id": "my-task",
+                "tag": "rust"
+            })],
+        );
+        snapshot.tables.insert(
+            "task_needed_tags".to_string(),
+            vec![json!({
+                "task_id": "my-task",
+                "tag": "implementer"
+            })],
+        );
+        snapshot.tables.insert(
+            "task_wanted_tags".to_string(),
+            vec![json!({
+                "task_id": "my-task",
+                "tag": "code"
+            })],
+        );
+        snapshot.tables.insert(
+            "task_sequence".to_string(),
+            vec![json!({
+                "id": 1,
+                "task_id": "my-task",
+                "worker_id": null,
+                "status": "pending",
+                "phase": null,
+                "reason": null,
+                "timestamp": 1700000000000_i64,
+                "end_timestamp": null
+            })],
+        );
+
+        let ids_config = IdsConfig::default();
+        let (remapped, id_map) = remap_snapshot(&snapshot, &ids_config).unwrap();
+        let new_id = &id_map["my-task"];
+
+        // Attachments should use new task_id
+        let atts = remapped.tables.get("attachments").unwrap();
+        assert_eq!(atts[0]["task_id"].as_str().unwrap(), new_id.as_str());
+
+        // Tags should use new task_id
+        let tags = remapped.tables.get("task_tags").unwrap();
+        assert_eq!(tags[0]["task_id"].as_str().unwrap(), new_id.as_str());
+
+        let needed = remapped.tables.get("task_needed_tags").unwrap();
+        assert_eq!(needed[0]["task_id"].as_str().unwrap(), new_id.as_str());
+
+        let wanted = remapped.tables.get("task_wanted_tags").unwrap();
+        assert_eq!(wanted[0]["task_id"].as_str().unwrap(), new_id.as_str());
+
+        // State history should use new task_id
+        let events = remapped.tables.get("task_sequence").unwrap();
+        assert_eq!(events[0]["task_id"].as_str().unwrap(), new_id.as_str());
+    }
+
+    #[test]
+    fn test_remap_snapshot_empty() {
+        // Empty snapshot should produce empty mapping
+        let snapshot = Snapshot::new();
+        let ids_config = IdsConfig::default();
+        let (remapped, id_map) = remap_snapshot(&snapshot, &ids_config).unwrap();
+
+        assert!(id_map.is_empty());
+        assert!(remapped.tables.is_empty());
+    }
+
+    #[test]
+    fn test_remap_import_round_trip() {
+        // Test that a remapped snapshot can be imported successfully
+        let db = Database::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::new();
+
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({
+                    "id": "task-alpha",
+                    "title": "Alpha Task",
+                    "description": "First task",
+                    "status": "pending",
+                    "priority": "5",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+                    "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+                json!({
+                    "id": "task-beta",
+                    "title": "Beta Task",
+                    "description": "Second task",
+                    "status": "pending",
+                    "priority": "3",
+                    "worker_id": null,
+                    "claimed_at": null,
+                    "needed_tags": null,
+                    "wanted_tags": null,
+                    "tags": "[]",
+                    "points": null,
+                    "time_estimate_ms": null,
+                    "time_actual_ms": null,
+                    "started_at": null,
+                    "completed_at": null,
+                    "current_thought": null,
+                    "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+                    "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+                    "cost_usd": 0.0,
+                    "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+                    "created_at": 1700000000000_i64,
+                    "updated_at": 1700000000000_i64
+                }),
+            ],
+        );
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            vec![json!({
+                "from_task_id": "task-alpha",
+                "to_task_id": "task-beta",
+                "dep_type": "contains"
+            })],
+        );
+
+        // Remap IDs
+        let ids_config = IdsConfig::default();
+        let (remapped, id_map) = remap_snapshot(&snapshot, &ids_config).unwrap();
+
+        // Import the remapped snapshot
+        let options = ImportOptions::fresh();
+        let result = db.import_snapshot(&remapped, &options).unwrap();
+
+        assert_eq!(result.rows_imported.get("tasks"), Some(&2));
+        assert_eq!(result.rows_imported.get("dependencies"), Some(&1));
+
+        // Verify tasks exist with new IDs
+        let new_alpha = &id_map["task-alpha"];
+        let new_beta = &id_map["task-beta"];
+
+        // Search for the tasks in the database
+        let alpha_results = db.search_tasks("Alpha", None, 0, false, None).unwrap();
+        assert_eq!(alpha_results.len(), 1);
+        assert_eq!(alpha_results[0].task_id, *new_alpha);
+
+        let beta_results = db.search_tasks("Beta", None, 0, false, None).unwrap();
+        assert_eq!(beta_results.len(), 1);
+        assert_eq!(beta_results[0].task_id, *new_beta);
+    }
+
+    // ============================================================================
+    // Parent attachment tests
+    // ============================================================================
+
+    #[test]
+    fn test_snapshot_root_task_ids_all_roots() {
+        // Snapshot with two tasks and no "contains" deps: both are roots
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({"id": "a", "title": "A"}),
+                json!({"id": "b", "title": "B"}),
+            ],
+        );
+        let roots = snapshot_root_task_ids(&snapshot);
+        assert_eq!(roots.len(), 2);
+        assert!(roots.contains(&"a".to_string()));
+        assert!(roots.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn test_snapshot_root_task_ids_with_contains() {
+        // "a" contains "b" -> only "a" is a root
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({"id": "a", "title": "A"}),
+                json!({"id": "b", "title": "B"}),
+            ],
+        );
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            vec![json!({"from_task_id": "a", "to_task_id": "b", "dep_type": "contains"})],
+        );
+        let roots = snapshot_root_task_ids(&snapshot);
+        assert_eq!(roots.len(), 1);
+        assert!(roots.contains(&"a".to_string()));
+    }
+
+    #[test]
+    fn test_snapshot_root_task_ids_non_contains_dep_ignored() {
+        // "a" blocks "b" -> both are roots (only "contains" matters)
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                json!({"id": "a", "title": "A"}),
+                json!({"id": "b", "title": "B"}),
+            ],
+        );
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            vec![json!({"from_task_id": "a", "to_task_id": "b", "dep_type": "blocks"})],
+        );
+        let roots = snapshot_root_task_ids(&snapshot);
+        assert_eq!(roots.len(), 2);
+    }
+
+    #[test]
+    fn test_snapshot_root_task_ids_empty_snapshot() {
+        let snapshot = Snapshot::new();
+        let roots = snapshot_root_task_ids(&snapshot);
+        assert!(roots.is_empty());
+    }
+
+    /// Helper to create a full task JSON value for import tests.
+    fn make_task_json(id: &str, title: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "title": title,
+            "description": "",
+            "status": "pending",
+            "priority": "5",
+            "worker_id": null,
+            "claimed_at": null,
+            "needed_tags": null,
+            "wanted_tags": null,
+            "tags": "[]",
+            "points": null,
+            "time_estimate_ms": null,
+            "time_actual_ms": null,
+            "started_at": null,
+            "completed_at": null,
+            "current_thought": null,
+            "metric_0": 0, "metric_1": 0, "metric_2": 0, "metric_3": 0,
+            "metric_4": 0, "metric_5": 0, "metric_6": 0, "metric_7": 0,
+            "cost_usd": 0.0,
+            "deleted_at": null, "deleted_by": null, "deleted_reason": null,
+            "created_at": 1700000000000_i64,
+            "updated_at": 1700000000000_i64
+        })
+    }
+
+    #[test]
+    fn test_import_with_parent_attaches_root_tasks() {
+        use crate::config::StatesConfig;
+
+        let db = Database::open_in_memory().unwrap();
+
+        // Pre-create the parent task in the database
+        db.create_task(
+            Some("parent-task".to_string()),
+            "Parent".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &StatesConfig::default(),
+            &IdsConfig::default(),
+        )
+        .unwrap();
+
+        // Create snapshot with two root tasks and one child
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![
+                make_task_json("root-a", "Root A"),
+                make_task_json("root-b", "Root B"),
+                make_task_json("child-c", "Child C"),
+            ],
+        );
+        snapshot.tables.insert(
+            "dependencies".to_string(),
+            vec![
+                json!({"from_task_id": "root-a", "to_task_id": "child-c", "dep_type": "contains"}),
+            ],
+        );
+
+        // Import with parent -- use merge mode since parent task already exists in DB
+        let options = ImportOptions::merge().with_parent("parent-task".to_string());
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // Verify root tasks were linked
+        assert_eq!(result.parent_linked_roots.len(), 2);
+        assert!(result.parent_linked_roots.contains(&"root-a".to_string()));
+        assert!(result.parent_linked_roots.contains(&"root-b".to_string()));
+        // child-c should NOT be in roots (it has a contains parent)
+        assert!(!result.parent_linked_roots.contains(&"child-c".to_string()));
+
+        // Verify "contains" dependencies exist in DB
+        let parent_a = db.get_parent("root-a").unwrap();
+        assert_eq!(parent_a, Some("parent-task".to_string()));
+
+        let parent_b = db.get_parent("root-b").unwrap();
+        assert_eq!(parent_b, Some("parent-task".to_string()));
+
+        // child-c should have root-a as parent (from the snapshot)
+        let parent_c = db.get_parent("child-c").unwrap();
+        assert_eq!(parent_c, Some("root-a".to_string()));
+    }
+
+    #[test]
+    fn test_import_with_parent_not_found_fails() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![make_task_json("task-x", "Task X")],
+        );
+
+        // Import with nonexistent parent
+        let options = ImportOptions::fresh().with_parent("nonexistent".to_string());
+        let result = db.import_snapshot(&snapshot, &options);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not found"),
+            "Expected 'not found' in: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_import_without_parent_does_not_link() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut snapshot = Snapshot::new();
+        snapshot.tables.insert(
+            "tasks".to_string(),
+            vec![make_task_json("task-y", "Task Y")],
+        );
+
+        // Import without parent
+        let options = ImportOptions::fresh();
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        assert!(result.parent_linked_roots.is_empty());
+
+        // Verify no parent exists
+        let parent = db.get_parent("task-y").unwrap();
+        assert_eq!(parent, None);
+    }
+
+    #[test]
+    fn test_import_with_parent_and_empty_snapshot() {
+        use crate::config::StatesConfig;
+
+        let db = Database::open_in_memory().unwrap();
+
+        // Pre-create the parent task
+        db.create_task(
+            Some("parent-task".to_string()),
+            "Parent".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &StatesConfig::default(),
+            &IdsConfig::default(),
+        )
+        .unwrap();
+
+        // Import empty snapshot with parent -- use merge since parent already exists
+        let snapshot = Snapshot::new();
+        let options = ImportOptions::merge().with_parent("parent-task".to_string());
+        let result = db.import_snapshot(&snapshot, &options).unwrap();
+
+        // No roots to link
+        assert!(result.parent_linked_roots.is_empty());
+    }
+
+    #[test]
+    fn test_import_options_with_parent_builder() {
+        let options = ImportOptions::merge().with_parent("my-parent".to_string());
+        assert_eq!(options.mode, ImportMode::Merge);
+        assert_eq!(options.parent_id, Some("my-parent".to_string()));
+        assert!(!options.remap_ids);
     }
 }

@@ -17,10 +17,7 @@ pub mod workflows;
 
 pub use context::ToolContext;
 
-use crate::config::{
-    AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, Prompts,
-    ServerPaths, StatesConfig, TagsConfig, workflows::WorkflowsConfig,
-};
+use crate::config::{AppConfig, Prompts, ServerPaths, workflows::WorkflowsConfig};
 use crate::db::Database;
 use crate::error::ToolError;
 use crate::format::{OutputFormat, ToolResult};
@@ -37,36 +34,21 @@ pub struct ToolHandler {
     pub skills_dir: PathBuf,
     pub server_paths: Arc<ServerPaths>,
     pub prompts: Arc<Prompts>,
-    pub states_config: Arc<StatesConfig>,
-    pub phases_config: Arc<PhasesConfig>,
-    pub deps_config: Arc<DependenciesConfig>,
-    pub auto_advance: Arc<AutoAdvanceConfig>,
-    pub attachments_config: Arc<AttachmentsConfig>,
-    pub tags_config: Arc<TagsConfig>,
-    pub ids_config: Arc<IdsConfig>,
-    /// Workflow config with named_workflows cache for per-worker selection
-    pub workflows: Arc<WorkflowsConfig>,
+    /// Consolidated application configuration.
+    pub config: AppConfig,
     pub default_format: OutputFormat,
     pub default_page_size: i32,
     pub path_mapper: Arc<crate::paths::PathMapper>,
 }
 
 impl ToolHandler {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Arc<Database>,
         media_dir: PathBuf,
         skills_dir: PathBuf,
         server_paths: Arc<ServerPaths>,
         prompts: Arc<Prompts>,
-        states_config: Arc<StatesConfig>,
-        phases_config: Arc<PhasesConfig>,
-        deps_config: Arc<DependenciesConfig>,
-        auto_advance: Arc<AutoAdvanceConfig>,
-        attachments_config: Arc<AttachmentsConfig>,
-        tags_config: Arc<TagsConfig>,
-        ids_config: Arc<IdsConfig>,
-        workflows: Arc<WorkflowsConfig>,
+        config: AppConfig,
         default_format: OutputFormat,
         default_page_size: i32,
         path_mapper: Arc<crate::paths::PathMapper>,
@@ -77,14 +59,7 @@ impl ToolHandler {
             skills_dir,
             server_paths,
             prompts,
-            states_config,
-            phases_config,
-            deps_config,
-            auto_advance,
-            attachments_config,
-            tags_config,
-            ids_config,
-            workflows,
+            config,
             default_format,
             default_page_size,
             path_mapper,
@@ -100,15 +75,15 @@ impl ToolHandler {
             && let Some(ref workflow_name) = worker.workflow
         {
             // Try to get from named_workflows cache
-            if let Some(workflow_config) = self.workflows.get_named_workflow(workflow_name) {
+            if let Some(workflow_config) = self.config.workflows.get_named_workflow(workflow_name) {
                 return Arc::clone(workflow_config);
             }
         }
         // Fall back to configured default workflow, or base config
-        if let Some(default_workflow) = self.workflows.get_default_workflow() {
+        if let Some(default_workflow) = self.config.workflows.get_default_workflow() {
             Arc::clone(default_workflow)
         } else {
-            Arc::clone(&self.workflows)
+            Arc::clone(&self.config.workflows)
         }
     }
 
@@ -120,16 +95,16 @@ impl ToolHandler {
         tools.extend(agents::get_tools(&self.prompts));
 
         // Task tools (with dynamic state schema)
-        tools.extend(tasks::get_tools(&self.prompts, &self.states_config));
+        tools.extend(tasks::get_tools(&self.prompts, &self.config.states));
 
         // Tracking tools
-        tools.extend(tracking::get_tools(&self.prompts, &self.states_config));
+        tools.extend(tracking::get_tools(&self.prompts, &self.config.states));
 
         // Dependency tools
-        tools.extend(deps::get_tools(&self.prompts, &self.deps_config));
+        tools.extend(deps::get_tools(&self.prompts, &self.config.deps));
 
         // Claiming tools (with dynamic state schema)
-        tools.extend(claiming::get_tools(&self.prompts, &self.states_config));
+        tools.extend(claiming::get_tools(&self.prompts, &self.config.states));
 
         // File coordination tools
         tools.extend(files::get_tools(&self.prompts));
@@ -176,57 +151,46 @@ impl ToolHandler {
                 let workflow = arguments
                     .get("workflow")
                     .and_then(|v| v.as_str())
-                    .and_then(|name| self.workflows.get_named_workflow(name))
+                    .and_then(|name| self.config.workflows.get_named_workflow(name))
                     .map(|w| Arc::clone(w))
-                    .or_else(|| self.workflows.get_default_workflow().map(|w| Arc::clone(w)))
-                    .unwrap_or_else(|| Arc::clone(&self.workflows));
+                    .or_else(|| {
+                        self.config
+                            .workflows
+                            .get_default_workflow()
+                            .map(|w| Arc::clone(w))
+                    })
+                    .unwrap_or_else(|| Arc::clone(&self.config.workflows));
                 json(agents::connect(
-                    &self.db,
-                    &self.server_paths,
-                    &self.states_config,
-                    &self.phases_config,
-                    &self.deps_config,
-                    &self.tags_config,
-                    &self.ids_config,
-                    &workflow,
+                    agents::ConnectOptions {
+                        db: &self.db,
+                        server_paths: &self.server_paths,
+                        config: &self.config,
+                        workflows: &workflow,
+                    },
                     arguments,
                 ))
             }
-            "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
+            "disconnect" => json(agents::disconnect(&self.db, &self.config.states, arguments)),
             "list_agents" => agents::list_agents(
                 &self.db,
-                &self.states_config,
+                &self.config.states,
                 self.default_format,
                 arguments,
             ),
             "cleanup_stale" => json(agents::cleanup_stale(
                 &self.db,
-                &self.states_config,
+                &self.config.states,
                 arguments,
             )),
 
             // Task tools
-            "create" => json(tasks::create(
-                &self.db,
-                &self.states_config,
-                &self.phases_config,
-                &self.tags_config,
-                &self.ids_config,
-                arguments,
-            )),
-            "create_tree" => json(tasks::create_tree(
-                &self.db,
-                &self.states_config,
-                &self.phases_config,
-                &self.tags_config,
-                &self.ids_config,
-                arguments,
-            )),
+            "create" => json(tasks::create(&self.db, &self.config, arguments)),
+            "create_tree" => json(tasks::create_tree(&self.db, &self.config, arguments)),
             "get" => json(tasks::get(&self.db, self.default_format, arguments)),
             "list_tasks" => json(tasks::list_tasks(
                 &self.db,
-                &self.states_config,
-                &self.deps_config,
+                &self.config.states,
+                &self.config.deps,
                 self.default_format,
                 arguments,
             )),
@@ -238,14 +202,11 @@ impl ToolHandler {
                     .unwrap_or("");
                 let workflow = self.get_workflow_for_worker(worker_id);
                 json(tasks::update(
-                    &self.db,
-                    &self.attachments_config,
-                    &self.states_config,
-                    &self.phases_config,
-                    &self.deps_config,
-                    &self.auto_advance,
-                    &self.tags_config,
-                    &workflow,
+                    tasks::UpdateOptions {
+                        db: &self.db,
+                        config: &self.config,
+                        workflows: &workflow,
+                    },
                     arguments,
                 ))
             }
@@ -257,7 +218,7 @@ impl ToolHandler {
             "thinking" => json(tracking::thinking(&self.db, arguments)),
             "task_history" => json(tracking::task_history(
                 &self.db,
-                &self.states_config,
+                &self.config.states,
                 self.default_format,
                 arguments,
             )),
@@ -270,9 +231,9 @@ impl ToolHandler {
             )),
 
             // Dependency tools
-            "link" => json(deps::link(&self.db, &self.deps_config, arguments)),
+            "link" => json(deps::link(&self.db, &self.config.deps, arguments)),
             "unlink" => json(deps::unlink(&self.db, arguments)),
-            "relink" => json(deps::relink(&self.db, &self.deps_config, arguments)),
+            "relink" => json(deps::relink(&self.db, &self.config.deps, arguments)),
 
             // Claiming tools
             "claim" => {
@@ -284,10 +245,7 @@ impl ToolHandler {
                 let workflow = self.get_workflow_for_worker(worker_id);
                 json(claiming::claim(
                     &self.db,
-                    &self.states_config,
-                    &self.phases_config,
-                    &self.deps_config,
-                    &self.auto_advance,
+                    &self.config,
                     &workflow,
                     arguments,
                 ))
@@ -305,7 +263,7 @@ impl ToolHandler {
             "attach" => json(attachments::attach(
                 &self.db,
                 &self.media_dir,
-                &self.attachments_config,
+                &self.config.attachments,
                 arguments,
             )),
             "attachments" => json(attachments::attachments(
@@ -334,11 +292,15 @@ impl ToolHandler {
             "check_gates" => {
                 // Look up worker's workflow for gate definitions
                 // Since check_gates doesn't require worker_id, use base workflow
-                json(gates::check_gates(&self.db, &self.workflows, arguments))
+                json(gates::check_gates(
+                    &self.db,
+                    &self.config.workflows,
+                    arguments,
+                ))
             }
 
             // Workflow discovery tools (no connection required)
-            "list_workflows" => json(workflows::list_workflows(&self.workflows)),
+            "list_workflows" => json(workflows::list_workflows(&self.config.workflows)),
 
             _ => Err(ToolError::unknown_tool(name).into()),
         }

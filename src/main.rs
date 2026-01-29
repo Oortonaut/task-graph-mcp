@@ -11,7 +11,9 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, Content, InitializeResult,
         ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
+        ReadResourceRequestParams, ReadResourceResult, ResourceContents,
+        ResourceUpdatedNotificationParam, ServerCapabilities, SubscribeRequestParams,
+        UnsubscribeRequestParams,
     },
     service::RequestContext,
     transport::io::stdio,
@@ -26,8 +28,7 @@ use task_graph_mcp::cli::export::ExportArgs;
 use task_graph_mcp::cli::import::ImportArgs;
 use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode, migrate};
 use task_graph_mcp::config::{
-    AttachmentsConfig, AutoAdvanceConfig, Config, ConfigLoader, DependenciesConfig, IdsConfig,
-    PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig, UiMode,
+    AppConfig, Config, ConfigLoader, PhasesConfig, Prompts, ServerPaths, StatesConfig, UiMode,
     watcher::{WatchPaths, WatcherConfig, start_config_watcher},
     workflows::WorkflowsConfig,
 };
@@ -41,9 +42,23 @@ use task_graph_mcp::export::{CURRENT_SCHEMA_VERSION, Snapshot};
 use task_graph_mcp::format::OutputFormat;
 use task_graph_mcp::logging::{LogLevelFilter, Logger};
 use task_graph_mcp::resources::ResourceHandler;
+use task_graph_mcp::subscriptions::{MutationKind, SubscriptionManager};
 use task_graph_mcp::tools::{ToolContext, ToolHandler};
-use tracing::{Level, info, warn};
+use tracing::{Level, debug, info, warn};
 use tracing_subscriber::FmtSubscriber;
+
+/// Auto-discover the docs directory.
+///
+/// Looks for a `docs/` directory in the current working directory.
+/// Returns `None` if no docs directory is found.
+fn discover_docs_dir() -> Option<std::path::PathBuf> {
+    let docs_path = std::path::PathBuf::from("docs");
+    if docs_path.exists() && docs_path.is_dir() {
+        Some(docs_path)
+    } else {
+        None
+    }
+}
 
 /// MCP server handler.
 ///
@@ -57,24 +72,19 @@ struct TaskGraphServer {
     prompts: Arc<ArcSwap<Prompts>>,
     /// Atomic level filter for logging (client can adjust via logging/setLevel).
     level_filter: Arc<LogLevelFilter>,
+    /// Tracks which resource URIs the client has subscribed to for update
+    /// notifications, enabling interrupt-style coordination instead of polling.
+    subscriptions: Arc<SubscriptionManager>,
 }
 
 impl TaskGraphServer {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         db: Arc<Database>,
         media_dir: std::path::PathBuf,
         skills_dir: std::path::PathBuf,
         server_paths: Arc<ServerPaths>,
         prompts: Arc<Prompts>,
-        states_config: Arc<StatesConfig>,
-        phases_config: Arc<PhasesConfig>,
-        deps_config: Arc<DependenciesConfig>,
-        auto_advance: Arc<AutoAdvanceConfig>,
-        attachments_config: Arc<AttachmentsConfig>,
-        tags_config: Arc<TagsConfig>,
-        ids_config: Arc<IdsConfig>,
-        workflows: Arc<WorkflowsConfig>,
+        app_config: AppConfig,
         default_format: OutputFormat,
         default_page_size: i32,
         path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
@@ -86,35 +96,25 @@ impl TaskGraphServer {
             skills_dir.clone(),
             server_paths,
             Arc::clone(&prompts),
-            Arc::clone(&states_config),
-            Arc::clone(&phases_config),
-            Arc::clone(&deps_config),
-            Arc::clone(&auto_advance),
-            Arc::clone(&attachments_config),
-            Arc::clone(&tags_config),
-            ids_config,
-            Arc::clone(&workflows),
+            app_config.clone(),
             default_format,
             default_page_size,
             path_mapper,
         ));
-        let resource_handler = Arc::new(
-            ResourceHandler::new(
-                db,
-                states_config,
-                phases_config,
-                deps_config,
-                tags_config,
-                workflows,
-            )
-            .with_skills_dir(skills_dir),
-        );
+        // Auto-discover docs directory
+        let docs_dir = discover_docs_dir();
+        let mut resource_handler = ResourceHandler::new(db, app_config).with_skills_dir(skills_dir);
+        if let Some(ref dir) = docs_dir {
+            resource_handler = resource_handler.with_docs_dir(dir.clone());
+        }
+        let resource_handler = Arc::new(resource_handler);
 
         Self {
             tool_handler: Arc::new(ArcSwap::from(tool_handler)),
             resource_handler: Arc::new(ArcSwap::from(resource_handler)),
             prompts: Arc::new(ArcSwap::from(prompts)),
             level_filter,
+            subscriptions: Arc::new(SubscriptionManager::new()),
         }
     }
 }
@@ -142,7 +142,7 @@ impl ServerHandler for TaskGraphServer {
             capabilities: ServerCapabilities {
                 tools: Some(rmcp::model::ToolsCapability::default()),
                 resources: Some(rmcp::model::ResourcesCapability {
-                    subscribe: None,
+                    subscribe: Some(Default::default()),
                     list_changed: None,
                 }),
                 logging: Some(Default::default()),
@@ -159,6 +159,36 @@ impl ServerHandler for TaskGraphServer {
     ) -> std::result::Result<(), ErrorData> {
         self.level_filter.set(request.level);
         tracing::info!(level = ?request.level, "Logging level updated via MCP");
+        Ok(())
+    }
+
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<(), ErrorData> {
+        let uri = request.uri;
+        let is_new = self.subscriptions.subscribe(&uri);
+        if is_new {
+            info!(uri = %uri, "Client subscribed to resource");
+        } else {
+            debug!(uri = %uri, "Client re-subscribed to resource (already subscribed)");
+        }
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<(), ErrorData> {
+        let uri = request.uri;
+        let was_present = self.subscriptions.unsubscribe(&uri);
+        if was_present {
+            info!(uri = %uri, "Client unsubscribed from resource");
+        } else {
+            debug!(uri = %uri, "Client unsubscribed from resource (was not subscribed)");
+        }
         Ok(())
     }
 
@@ -180,32 +210,79 @@ impl ServerHandler for TaskGraphServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        let tool_name = request.name.clone();
+        let start = std::time::Instant::now();
+
         // Create logger for this request
         let logger = Logger::new()
             .with_peer(context.peer.clone())
             .with_level_filter(Arc::clone(&self.level_filter))
-            .with_name(format!("tool:{}", request.name));
+            .with_name(format!("tool:{}", tool_name));
         let tool_ctx = ToolContext::new(logger);
 
         let handler = self.tool_handler.load();
         let args = Value::Object(request.arguments.unwrap_or_default());
-        match handler.call_tool(&request.name, args, &tool_ctx).await {
-            Ok(result) => Ok(CallToolResult {
-                content: vec![Content::text(result.into_string())],
-                is_error: None,
-                meta: None,
-                structured_content: None,
-            }),
+        match handler.call_tool(&tool_name, args, &tool_ctx).await {
+            Ok(result) => {
+                let elapsed = start.elapsed();
+                debug!(tool = %tool_name, duration_ms = elapsed.as_millis() as u64, "Tool call succeeded");
+
+                // Notify subscribed resources about mutations from this tool call.
+                // Only send notifications if the client has any active subscriptions
+                // to avoid unnecessary work.
+                if self.subscriptions.has_subscriptions() {
+                    let mutations = mutations_for_tool(&tool_name);
+                    if !mutations.is_empty() {
+                        let affected = self.subscriptions.affected_subscriptions(&mutations);
+                        if !affected.is_empty() {
+                            let peer = context.peer.clone();
+                            tokio::spawn(async move {
+                                for uri in affected {
+                                    debug!(uri = %uri, tool = %tool_name, "Sending resource updated notification");
+                                    let param = ResourceUpdatedNotificationParam { uri };
+                                    let _ = peer.notify_resource_updated(param).await;
+                                }
+                            });
+                        }
+                    }
+                }
+
+                Ok(CallToolResult {
+                    content: vec![Content::text(result.into_string())],
+                    is_error: None,
+                    meta: None,
+                    structured_content: None,
+                })
+            }
             Err(e) => {
+                let elapsed = start.elapsed();
                 // Try to downcast to ToolError for structured response
                 let error_json = match e.downcast::<ToolError>() {
-                    Ok(tool_err) => serde_json::to_string(&tool_err)
-                        .unwrap_or_else(|_| json!({ "error": tool_err.to_string() }).to_string()),
-                    Err(e) => json!({
-                        "code": "INTERNAL_ERROR",
-                        "message": e.to_string()
-                    })
-                    .to_string(),
+                    Ok(tool_err) => {
+                        warn!(
+                            tool = %tool_name,
+                            error_code = ?tool_err.code,
+                            error_message = %tool_err.message,
+                            duration_ms = elapsed.as_millis() as u64,
+                            "Tool call failed"
+                        );
+                        serde_json::to_string(&tool_err).unwrap_or_else(|_| {
+                            json!({ "error": tool_err.to_string() }).to_string()
+                        })
+                    }
+                    Err(e) => {
+                        warn!(
+                            tool = %tool_name,
+                            error = %e,
+                            duration_ms = elapsed.as_millis() as u64,
+                            "Tool call failed with internal error"
+                        );
+                        json!({
+                            "code": "INTERNAL_ERROR",
+                            "message": e.to_string()
+                        })
+                        .to_string()
+                    }
                 };
                 Ok(CallToolResult {
                     content: vec![Content::text(error_json)],
@@ -257,11 +334,54 @@ impl ServerHandler for TaskGraphServer {
                     request.uri,
                 )],
             }),
-            Err(e) => Err(ErrorData::resource_not_found(
-                format!("Unknown resource: {}", uri_string),
-                Some(json!({ "error": e.to_string() })),
-            )),
+            Err(e) => {
+                warn!(
+                    resource_uri = %uri_string,
+                    error = %e,
+                    "Resource read failed"
+                );
+                Err(ErrorData::resource_not_found(
+                    format!("Unknown resource: {}", uri_string),
+                    Some(json!({ "error": e.to_string() })),
+                ))
+            }
         }
+    }
+}
+
+/// Map a tool name to the mutation categories it causes.
+/// Used to determine which subscribed resource URIs need notifications
+/// after a successful tool call.
+fn mutations_for_tool(tool_name: &str) -> Vec<MutationKind> {
+    match tool_name {
+        // Task mutations
+        "create" | "create_tree" | "delete" | "rename" | "scan" => {
+            vec![MutationKind::TaskChanged]
+        }
+        // Update can change status, which affects claimed/ready/blocked views
+        "update" => vec![MutationKind::TaskChanged],
+        // Claiming changes task status and agent claims
+        "claim" => vec![MutationKind::TaskChanged, MutationKind::AgentChanged],
+        // Dependency mutations affect ready/blocked status
+        "link" | "unlink" | "relink" => {
+            vec![MutationKind::DependencyChanged, MutationKind::TaskChanged]
+        }
+        // File coordination
+        "mark_file" | "unmark_file" => vec![MutationKind::FileMarkChanged],
+        // Agent lifecycle
+        "connect" | "disconnect" | "cleanup_stale" => vec![MutationKind::AgentChanged],
+        // Attachments
+        "attach" | "detach" => vec![MutationKind::AttachmentChanged],
+        // Tracking tools update agent state
+        "thinking" | "log_metrics" => vec![MutationKind::AgentChanged],
+        // Read-only tools cause no mutations
+        "get" | "list_tasks" | "list_agents" | "list_marks" | "mark_updates" | "attachments"
+        | "get_schema" | "search" | "query" | "check_gates" | "task_history" | "get_metrics"
+        | "project_history" | "list_workflows" => vec![],
+        // Skills tools are read-only
+        name if name.starts_with("get_skill") || name.starts_with("list_skills") => vec![],
+        // Unknown tools -- conservatively notify nothing
+        _ => vec![],
     }
 }
 
@@ -501,7 +621,7 @@ fn reload_config(server: &TaskGraphServer, reload_ctx: &ReloadContext) {
         return;
     }
 
-    // Wrap in Arc
+    // Wrap in Arc and build consolidated AppConfig
     let prompts = Arc::new(prompts);
     let workflows = Arc::new(workflows);
     let states_config = Arc::new(states_config);
@@ -514,13 +634,7 @@ fn reload_config(server: &TaskGraphServer, reload_ctx: &ReloadContext) {
     let tags_config = Arc::new(tags_config);
     let ids_config = Arc::new(new_config.ids.clone());
 
-    // Build new ToolHandler
-    let new_tool_handler = Arc::new(ToolHandler::new(
-        Arc::clone(&reload_ctx.db),
-        reload_ctx.media_dir.clone(),
-        reload_ctx.skills_dir.clone(),
-        Arc::clone(&reload_ctx.server_paths),
-        Arc::clone(&prompts),
+    let app_config = AppConfig::new(
         Arc::clone(&states_config),
         Arc::clone(&phases_config),
         Arc::clone(&deps_config),
@@ -529,23 +643,29 @@ fn reload_config(server: &TaskGraphServer, reload_ctx: &ReloadContext) {
         Arc::clone(&tags_config),
         ids_config,
         Arc::clone(&workflows),
+    );
+
+    // Build new ToolHandler
+    let new_tool_handler = Arc::new(ToolHandler::new(
+        Arc::clone(&reload_ctx.db),
+        reload_ctx.media_dir.clone(),
+        reload_ctx.skills_dir.clone(),
+        Arc::clone(&reload_ctx.server_paths),
+        Arc::clone(&prompts),
+        app_config.clone(),
         reload_ctx.default_format,
         reload_ctx.default_page_size,
         Arc::clone(&reload_ctx.path_mapper),
     ));
 
     // Build new ResourceHandler
-    let new_resource_handler = Arc::new(
-        ResourceHandler::new(
-            Arc::clone(&reload_ctx.db),
-            states_config,
-            phases_config,
-            deps_config,
-            tags_config,
-            workflows,
-        )
-        .with_skills_dir(reload_ctx.skills_dir.clone()),
-    );
+    let docs_dir = discover_docs_dir();
+    let mut new_resource_handler = ResourceHandler::new(Arc::clone(&reload_ctx.db), app_config)
+        .with_skills_dir(reload_ctx.skills_dir.clone());
+    if let Some(ref dir) = docs_dir {
+        new_resource_handler = new_resource_handler.with_docs_dir(dir.clone());
+    }
+    let new_resource_handler = Arc::new(new_resource_handler);
 
     // Atomically swap in the new handlers
     server.tool_handler.store(new_tool_handler);
@@ -620,7 +740,7 @@ async fn run_server(
         config_path: config_path_used.map(std::path::PathBuf::from),
     });
 
-    // Create server handler
+    // Create server handler -- build consolidated AppConfig
     let deps_config = Arc::new(config.dependencies.clone());
     let auto_advance = Arc::new(config.auto_advance.clone());
     let attachments_config = Arc::new(config.attachments.clone());
@@ -628,6 +748,17 @@ async fn run_server(
     tags_config.register_workflow_tags(&workflows.all_role_tags());
     let tags_config = Arc::new(tags_config);
     let ids_config = Arc::new(config.ids.clone());
+
+    let app_config = AppConfig::new(
+        Arc::clone(&states_config),
+        Arc::clone(&phases_config),
+        deps_config,
+        auto_advance,
+        attachments_config,
+        tags_config,
+        ids_config,
+        Arc::clone(&workflows),
+    );
 
     // Create path mapper from config
     let path_mapper = Arc::new(
@@ -644,14 +775,7 @@ async fn run_server(
         config.server.skills_dir.clone(),
         Arc::clone(&server_paths),
         prompts,
-        Arc::clone(&states_config),
-        Arc::clone(&phases_config),
-        deps_config,
-        auto_advance,
-        attachments_config,
-        tags_config,
-        ids_config,
-        workflows,
+        app_config,
         config.server.default_format,
         config.server.default_page_size,
         Arc::clone(&path_mapper),
@@ -896,10 +1020,10 @@ fn run_export(config: &Config, args: ExportArgs) -> Result<()> {
 
 /// Run the import command
 fn run_import(config: &Config, args: ImportArgs) -> Result<()> {
-    use task_graph_mcp::db::import::ImportOptions;
+    use task_graph_mcp::db::import::{ImportOptions, remap_snapshot};
 
     // Load snapshot from file
-    let snapshot = Snapshot::from_file(&args.file)?;
+    let mut snapshot = Snapshot::from_file(&args.file)?;
 
     // Check schema compatibility
     if !snapshot.is_schema_compatible() {
@@ -909,21 +1033,41 @@ fn run_import(config: &Config, args: ImportArgs) -> Result<()> {
         );
     }
 
+    // Apply ID remapping if requested
+    let remap_result = if args.remap_ids {
+        let ids_config = config.ids.clone();
+        let (remapped, id_map) = remap_snapshot(&snapshot, &ids_config)?;
+        snapshot = remapped;
+        eprintln!("Remapped {} task IDs to fresh IDs", id_map.len());
+        Some(id_map)
+    } else {
+        None
+    };
+
     // Open database
     let db = Database::open(&config.server.db_path)?;
 
     // Determine import options
-    let options = if args.merge {
+    let mut options = if args.merge {
         ImportOptions::merge()
     } else {
         ImportOptions::replace()
     };
+    if args.remap_ids {
+        options.remap_ids = true;
+    }
+    if let Some(ref parent) = args.parent {
+        options.parent_id = Some(parent.clone());
+    }
 
     if args.dry_run {
         // Dry run - just validate and report
         let result = db.preview_import(&snapshot, &options);
         println!("Dry run results:");
         println!("  Mode: {:?}", result.mode);
+        if args.remap_ids {
+            println!("  ID remapping: enabled");
+        }
         println!("  Database is empty: {}", result.database_is_empty);
         println!("  Would succeed: {}", result.would_succeed);
         if let Some(reason) = &result.failure_reason {
@@ -951,11 +1095,21 @@ fn run_import(config: &Config, args: ImportArgs) -> Result<()> {
                 println!("    - {}", warning);
             }
         }
+        if let Some(ref id_map) = remap_result {
+            println!("  ID remapping ({} tasks):", id_map.len());
+            let mut entries: Vec<_> = id_map.iter().collect();
+            entries.sort_by_key(|(old, _)| (*old).clone());
+            for (old_id, new_id) in &entries {
+                println!("    {} -> {}", old_id, new_id);
+            }
+        }
         return Ok(());
     }
 
     // Check if database has existing data and we're in replace mode without force
-    if options.mode == ImportMode::Replace && !args.force {
+    // When remap_ids is active, the IDs are fresh so merge is the natural mode,
+    // but if they chose replace mode, still check.
+    if options.mode == ImportMode::Replace && !args.force && !args.remap_ids {
         let preview = db.preview_import(&snapshot, &options);
         if !preview.database_is_empty {
             anyhow::bail!(
@@ -965,10 +1119,18 @@ fn run_import(config: &Config, args: ImportArgs) -> Result<()> {
     }
 
     // Perform import
-    let result = db.import_snapshot(&snapshot, &options)?;
+    let mut result = db.import_snapshot(&snapshot, &options)?;
+
+    // Attach the remap table to the result
+    if let Some(id_map) = remap_result {
+        result.id_remap = Some(id_map);
+    }
 
     println!("Import complete:");
     println!("  Mode: {:?}", options.mode);
+    if args.remap_ids {
+        println!("  ID remapping: enabled");
+    }
     println!("  Rows imported:");
     for (table, count) in &result.rows_imported {
         println!("    {}: {}", table, count);
@@ -990,6 +1152,24 @@ fn run_import(config: &Config, args: ImportArgs) -> Result<()> {
         println!("  Warnings:");
         for warning in &result.warnings {
             println!("    - {}", warning);
+        }
+    }
+    if let Some(ref id_map) = result.id_remap {
+        println!("  ID remapping ({} tasks):", id_map.len());
+        let mut entries: Vec<_> = id_map.iter().collect();
+        entries.sort_by_key(|(old, _)| (*old).clone());
+        for (old_id, new_id) in &entries {
+            println!("    {} -> {}", old_id, new_id);
+        }
+    }
+    if !result.parent_linked_roots.is_empty() {
+        println!(
+            "  Parent linking: {} root(s) attached to '{}'",
+            result.parent_linked_roots.len(),
+            args.parent.as_deref().unwrap_or("?")
+        );
+        for root_id in &result.parent_linked_roots {
+            println!("    -> {}", root_id);
         }
     }
 

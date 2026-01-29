@@ -14,6 +14,32 @@ use anyhow::{Result, anyhow};
 use petname::{Generator, Petnames};
 use rusqlite::{Connection, Row, params};
 
+/// Options for creating a task tree from nested input.
+#[derive(Debug)]
+pub struct CreateTreeOptions<'a> {
+    pub input: TaskTreeInput,
+    pub parent_id: Option<String>,
+    pub child_type: Option<String>,
+    pub sibling_type: Option<String>,
+    pub states_config: &'a StatesConfig,
+    pub phases_config: &'a PhasesConfig,
+    pub tags_config: &'a TagsConfig,
+    pub ids_config: &'a IdsConfig,
+}
+
+/// Query parameters for listing tasks with optional filters.
+#[derive(Debug, Default)]
+pub struct ListTasksQuery<'a> {
+    pub status: Option<&'a str>,
+    pub phase: Option<&'a str>,
+    pub owner: Option<&'a str>,
+    pub parent_id: Option<Option<&'a str>>,
+    pub limit: Option<i32>,
+    pub offset: i32,
+    pub sort_by: Option<&'a str>,
+    pub sort_order: Option<&'a str>,
+}
+
 /// Generate a petname-based task ID using the large wordlist.
 /// Uses the configured number of words and case style.
 fn generate_task_id(ids_config: &IdsConfig) -> String {
@@ -367,37 +393,30 @@ impl Database {
     /// Uses sibling_type for sibling dependencies (default: none/parallel).
     pub fn create_task_tree(
         &self,
-        input: TaskTreeInput,
-        parent_id: Option<String>,
-        child_type: Option<String>,
-        sibling_type: Option<String>,
-        states_config: &StatesConfig,
-        phases_config: &PhasesConfig,
-        tags_config: &TagsConfig,
-        ids_config: &IdsConfig,
+        opts: CreateTreeOptions<'_>,
     ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>)> {
         let mut all_ids = Vec::new();
         let mut phase_warnings = Vec::new();
         let mut tag_warnings = Vec::new();
         // Default child_type to "contains" if not specified
-        let child_type = child_type.or_else(|| Some("contains".to_string()));
+        let child_type = opts.child_type.or_else(|| Some("contains".to_string()));
 
         self.with_conn_mut(|conn| {
             let tx = conn.transaction()?;
             let root_id = create_tree_recursive(
                 &tx,
-                &input,
-                parent_id.as_deref(),
+                &opts.input,
+                opts.parent_id.as_deref(),
                 None, // no previous sibling for root
                 child_type.as_deref(),
-                sibling_type.as_deref(),
+                opts.sibling_type.as_deref(),
                 &mut all_ids,
                 &mut phase_warnings,
                 &mut tag_warnings,
-                states_config,
-                phases_config,
-                tags_config,
-                ids_config,
+                opts.states_config,
+                opts.phases_config,
+                opts.tags_config,
+                opts.ids_config,
             )?;
             tx.commit()?;
             Ok((root_id, all_ids, phase_warnings, tag_warnings))
@@ -1183,17 +1202,17 @@ impl Database {
 
     /// List tasks with optional filters.
     /// Returns full Task objects. Excludes soft-deleted tasks.
-    pub fn list_tasks(
-        &self,
-        status: Option<&str>,
-        phase: Option<&str>,
-        owner: Option<&str>,
-        parent_id: Option<Option<&str>>,
-        limit: Option<i32>,
-        offset: i32,
-        sort_by: Option<&str>,
-        sort_order: Option<&str>,
-    ) -> Result<Vec<Task>> {
+    pub fn list_tasks(&self, query: ListTasksQuery<'_>) -> Result<Vec<Task>> {
+        let ListTasksQuery {
+            status,
+            phase,
+            owner,
+            parent_id,
+            limit,
+            offset,
+            sort_by,
+            sort_order,
+        } = query;
         self.with_conn(|conn| {
             let mut sql = String::from(
                 "SELECT t.* FROM tasks t WHERE t.deleted_at IS NULL",

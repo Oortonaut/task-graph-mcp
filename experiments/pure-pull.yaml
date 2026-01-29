@@ -1,0 +1,466 @@
+# Pure Pull Experiment Configuration
+# ===================================
+#
+# Tests the "pure pull" coordination pattern where ALL agents are generalists
+# that self-select tasks using list_tasks(ready=true) + claim().
+#
+# Hypothesis: Pure pull coordination maximizes throughput for independent tasks
+# but may suffer from claim contention as agent count increases.
+#
+# Key questions:
+#   1. How does claim contention scale with agent count?
+#   2. How evenly are tasks distributed across agents?
+#   3. What is the throughput ceiling before contention degrades performance?
+#   4. How does blocking ratio compare to push-based workflows?
+
+experiment:
+  name: pure-pull
+  description: >
+    All agents use list_tasks(ready=true) + claim() to self-select work.
+    No coordinator, no push assignments, no specialization.
+    Measures contention, distribution, and throughput under pure pull coordination.
+  version: "1.0"
+  created: "2026-01-29"
+
+# ---------------------------------------------------------------------------
+# Workflow Configuration
+# ---------------------------------------------------------------------------
+# Uses the swarm workflow which is the closest match for pure pull:
+#   - All agents are generalists (no role specialization)
+#   - Pull coordination only (list_tasks + claim)
+#   - Fine-grained atomic tasks
+#   - Loose dependencies for maximum parallelism
+workflow: swarm
+
+# Topology dimensions (from WORKFLOW_TOPOLOGIES.md)
+topology:
+  phase_model: field         # Phase is a property, not subtask
+  coordination: pull         # Pure pull -- no push assignments
+  granularity: fine          # Small atomic tasks for parallel claiming
+  default_deps: loose        # Minimal blocking to maximize parallelism
+  agents: generalists        # All agents interchangeable
+
+# ---------------------------------------------------------------------------
+# Agent Configurations to Test
+# ---------------------------------------------------------------------------
+# Run the experiment with varying agent counts to measure scaling behavior.
+# Each run uses the same task template but different numbers of agents.
+runs:
+  - name: pull-1
+    description: "Baseline: single agent (no contention possible)"
+    agents: 1
+    agent_config:
+      workflow: swarm
+      tags: [worker, implementer, code]
+      max_claims: 1
+
+  - name: pull-2
+    description: "Two agents (minimal contention expected)"
+    agents: 2
+    agent_config:
+      workflow: swarm
+      tags: [worker, implementer, code]
+      max_claims: 1
+
+  - name: pull-4
+    description: "Four agents (moderate parallelism)"
+    agents: 4
+    agent_config:
+      workflow: swarm
+      tags: [worker, implementer, code]
+      max_claims: 1
+
+  - name: pull-8
+    description: "Eight agents (high parallelism, potential contention)"
+    agents: 8
+    agent_config:
+      workflow: swarm
+      tags: [worker, implementer, code]
+      max_claims: 1
+
+# ---------------------------------------------------------------------------
+# Task Template
+# ---------------------------------------------------------------------------
+# Use the browser-parallel template for maximum independent task availability.
+# All implementation tasks are independent (loose deps), so agents compete
+# purely on claim speed rather than being blocked by dependency chains.
+template: experiments/templates/browser-parallel.json
+
+# Alternate templates for cross-comparison:
+# template_alternatives:
+#   - experiments/templates/browser-flat.json       # Flat structure, all independent
+#   - experiments/templates/browser-phased.json     # Phased structure (less parallelism)
+#   - task-graph/templates/browser-flat.json        # Original flat template
+
+# ---------------------------------------------------------------------------
+# Agent Protocol
+# ---------------------------------------------------------------------------
+# Defines the exact sequence each agent must follow. This is the core of
+# the "pure pull" pattern -- no external coordination, fully autonomous.
+protocol:
+  name: pure-pull-loop
+  description: >
+    Each agent runs an autonomous loop: find ready tasks, claim one, work it,
+    complete it, repeat until no tasks remain.
+  steps:
+    - action: connect
+      description: "Register with task-graph server"
+      tool: connect
+      params:
+        workflow: swarm
+        tags: [worker, implementer, code]
+
+    - action: find_ready
+      description: "Query for tasks that are ready to claim"
+      tool: list_tasks
+      params:
+        ready: true
+        # agent parameter auto-fills worker_id for tag matching
+      loop_until: "no ready tasks AND no working tasks"
+
+    - action: claim
+      description: "Attempt to claim the highest-priority ready task"
+      tool: claim
+      params: {}
+      on_failure: retry_find
+      notes: >
+        If claim fails (race condition with another agent),
+        go back to find_ready. This is the expected contention point.
+
+    - action: work
+      description: "Execute the task"
+      tool: update
+      params:
+        phase: implement
+      sub_steps:
+        - mark_file for any files being edited
+        - Execute task implementation
+        - Run tests if applicable
+        - Attach results
+
+    - action: complete
+      description: "Mark task completed and release resources"
+      tool: update
+      params:
+        status: completed
+      sub_steps:
+        - unmark_file all held files
+        - attach results with type "gate/results"
+        - log_metrics with cost and token data
+
+    - action: loop
+      description: "Return to find_ready"
+      goto: find_ready
+
+# ---------------------------------------------------------------------------
+# Metrics to Measure
+# ---------------------------------------------------------------------------
+# These metrics specifically target the pure-pull coordination questions.
+metrics:
+  # -- Contention Metrics --
+  contention:
+    description: "Measure how agents compete for the same tasks"
+    measurements:
+      - name: claim_success_rate
+        description: "Ratio of successful claims to total claim attempts"
+        query: >
+          SELECT
+            worker_id,
+            COUNT(*) as claim_attempts,
+            SUM(CASE WHEN status = 'working' THEN 1 ELSE 0 END) as successful
+          FROM task_sequence
+          WHERE status IN ('working', 'pending')
+          GROUP BY worker_id
+        target: "> 90% success rate with 4 agents"
+
+      - name: claim_retry_count
+        description: "Number of times agents had to retry after a failed claim"
+        derivation: "claim_attempts - successful_claims per agent"
+        target: "< 2 retries average per task"
+
+      - name: queue_wait_time
+        description: "Time from task becoming ready to being claimed"
+        query: >
+          SELECT
+            AVG(started_at - created_at) as avg_queue_wait_ms,
+            MAX(started_at - created_at) as max_queue_wait_ms
+          FROM tasks
+          WHERE started_at IS NOT NULL AND created_at IS NOT NULL
+        target: "Queue wait should decrease with more agents"
+
+  # -- Distribution Metrics --
+  distribution:
+    description: "Measure how evenly work is spread across agents"
+    measurements:
+      - name: tasks_per_agent
+        description: "Number of completed tasks per agent"
+        query: >
+          SELECT
+            worker_id,
+            COUNT(*) as tasks_completed,
+            SUM(COALESCE(points, 1)) as points_completed
+          FROM tasks
+          WHERE status = 'completed' AND worker_id IS NOT NULL
+          GROUP BY worker_id
+        target: "Coefficient of variation < 0.3 (roughly even distribution)"
+
+      - name: load_balance_gini
+        description: "Gini coefficient of task distribution (0=perfect, 1=all to one)"
+        derivation: "Gini coefficient computed from tasks_per_agent counts"
+        target: "< 0.15 for 4+ agents"
+
+      - name: time_per_agent
+        description: "Total working time per agent"
+        query: >
+          SELECT
+            worker_id,
+            SUM(time_actual_ms) as total_work_ms,
+            AVG(time_actual_ms) as avg_task_ms
+          FROM tasks
+          WHERE status = 'completed' AND worker_id IS NOT NULL
+          GROUP BY worker_id
+        target: "Agents should have similar total work times"
+
+      - name: idle_time_ratio
+        description: "Time agents spend not working (looking for tasks, failed claims)"
+        derivation: "(wall_clock_per_agent - working_time_per_agent) / wall_clock_per_agent"
+        target: "< 15% idle time per agent"
+
+  # -- Throughput Metrics --
+  throughput:
+    description: "Measure task completion velocity"
+    measurements:
+      - name: tasks_per_hour
+        description: "Overall task completion rate"
+        query: >
+          SELECT
+            COUNT(*) as completed,
+            (MAX(completed_at) - MIN(started_at)) / 3600000.0 as hours,
+            COUNT(*) / ((MAX(completed_at) - MIN(started_at)) / 3600000.0) as tasks_per_hour
+          FROM tasks
+          WHERE status = 'completed'
+        target: "Should scale near-linearly with agent count for independent tasks"
+
+      - name: throughput_per_agent
+        description: "Per-agent throughput (scaling efficiency)"
+        derivation: "tasks_per_hour / agent_count"
+        target: "> 80% of single-agent throughput per agent"
+
+      - name: scaling_efficiency
+        description: "How well throughput scales with agent count"
+        derivation: "throughput_N_agents / (N * throughput_1_agent)"
+        target: "> 0.8 for 4 agents, > 0.6 for 8 agents"
+
+      - name: completion_timeline
+        description: "Cumulative task completion over time"
+        query: >
+          SELECT
+            completed_at as timestamp_ms,
+            id as task_id,
+            worker_id,
+            ROW_NUMBER() OVER (ORDER BY completed_at) as cumulative_count
+          FROM tasks
+          WHERE status = 'completed'
+          ORDER BY completed_at
+
+  # -- Coordination Overhead --
+  coordination:
+    description: "Measure overhead from the pull coordination mechanism"
+    measurements:
+      - name: blocking_ratio
+        description: "Fraction of time spent waiting vs working"
+        query: >
+          SELECT
+            SUM(CASE WHEN status = 'working' THEN
+              COALESCE(end_timestamp, CAST(strftime('%s','now') AS INTEGER)*1000) - timestamp
+            ELSE 0 END) as working_ms,
+            SUM(CASE WHEN status IN ('pending', 'assigned') THEN
+              COALESCE(end_timestamp, CAST(strftime('%s','now') AS INTEGER)*1000) - timestamp
+            ELSE 0 END) as blocked_ms
+          FROM task_sequence
+        target: "< 10% blocking ratio for independent tasks"
+
+      - name: file_contention
+        description: "Instances of multiple agents trying to edit the same file"
+        derivation: "Count of mark_file warnings from concurrent marks"
+        target: "Zero for truly independent tasks"
+
+      - name: rework_rate
+        description: "Tasks that had to be reworked (multiple working periods)"
+        query: >
+          SELECT
+            task_id,
+            COUNT(*) as working_periods
+          FROM task_sequence
+          WHERE status = 'working'
+          GROUP BY task_id
+          HAVING COUNT(*) > 1
+        target: "< 5% rework rate"
+
+# ---------------------------------------------------------------------------
+# Success Criteria
+# ---------------------------------------------------------------------------
+# These are pass/fail criteria for the experiment to validate the pure pull
+# coordination pattern.
+success_criteria:
+  - name: all_tasks_complete
+    description: "All tasks reach terminal state (completed or cancelled)"
+    condition: "pending_count == 0 AND working_count == 0"
+    required: true
+
+  - name: acceptable_contention
+    description: "Claim contention does not cause significant waste"
+    condition: "claim_success_rate > 0.85"
+    required: true
+
+  - name: even_distribution
+    description: "Work is reasonably distributed across agents"
+    condition: "gini_coefficient < 0.25"
+    required: false  # Advisory
+
+  - name: scaling_efficiency
+    description: "Adding agents provides meaningful throughput improvement"
+    condition: "throughput_4_agents > 2.5 * throughput_1_agent"
+    required: false  # Advisory
+
+  - name: low_overhead
+    description: "Coordination overhead is minimal"
+    condition: "blocking_ratio < 0.15"
+    required: false  # Advisory
+
+# ---------------------------------------------------------------------------
+# Execution Instructions
+# ---------------------------------------------------------------------------
+# How to run this experiment using the experiment runner.
+execution:
+  # Step 1: Run single-agent baseline
+  baseline:
+    command: >
+      python scripts/run_experiment.py
+        --template experiments/templates/browser-parallel.json
+        --workflow swarm
+        --agents 1
+        --output results/pure-pull/pull-1
+    notes: "Run first to establish baseline throughput"
+
+  # Step 2: Run multi-agent variants
+  variants:
+    - command: >
+        python scripts/run_experiment.py
+          --template experiments/templates/browser-parallel.json
+          --workflow swarm
+          --agents 2
+          --output results/pure-pull/pull-2
+    - command: >
+        python scripts/run_experiment.py
+          --template experiments/templates/browser-parallel.json
+          --workflow swarm
+          --agents 4
+          --output results/pure-pull/pull-4
+    - command: >
+        python scripts/run_experiment.py
+          --template experiments/templates/browser-parallel.json
+          --workflow swarm
+          --agents 8
+          --output results/pure-pull/pull-8
+
+  # Step 3: Compare results
+  comparison:
+    command: >
+      python scripts/compare_experiments.py
+        results/pure-pull/pull-1/tasks.db
+        results/pure-pull/pull-2/tasks.db
+        results/pure-pull/pull-4/tasks.db
+        results/pure-pull/pull-8/tasks.db
+        --labels "1-agent,2-agent,4-agent,8-agent"
+        --charts
+        --output results/pure-pull/comparison
+    notes: "Generates markdown report and charts comparing all runs"
+
+  # Step 4: Wait for completion (alternative to manual monitoring)
+  wait_mode:
+    command: >
+      python scripts/run_experiment.py
+        --wait
+        --poll-interval 15
+        --output results/pure-pull/pull-4
+    notes: "Polls DB every 15s, auto-exports metrics when all tasks are terminal"
+
+# ---------------------------------------------------------------------------
+# Expected Results & Analysis Guide
+# ---------------------------------------------------------------------------
+analysis:
+  expected_outcomes:
+    - metric: contention
+      expectation: >
+        With independent tasks and atomic claiming, contention should be low
+        (< 10% failed claims) for up to 4 agents. At 8 agents, contention may
+        increase as agents race to claim from a shrinking pool. The claim()
+        operation is atomic in SQLite, so no data corruption -- just wasted
+        list_tasks() calls when another agent claims first.
+
+    - metric: distribution
+      expectation: >
+        Task distribution should be roughly even because all agents are
+        generalists with the same tags. Minor imbalance expected due to
+        variable task durations -- agents that finish fast claim more tasks.
+        The Gini coefficient should be < 0.2 for 4+ agents.
+
+    - metric: throughput
+      expectation: >
+        Throughput should scale near-linearly for 1-4 agents since the
+        browser-parallel template has 20+ independent tasks. Scaling
+        efficiency may drop at 8 agents as the task pool depletes and
+        agents start competing for the last few tasks.
+
+    - metric: overhead
+      expectation: >
+        Pure pull has minimal coordination overhead -- no coordinator
+        bottleneck, no assignment delays. The main overhead is from
+        list_tasks() calls that return tasks already claimed by another
+        agent. This overhead should be < 5% of total agent time.
+
+  comparison_dimensions:
+    - name: "Pure Pull vs Hierarchical"
+      description: >
+        Compare with workflow-hierarchical where a lead assigns tasks.
+        Expected: pull has lower overhead for independent tasks but
+        hierarchical handles dependencies better.
+
+    - name: "Pure Pull vs Relay"
+      description: >
+        Compare with workflow-relay where specialists hand off.
+        Expected: pull has higher throughput for generalist tasks but
+        relay produces higher quality through review gates.
+
+    - name: "Agent Count Scaling"
+      description: >
+        Compare pull-1 through pull-8 to find the optimal agent count
+        before contention overhead exceeds parallelism gains.
+        Plot: throughput vs agent count (expect sublinear but positive).
+
+  key_charts:
+    - title: "Throughput vs Agent Count"
+      type: line
+      x: agent_count
+      y: tasks_per_hour
+      description: "Shows scaling behavior of pure pull coordination"
+
+    - title: "Task Distribution Heatmap"
+      type: heatmap
+      x: task_id
+      y: worker_id
+      description: "Shows which agent completed which tasks"
+
+    - title: "Cumulative Completion Timeline"
+      type: area
+      x: elapsed_time
+      y: cumulative_completed
+      series: run_name
+      description: "Overlay completion curves for each agent count"
+
+    - title: "Claim Contention Rate"
+      type: bar
+      x: agent_count
+      y: failed_claim_pct
+      description: "Shows how contention increases with agents"

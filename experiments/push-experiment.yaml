@@ -1,0 +1,333 @@
+# Pure Push Experiment Configuration
+# ===================================
+#
+# Tests the "pure push" coordination pattern where a single coordinator
+# assigns ALL tasks to workers via update(assignee=). Workers never
+# self-select tasks. This is the opposite of the swarm (pure pull) model.
+#
+# Hypothesis:
+#   Push coordination reduces contention and duplicate work but introduces
+#   coordinator bottleneck overhead and assignment latency. Compared to
+#   swarm (pull), we expect:
+#     - Lower contention / fewer claim conflicts
+#     - Higher coordinator overhead (single point of dispatch)
+#     - Potentially higher idle time for workers waiting for assignments
+#     - Better task affinity (coordinator can match workers to tasks)
+#     - More predictable task distribution across workers
+#
+# Baselines to compare against:
+#   - workflow-swarm.yaml    (pure pull: agents self-select from ready queue)
+#   - workflow-hierarchical.yaml (hybrid: lead assigns some, workers pull some)
+
+experiment:
+  name: pure-push
+  version: "1.0.0"
+  description: >
+    Coordinator assigns all tasks via update(assignee=). Workers passively
+    wait for assignments and never browse the task queue. Measures dispatch
+    overhead, pickup latency, worker idle time, and end-to-end throughput.
+
+# ---------------------------------------------------------------------------
+# Experiment variants
+# ---------------------------------------------------------------------------
+variants:
+  # Primary: pure push with 1 coordinator + N workers
+  push-4:
+    workflow: push
+    template: experiments/templates/browser-parallel.json
+    agents:
+      total: 5
+      coordinator: 1
+      workers: 4
+    description: "1 coordinator + 4 workers, pure push assignment"
+    launch:
+      - worker_id: coordinator
+        tags: [coordinator, lead]
+        workflow: push
+        instruction: >
+          You are the coordinator in a pure-push experiment. Your ONLY job is to
+          dispatch tasks to workers. Use this loop:
+          1. list_tasks(status="pending") to find unassigned work
+          2. list_agents() to find available workers (look for low claim counts)
+          3. update(task="<id>", assignee="<worker-id>") for each task
+          4. Monitor progress with list_tasks(status="working") and list_agents()
+          5. On worker failure: reassign with update(task="<id>", assignee="<other>", force=true)
+          6. Repeat until all tasks are completed or cancelled.
+          Log metrics with log_metrics() when done.
+      - worker_id: worker-1
+        tags: [worker, implementer, code]
+        workflow: push
+        instruction: >
+          You are a worker in a pure-push experiment. Do NOT browse for tasks.
+          Wait for the coordinator to assign tasks to you (status=assigned).
+          When assigned: claim(), work, attach results, update(status="completed").
+          Then WAIT for the next assignment.
+      - worker_id: worker-2
+        tags: [worker, implementer, code]
+        workflow: push
+        instruction: (same as worker-1)
+      - worker_id: worker-3
+        tags: [worker, implementer, code]
+        workflow: push
+        instruction: (same as worker-1)
+      - worker_id: worker-4
+        tags: [worker, implementer, code]
+        workflow: push
+        instruction: (same as worker-1)
+
+  # Comparison: pure pull (swarm) with same agent count
+  pull-4:
+    workflow: swarm
+    template: experiments/templates/browser-parallel.json
+    agents:
+      total: 4
+      coordinator: 0
+      workers: 4
+    description: "4 swarm agents, pure pull (self-select from ready queue)"
+    launch:
+      - worker_id: swarm-1
+        tags: [worker, implementer, code]
+        workflow: swarm
+        instruction: >
+          You are a swarm agent. list_tasks(ready=true) to find work, claim(),
+          execute, complete, repeat. No coordinator -- everyone self-selects.
+      - worker_id: swarm-2
+        tags: [worker, implementer, code]
+        workflow: swarm
+        instruction: (same as swarm-1)
+      - worker_id: swarm-3
+        tags: [worker, implementer, code]
+        workflow: swarm
+        instruction: (same as swarm-1)
+      - worker_id: swarm-4
+        tags: [worker, implementer, code]
+        workflow: swarm
+        instruction: (same as swarm-1)
+
+  # Comparison: hierarchical (hybrid push/pull) with same agent count
+  hybrid-4:
+    workflow: hierarchical
+    template: experiments/templates/browser-parallel.json
+    agents:
+      total: 5
+      coordinator: 1
+      workers: 4
+    description: "1 lead + 4 workers, hierarchical (lead assigns some, workers pull some)"
+    launch:
+      - worker_id: lead
+        tags: [lead, coordinator]
+        workflow: hierarchical
+        instruction: >
+          You are the lead in a hierarchical workflow. Decompose large tasks,
+          assign to workers, but workers can also self-select ready tasks.
+      - worker_id: worker-1
+        tags: [worker, implementer, code]
+        workflow: hierarchical
+        instruction: >
+          You are a worker. Check for assignments first, but also
+          list_tasks(ready=true) to self-select if idle.
+      - worker_id: worker-2
+        tags: [worker, implementer, code]
+        workflow: hierarchical
+        instruction: (same as worker-1)
+      - worker_id: worker-3
+        tags: [worker, implementer, code]
+        workflow: hierarchical
+        instruction: (same as worker-1)
+      - worker_id: worker-4
+        tags: [worker, implementer, code]
+        workflow: hierarchical
+        instruction: (same as worker-1)
+
+# ---------------------------------------------------------------------------
+# Metrics to collect
+# ---------------------------------------------------------------------------
+metrics:
+  # Primary metrics (directly answer the experiment question)
+  primary:
+    - name: wall_clock_time_ms
+      description: "Total time from first task started to last task completed"
+      query: "MAX(completed_at) - MIN(started_at) FROM tasks WHERE deleted_at IS NULL"
+      lower_is_better: true
+
+    - name: total_cost_usd
+      description: "Sum of all agent costs"
+      query: "SUM(cost_usd) FROM tasks WHERE deleted_at IS NULL"
+      lower_is_better: true
+
+    - name: tasks_per_hour
+      description: "Completed tasks divided by wall-clock hours"
+      derived: "completed_count / (wall_clock_time_ms / 3600000)"
+      lower_is_better: false
+
+    - name: completion_rate_pct
+      description: "Percentage of tasks reaching completed status"
+      query: "100.0 * SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) / COUNT(*) FROM tasks WHERE deleted_at IS NULL"
+      lower_is_better: false
+
+  # Coordination overhead metrics (push-specific)
+  coordination:
+    - name: dispatch_latency_ms
+      description: >
+        Average time from task creation to coordinator assigning it.
+        Measured as the gap between created_at and the first 'assigned'
+        entry in task_sequence for each task.
+      query: |
+        SELECT AVG(ts.timestamp - t.created_at)
+        FROM tasks t
+        JOIN task_sequence ts ON ts.task_id = t.id AND ts.status = 'assigned'
+        WHERE t.deleted_at IS NULL
+      lower_is_better: true
+
+    - name: pickup_latency_ms
+      description: >
+        Average time from assignment to worker claiming (transitioning
+        to working). Measures how quickly workers react to push-assignments.
+      query: |
+        SELECT AVG(w.timestamp - a.timestamp)
+        FROM task_sequence a
+        JOIN task_sequence w ON w.task_id = a.task_id AND w.status = 'working'
+        WHERE a.status = 'assigned'
+          AND w.timestamp > a.timestamp
+      lower_is_better: true
+
+    - name: coordinator_time_ms
+      description: >
+        Total time the coordinator spent in 'working' state across all
+        tasks. This is pure dispatch overhead that doesn't exist in pull models.
+      query: |
+        SELECT COALESCE(SUM(time_actual_ms), 0)
+        FROM tasks
+        WHERE worker_id IN ('coordinator', 'lead')
+          AND deleted_at IS NULL
+      lower_is_better: true
+
+    - name: worker_idle_time_ms
+      description: >
+        Average gap between a worker completing one task and starting
+        the next. High values indicate the coordinator is a bottleneck.
+      derived: "Per-worker: avg(next_task.started_at - prev_task.completed_at)"
+      lower_is_better: true
+
+    - name: reassignment_count
+      description: >
+        Total number of task reassignments (assigned -> assigned transitions
+        with different worker_id). Indicates coordinator correction overhead.
+      query: |
+        SELECT COUNT(*)
+        FROM task_sequence s1
+        JOIN task_sequence s2 ON s2.task_id = s1.task_id
+        WHERE s1.status = 'assigned' AND s2.status = 'assigned'
+          AND s2.timestamp > s1.timestamp
+          AND s1.worker_id != s2.worker_id
+      lower_is_better: true
+
+  # Quality and distribution metrics
+  quality:
+    - name: blocking_ratio_pct
+      description: "Percentage of tracked time spent in pending/assigned vs working"
+      derived: "100 * blocked_time / (blocked_time + working_time)"
+      lower_is_better: true
+
+    - name: rework_rate_pct
+      description: "Percentage of tasks that entered working state more than once"
+      derived: "100 * reworked_tasks / total_tasks_worked"
+      lower_is_better: true
+
+    - name: task_distribution_gini
+      description: >
+        Gini coefficient of tasks-per-worker distribution. 0 = perfectly
+        equal, 1 = all tasks on one worker. Push should produce lower
+        values than pull if coordinator distributes evenly.
+      derived: "gini(tasks_completed_per_worker)"
+      lower_is_better: true
+
+    - name: first_pass_success_pct
+      description: "Percentage of tasks completed on first attempt (no rework)"
+      derived: "100 * first_pass_tasks / total_tasks_worked"
+      lower_is_better: false
+
+  # Token/cost efficiency
+  efficiency:
+    - name: tokens_per_completed_task
+      description: "Average total billable tokens per completed task"
+      query: |
+        SELECT AVG(metric_0 + metric_1 + metric_3)
+        FROM tasks
+        WHERE status = 'completed' AND deleted_at IS NULL
+      lower_is_better: true
+
+    - name: cost_per_point
+      description: "Total cost divided by total completed story points"
+      derived: "total_cost_usd / completed_points"
+      lower_is_better: true
+
+# ---------------------------------------------------------------------------
+# How to run
+# ---------------------------------------------------------------------------
+run:
+  # Step 1: Reset database
+  reset: true
+
+  # Step 2: Import template
+  template: experiments/templates/browser-parallel.json
+
+  # Step 3: Launch agents (see variants above for specific commands)
+  # Use scripts/run_experiment.py for automation:
+  #
+  #   # Pure push variant
+  #   python scripts/run_experiment.py \
+  #     --template experiments/templates/browser-parallel.json \
+  #     --workflow push \
+  #     --agents 5 \
+  #     --output results/push-4
+  #
+  #   # Pure pull baseline
+  #   python scripts/run_experiment.py \
+  #     --template experiments/templates/browser-parallel.json \
+  #     --workflow swarm \
+  #     --agents 4 \
+  #     --output results/pull-4
+  #
+  #   # Hierarchical baseline
+  #   python scripts/run_experiment.py \
+  #     --template experiments/templates/browser-parallel.json \
+  #     --workflow hierarchical \
+  #     --agents 5 \
+  #     --output results/hybrid-4
+
+  # Step 4: Wait and export
+  #   python scripts/run_experiment.py --wait --output results/push-4
+  #   python scripts/run_experiment.py --wait --output results/pull-4
+  #   python scripts/run_experiment.py --wait --output results/hybrid-4
+
+  # Step 5: Compare results
+  #   python scripts/compare_experiments.py \
+  #     results/push-4/tasks.db results/pull-4/tasks.db results/hybrid-4/tasks.db \
+  #     --labels "push,pull,hybrid" \
+  #     --charts \
+  #     --output results/push-vs-pull-vs-hybrid
+
+  # Timeout: abort if not complete within 2 hours
+  timeout_seconds: 7200
+
+  # Poll interval for completion check
+  poll_interval_seconds: 30
+
+# ---------------------------------------------------------------------------
+# Expected outcomes and success criteria
+# ---------------------------------------------------------------------------
+success_criteria:
+  # Minimum completion rate to consider the experiment valid
+  min_completion_rate_pct: 80
+
+  # Maximum acceptable coordinator overhead (as % of total time)
+  max_coordinator_overhead_pct: 20
+
+  # The experiment is interesting if push shows measurable differences from pull
+  interesting_if:
+    - "dispatch_latency_ms > 1000 (coordinator adds noticeable delay)"
+    - "pickup_latency_ms < 5000 (workers respond quickly to assignments)"
+    - "worker_idle_time_ms differs significantly from pull baseline"
+    - "task_distribution_gini < pull baseline (more even distribution)"
+    - "blocking_ratio_pct differs > 5 percentage points from pull"

@@ -29,3 +29,4 @@ pub use files::{FileSource, ResolvedFile};
 pub use loader::{ConfigLoader, ConfigPaths, ConfigTier};
 pub use merge::deep_merge;
 pub use types::*;
+// AppConfig is re-exported via the glob above.

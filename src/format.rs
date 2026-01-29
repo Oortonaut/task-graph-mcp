@@ -220,6 +220,10 @@ pub fn format_workers_markdown(workers: &[WorkerInfo]) -> String {
             md.push_str(&format!("- **tags**: {}\n", worker.tags.join(", ")));
         }
 
+        if let Some(ref workflow) = worker.workflow {
+            md.push_str(&format!("- **workflow**: {}\n", workflow));
+        }
+
         md.push_str(&format!(
             "- **claims**: {}/{}\n",
             worker.claim_count, worker.max_claims

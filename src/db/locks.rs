@@ -1,4 +1,10 @@
-//! File lock operations (advisory) and claim tracking.
+//! File lock operations (advisory and exclusive) and claim tracking.
+//!
+//! Two lock modes are supported:
+//! - **Advisory marks** (default): `mark_file("src/main.rs")` - warns if another agent
+//!   holds the mark, but allows it.
+//! - **Exclusive locks** (`lock:` prefix): `mark_file("lock:git-commit")` - rejects with
+//!   an error if another agent holds the lock. Used for mutual exclusion on shared resources.
 
 use super::{Database, now_ms};
 use crate::types::{ClaimEvent, ClaimEventType, ClaimUpdates, FileLock};
@@ -6,7 +12,79 @@ use anyhow::Result;
 use rusqlite::params;
 use std::collections::{HashMap, HashSet};
 
+/// Result of an exclusive lock attempt.
+pub enum ExclusiveLockResult {
+    /// Lock acquired successfully.
+    Acquired,
+    /// Lock already held by this agent (refreshed).
+    AlreadyHeldBySelf,
+    /// Lock held by another agent - cannot acquire.
+    HeldByOther(String),
+}
+
 impl Database {
+    /// Acquire an exclusive lock on a resource.
+    ///
+    /// Unlike advisory `lock_file`, this method enforces mutual exclusion:
+    /// - If the lock is free, it is acquired.
+    /// - If the lock is already held by the same agent, it is refreshed (timestamp/reason updated).
+    /// - If the lock is held by another agent, returns `HeldByOther(agent_id)`.
+    ///
+    /// The `file_path` parameter stores the full `lock:resource` string for consistent
+    /// storage in the file_locks table.
+    pub fn lock_file_exclusive(
+        &self,
+        file_path: String,
+        worker_id: &str,
+        reason: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<ExclusiveLockResult> {
+        let now = now_ms();
+
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction()?;
+
+            // Check if already locked
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT worker_id FROM file_locks WHERE file_path = ?1",
+                    params![&file_path],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            let result = if let Some(existing_worker) = existing {
+                if existing_worker != worker_id {
+                    // Locked by another worker - exclusive rejection
+                    ExclusiveLockResult::HeldByOther(existing_worker)
+                } else {
+                    // Already locked by this worker - refresh timestamp, reason, and task_id
+                    tx.execute(
+                        "UPDATE file_locks SET locked_at = ?1, reason = ?2, task_id = ?3 WHERE file_path = ?4",
+                        params![now, &reason, &task_id, &file_path],
+                    )?;
+                    ExclusiveLockResult::AlreadyHeldBySelf
+                }
+            } else {
+                // Not locked - create new lock
+                tx.execute(
+                    "INSERT INTO file_locks (file_path, worker_id, reason, locked_at, task_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![&file_path, worker_id, &reason, now, &task_id],
+                )?;
+
+                // Record claim event for tracking
+                tx.execute(
+                    "INSERT INTO claim_sequence (file_path, worker_id, event, reason, timestamp) VALUES (?1, ?2, 'claimed', ?3, ?4)",
+                    params![&file_path, worker_id, &reason, now],
+                )?;
+                ExclusiveLockResult::Acquired
+            };
+
+            tx.commit()?;
+            Ok(result)
+        })
+    }
+
     /// Lock a file (advisory).
     /// Returns Ok with optional warning if already locked by another worker.
     pub fn lock_file(

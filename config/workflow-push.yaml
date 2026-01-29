@@ -1,0 +1,358 @@
+# PURE PUSH WORKFLOW - Coordinator assigns ALL tasks via update(assignee=)
+# Use for: experiments measuring push-coordination overhead and latency
+# Coordination: coordinator creates and assigns every task; workers NEVER self-select
+# Contrast with: swarm (pure pull), hierarchical (hybrid push/pull)
+
+name: push
+description: Coordinator assigns all tasks to workers via update(assignee=). No self-selection.
+
+settings:
+  initial_state: pending
+  disconnect_state: pending
+  blocking_states: [pending, assigned, working]
+  unknown_phase: warn
+
+# ---------------------------------------------------------------------------
+# Roles
+# ---------------------------------------------------------------------------
+roles:
+  coordinator:
+    description: >
+      Central dispatcher. Creates tasks, assigns every one via
+      update(task=..., assignee="worker-N"). Monitors progress, reassigns
+      on failure. Workers NEVER call list_tasks(ready=true) to self-select.
+    tags: [coordinator, lead]
+    max_claims: 1            # coordinator only claims the root/dispatch task
+    can_assign: true
+    can_create_subtasks: true
+
+  worker:
+    description: >
+      Passive executor. Waits for assignment (status=assigned), claims the
+      assigned task, executes, and completes. Does NOT browse or self-select
+      tasks. Reports results via attach().
+    tags: [worker]
+    max_claims: 2
+    can_assign: false
+    can_create_subtasks: false
+
+# ---------------------------------------------------------------------------
+# States
+# ---------------------------------------------------------------------------
+states:
+  pending:
+    exits: [assigned, working, cancelled]
+    timed: false
+    prompts:
+      enter: >
+        Task created but not yet assigned. Only the coordinator moves tasks
+        out of pending via update(assignee=...).
+
+  assigned:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: >
+        **Assigned to you by the coordinator.** Review the description and
+        any attached context, then claim() to begin working. Do NOT browse
+        for other tasks -- wait for explicit assignment.
+
+  working:
+    exits: [completed, failed, pending, consult]
+    timed: true
+    prompts:
+      enter: |
+        **Push-model working.** You received this task from the coordinator.
+
+        - `thinking()` regularly for heartbeat + visibility
+        - `mark_file()` before editing; `list_marks()` first for conflicts
+        - Never revert unfamiliar changes: check `mark_updates()` / `list_marks()` first
+        - 5+ files? Ask coordinator to decompose instead
+        - `mark_updates()` every 30-60s during long ops
+        - Stale workers (5+ min no heartbeat) get evicted
+        - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release via `update(task="_lock:git-commit", status="pending")`
+
+        Transitions: {{valid_exits}}
+        Phase: {{current_phase}} | Valid: {{valid_phases}}
+
+      exit: "Unmark files, attach results, `log_metrics()`. Coordinator will assign next task."
+
+  completed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: >
+        Task completed. Results should be attached. Wait for coordinator
+        to assign the next task -- do NOT self-select.
+
+  failed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: |
+        Task failed. Document: what was attempted, what blocked, suggested next steps.
+        The coordinator will decide whether to reassign or cancel.
+
+  consult:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: >
+        **Paused for coordinator review.** Attach a note explaining what decision
+        is needed. The coordinator (or a human) must transition this back.
+
+  cancelled:
+    exits: []
+    timed: false
+
+# ---------------------------------------------------------------------------
+# Phases
+# ---------------------------------------------------------------------------
+phases:
+  explore:
+    prompts:
+      enter: "**Explore.** Read code/docs, identify constraints. Attach findings for coordinator."
+      exit: "Attach exploration findings. Coordinator decides next assignment."
+
+  plan:
+    prompts:
+      enter: "**Plan.** Outline approach. Coordinator decomposes via `create_tree()` and assigns."
+      exit: "Ensure plan attached. Coordinator creates and assigns subtasks."
+
+  design:
+    prompts:
+      enter: "**Design.** Document approach, interfaces, key decisions. Attach design note."
+      exit: "Ensure design doc attached with rationale."
+
+  implement:
+    prompts:
+      enter: "**Implement.** `mark_file()` first. Follow codebase patterns. Tests alongside code."
+      exit: "Ensure: compiles, tests pass, commit attached."
+
+  review:
+    prompts:
+      enter: "**Review.** Tests pass, no warnings, docs updated."
+      exit: "Ensure findings documented, blockers escalated."
+
+  test:
+    prompts:
+      enter: "**Test.** Run existing tests, add new ones, cover edge cases."
+      exit: "Ensure test results attached, all passing."
+
+  security:
+    prompts:
+      enter: "**Security.** Input validation, auth/authz, no secrets in code."
+      exit: "Ensure findings attached, critical issues escalated."
+
+  triage:
+    prompts:
+      enter: "**Triage.** Classify, set priority, assess scope. Coordinator routes."
+      exit: "Ensure tags/priority set, description clear."
+
+  diagnose:
+    prompts:
+      enter: "**Diagnose.** Reproduce, narrow to module/function, attach findings."
+      exit: "Ensure root cause documented, fix approach outlined."
+
+  doc:
+    prompts:
+      enter: "**Document.** Update README, API docs, inline comments."
+      exit: "Ensure doc changes committed."
+
+  integrate:
+    prompts:
+      enter: "**Integrate.** Full test suite. Check conflicts via `mark_updates()`."
+
+  deliver:
+    prompts:
+      enter: "**Deliver.** All tests green, build clean. Version bumps if applicable."
+
+  deploy:
+    prompts:
+      enter: "**Deploy.** Release build. Tag if applicable. Monitor initial deployment."
+
+  monitor:
+    prompts:
+      enter: "**Monitor.** Check errors and performance. Time-box. Attach observations."
+
+  optimize:
+    prompts:
+      enter: "**Optimize.** Measure baseline, change one thing, re-measure."
+
+# ---------------------------------------------------------------------------
+# State+Phase combos
+# ---------------------------------------------------------------------------
+combos:
+  working+implement:
+    enter: |
+      Implementing (push-assigned). Follow patterns, tests alongside, atomic commits.
+      - **3+ files**: search ALL symbols first, mark_file() ALL, plan attachment before coding
+      - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release
+
+  working+review:
+    enter: "Review (push-assigned): correctness, edge cases, test coverage."
+
+  working+plan:
+    enter: "Planning (push-assigned): outline approach, attach plan for coordinator."
+
+  working+explore:
+    enter: "Exploring (push-assigned): read code/docs, attach findings. Time-box."
+
+  working+test:
+    enter: "Testing (push-assigned): run suite, add tests, verify edges. Attach results."
+
+  working+triage:
+    enter: "Triaging (push-assigned): categorize, prioritize, assess scope."
+
+  working+diagnose:
+    enter: "Diagnosing (push-assigned): reproduce, narrow down, root cause."
+
+  working+security:
+    enter: "Security (push-assigned): input validation, auth, secrets, deps."
+
+  assigned+implement:
+    enter: "Implementation assigned by coordinator. Read task description and context before claiming."
+
+  assigned+review:
+    enter: "Review assigned by coordinator. Read implementation context before claiming."
+
+  assigned+test:
+    enter: "Test assigned by coordinator. Check implementation notes before claiming."
+
+  assigned+explore:
+    enter: "Exploration assigned by coordinator. Read scope constraints before claiming."
+
+# ---------------------------------------------------------------------------
+# Role-specific prompts
+# ---------------------------------------------------------------------------
+role_prompts:
+  coordinator:
+    dispatch_loop: |
+      **Pure push dispatch loop:**
+      1. `list_tasks(status="pending")` to find unassigned work
+      2. `list_agents()` to find available workers (low claim count, matching tags)
+      3. `update(task="id", assignee="worker-id")` to push-assign each task
+      4. Monitor: `list_tasks(status="working")` and `list_agents()`
+      5. On failure: `update(task="id", assignee="other-worker", force=true)`
+      6. Repeat until all tasks are terminal
+
+      **Key metrics to log (for experiment):**
+      - Time between task creation and assignment (dispatch latency)
+      - Time between assignment and worker claiming (pickup latency)
+      - Number of reassignments per task
+      - Worker idle time between assignments
+      - Total wall-clock time
+
+    assignment_strategy: |
+      Assign via `update(task="id", assignee="worker-id")`.
+      Selection criteria (in order):
+      1. Worker has matching needed_tags
+      2. Worker has lowest current claim count
+      3. Worker has context from related tasks (same parent, similar tags)
+      4. Round-robin if all else is equal
+
+    monitoring: |
+      Monitor: `list_agents()` for workers, `list_tasks(status="working")` for progress.
+      Watch for: stuck workers (no heartbeat), overloaded workers, dependency bottlenecks.
+      Reassign: `update(task="id", assignee="other-worker", force=true)`.
+
+  worker:
+    passive_wait: |
+      **Pure push model -- do NOT self-select tasks.**
+      1. Wait for task assignment (status transitions to "assigned")
+      2. `claim(task="id")` to begin working
+      3. `mark_file()` before editing
+      4. Work, `thinking()` regularly
+      5. `attach(type="result", ...)` + `unmark_file()` + `update(status="completed")`
+      6. **Wait** for coordinator to assign the next task
+
+    completing: |
+      Before completing:
+      1. Verify success criteria met
+      2. Run tests
+      3. `attach(type="result", content="...")` - document work done
+      4. `unmark_file()` - release files
+      5. `log_metrics(cost_usd=...)` - record cost
+      6. `update(status="completed")`
+      7. **Do NOT look for the next task.** Wait for assignment.
+
+# ---------------------------------------------------------------------------
+# Push-specific settings
+# ---------------------------------------------------------------------------
+push:
+  coordinator_settings:
+    # Coordinator is the sole dispatcher; workers never self-select
+    exclusive_dispatch: true
+    # How often coordinator should poll for unassigned tasks (guidance)
+    poll_interval_guidance_ms: 5000
+    # Maximum tasks to assign in one dispatch cycle
+    batch_size: 5
+    # Reassign after this many ms with no heartbeat from worker
+    reassign_after_stale_ms: 300000
+
+  worker_settings:
+    # Workers must NOT call list_tasks(ready=true) to find work
+    self_select: false
+    # Workers claim only tasks explicitly assigned to them
+    max_concurrent_claims: 2
+    # Workers should check for assignments this often (guidance)
+    poll_for_assignment_ms: 10000
+
+  # Metrics to capture for the experiment
+  experiment_metrics:
+    - name: dispatch_latency_ms
+      description: "Time from task creation to coordinator assigning it"
+      source: "created_at -> assigned transition timestamp"
+    - name: pickup_latency_ms
+      description: "Time from assignment to worker claiming (starting work)"
+      source: "assigned transition -> working transition timestamp"
+    - name: execution_time_ms
+      description: "Time spent in working state"
+      source: "time_actual_ms on task"
+    - name: total_task_latency_ms
+      description: "End-to-end time from creation to completion"
+      source: "created_at -> completed_at"
+    - name: reassignment_count
+      description: "Number of times a task was reassigned"
+      source: "Count of assigned transitions per task in task_sequence"
+    - name: worker_idle_time_ms
+      description: "Time workers spend not working (between completions and next assignment)"
+      source: "Gap between completed_at of previous task and working timestamp of next task per worker"
+    - name: coordinator_overhead_ms
+      description: "Total time coordinator spends in working state (dispatch overhead)"
+      source: "Coordinator's total time_actual_ms"
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+gates:
+  status:working:
+    - type: "gate/results"
+      enforcement: warn
+      description: "Attach results for coordinator visibility"
+
+  status:assigned:
+    - type: "gate/context"
+      enforcement: warn
+      description: "Coordinator should attach task context at assignment time"
+
+# ---------------------------------------------------------------------------
+# Attachment types
+# ---------------------------------------------------------------------------
+attachments:
+  coordinator_to_worker:
+    context: Essential background info (replaces)
+    plan: Task approach and constraints (markdown, replaces)
+    note: Clarifications or additional instructions (appends)
+  worker_to_coordinator:
+    result: Structured completion data (JSON, replaces)
+    note: Progress updates, questions, observations (appends)
+    error: Blockers or failures needing reassignment (appends)
+  code_artifacts:
+    commit: Git commit hash (appends)
+    diff: Code changes for review (appends)
+    changelist: Files modified (appends)
+  operations:
+    log: Chronological work record (appends)
+    output: Command/test output (appends)
+    meta: Structured metadata (JSON, replaces)
