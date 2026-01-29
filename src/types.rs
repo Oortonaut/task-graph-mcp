@@ -181,9 +181,8 @@ pub struct TaskTreeInput {
     /// Ignored if ref is set.
     pub id: Option<String>,
 
-    /// Task title (required for new tasks, optional if ref is set).
-    #[serde(default)]
-    pub title: String,
+    /// Task title (optional; derived from description if omitted).
+    pub title: Option<String>,
 
     /// Task description.
     pub description: Option<String>,

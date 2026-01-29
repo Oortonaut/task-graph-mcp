@@ -793,9 +793,13 @@ impl Database {
                  AND NOT EXISTS (
                      SELECT 1 FROM dependencies d
                      INNER JOIN tasks blocker ON d.from_task_id = blocker.id
-                     WHERE d.to_task_id = t.id 
+                     WHERE d.to_task_id = t.id
                      AND d.dep_type IN ({})
                      AND blocker.status IN ({})
+                 )
+                 AND t.id NOT IN (
+                     SELECT from_task_id FROM dependencies
+                     WHERE dep_type = 'contains'
                  )
                  {}
                  {}

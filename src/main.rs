@@ -4,6 +4,7 @@
 //! for multi-agent coordination.
 
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use clap::Parser;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
@@ -27,6 +28,7 @@ use task_graph_mcp::cli::{Cli, Command, UiMode as CliUiMode, migrate};
 use task_graph_mcp::config::{
     AttachmentsConfig, AutoAdvanceConfig, Config, ConfigLoader, DependenciesConfig, IdsConfig,
     PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig, UiMode,
+    watcher::{WatchPaths, WatcherConfig, start_config_watcher},
     workflows::WorkflowsConfig,
 };
 use task_graph_mcp::dashboard;
@@ -40,15 +42,19 @@ use task_graph_mcp::format::OutputFormat;
 use task_graph_mcp::logging::{LogLevelFilter, Logger};
 use task_graph_mcp::resources::ResourceHandler;
 use task_graph_mcp::tools::{ToolContext, ToolHandler};
-use tracing::{Level, info};
+use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 /// MCP server handler.
+///
+/// Uses `ArcSwap` for `tool_handler` and `resource_handler` so that the config
+/// file watcher can atomically swap in rebuilt handlers when config files change
+/// on disk, without restarting the server.
 #[derive(Clone)]
 struct TaskGraphServer {
-    tool_handler: Arc<ToolHandler>,
-    resource_handler: Arc<ResourceHandler>,
-    prompts: Arc<Prompts>,
+    tool_handler: Arc<ArcSwap<ToolHandler>>,
+    resource_handler: Arc<ArcSwap<ResourceHandler>>,
+    prompts: Arc<ArcSwap<Prompts>>,
     /// Atomic level filter for logging (client can adjust via logging/setLevel).
     level_filter: Arc<LogLevelFilter>,
 }
@@ -74,37 +80,40 @@ impl TaskGraphServer {
         path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
         level_filter: Arc<LogLevelFilter>,
     ) -> Self {
+        let tool_handler = Arc::new(ToolHandler::new(
+            Arc::clone(&db),
+            media_dir,
+            skills_dir.clone(),
+            server_paths,
+            Arc::clone(&prompts),
+            Arc::clone(&states_config),
+            Arc::clone(&phases_config),
+            Arc::clone(&deps_config),
+            Arc::clone(&auto_advance),
+            Arc::clone(&attachments_config),
+            Arc::clone(&tags_config),
+            ids_config,
+            Arc::clone(&workflows),
+            default_format,
+            default_page_size,
+            path_mapper,
+        ));
+        let resource_handler = Arc::new(
+            ResourceHandler::new(
+                db,
+                states_config,
+                phases_config,
+                deps_config,
+                tags_config,
+                workflows,
+            )
+            .with_skills_dir(skills_dir),
+        );
+
         Self {
-            tool_handler: Arc::new(ToolHandler::new(
-                Arc::clone(&db),
-                media_dir,
-                skills_dir.clone(),
-                server_paths,
-                Arc::clone(&prompts),
-                Arc::clone(&states_config),
-                Arc::clone(&phases_config),
-                Arc::clone(&deps_config),
-                Arc::clone(&auto_advance),
-                Arc::clone(&attachments_config),
-                Arc::clone(&tags_config),
-                ids_config,
-                Arc::clone(&workflows),
-                default_format,
-                default_page_size,
-                path_mapper,
-            )),
-            resource_handler: Arc::new(
-                ResourceHandler::new(
-                    db,
-                    states_config,
-                    phases_config,
-                    deps_config,
-                    tags_config,
-                    workflows,
-                )
-                .with_skills_dir(skills_dir),
-            ),
-            prompts,
+            tool_handler: Arc::new(ArcSwap::from(tool_handler)),
+            resource_handler: Arc::new(ArcSwap::from(resource_handler)),
+            prompts: Arc::new(ArcSwap::from(prompts)),
             level_filter,
         }
     }
@@ -112,13 +121,13 @@ impl TaskGraphServer {
 
 /// Default server instructions when no prompts.yaml is present.
 const DEFAULT_INSTRUCTIONS: &str = "\
-Task graph for multi-agent coordination. Start: connect() → list_tasks(ready=true) → claim() → work → update(state=\"completed\").
+Task graph for multi-agent coordination. Start: connect() \u{2192} list_tasks(ready=true) \u{2192} claim() \u{2192} work \u{2192} update(state=\"completed\").
 Use get_skill(\"basics\") for full documentation.";
 
 impl ServerHandler for TaskGraphServer {
     fn get_info(&self) -> InitializeResult {
-        let instructions = self
-            .prompts
+        let prompts = self.prompts.load();
+        let instructions = prompts
             .instructions
             .clone()
             .unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string());
@@ -158,8 +167,9 @@ impl ServerHandler for TaskGraphServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, ErrorData> {
+        let handler = self.tool_handler.load();
         Ok(ListToolsResult {
-            tools: self.tool_handler.get_tools(),
+            tools: handler.get_tools(),
             next_cursor: None,
             meta: None,
         })
@@ -177,12 +187,9 @@ impl ServerHandler for TaskGraphServer {
             .with_name(format!("tool:{}", request.name));
         let tool_ctx = ToolContext::new(logger);
 
+        let handler = self.tool_handler.load();
         let args = Value::Object(request.arguments.unwrap_or_default());
-        match self
-            .tool_handler
-            .call_tool(&request.name, args, &tool_ctx)
-            .await
-        {
+        match handler.call_tool(&request.name, args, &tool_ctx).await {
             Ok(result) => Ok(CallToolResult {
                 content: vec![Content::text(result.into_string())],
                 is_error: None,
@@ -215,8 +222,9 @@ impl ServerHandler for TaskGraphServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListResourcesResult, ErrorData> {
+        let handler = self.resource_handler.load();
         Ok(ListResourcesResult {
-            resources: self.resource_handler.get_resources(),
+            resources: handler.get_resources(),
             next_cursor: None,
             meta: None,
         })
@@ -227,8 +235,9 @@ impl ServerHandler for TaskGraphServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListResourceTemplatesResult, ErrorData> {
+        let handler = self.resource_handler.load();
         Ok(ListResourceTemplatesResult {
-            resource_templates: self.resource_handler.get_resource_templates(),
+            resource_templates: handler.get_resource_templates(),
             next_cursor: None,
             meta: None,
         })
@@ -239,8 +248,9 @@ impl ServerHandler for TaskGraphServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ReadResourceResult, ErrorData> {
+        let handler = self.resource_handler.load();
         let uri_string = request.uri.to_string();
-        match self.resource_handler.read_resource(&uri_string).await {
+        match handler.read_resource(&uri_string).await {
             Ok(result) => Ok(ReadResourceResult {
                 contents: vec![ResourceContents::text(
                     serde_json::to_string_pretty(&result).unwrap_or_default(),
@@ -441,6 +451,123 @@ fn load_workflows_with_cache(loader: &ConfigLoader) -> WorkflowsConfig {
     workflows
 }
 
+/// Rebuild config from disk using a fresh ConfigLoader, then rebuild the
+/// ToolHandler and ResourceHandler and swap them into the server atomically.
+///
+/// Immutable state (db, server_paths, path_mapper, level_filter, media/skills dirs)
+/// is carried over from the original server construction since those are not
+/// expected to change via config file edits.
+fn reload_config(server: &TaskGraphServer, reload_ctx: &ReloadContext) {
+    info!("Reloading configuration from disk...");
+
+    // Re-load configuration from disk using a fresh ConfigLoader
+    let loader = match ConfigLoader::load() {
+        Ok(loader) => loader,
+        Err(e) => {
+            warn!(
+                "Config reload failed during load: {}. Keeping current config.",
+                e
+            );
+            return;
+        }
+    };
+
+    // Reload prompts
+    let prompts = loader.load_prompts();
+
+    // Reload workflows with cache
+    let workflows = load_workflows_with_cache(&loader);
+
+    // Re-derive states and phases from the new workflows
+    let states_config: StatesConfig = (&workflows).into();
+    let phases_config: PhasesConfig = (&workflows).into();
+
+    // Validate
+    if let Err(e) = states_config.validate() {
+        warn!(
+            "Config reload failed validation (states): {}. Keeping current config.",
+            e
+        );
+        return;
+    }
+
+    // Re-load the base config for dependencies, auto_advance, etc.
+    let new_config = loader.into_config();
+    if let Err(e) = new_config.dependencies.validate() {
+        warn!(
+            "Config reload failed validation (dependencies): {}. Keeping current config.",
+            e
+        );
+        return;
+    }
+
+    // Wrap in Arc
+    let prompts = Arc::new(prompts);
+    let workflows = Arc::new(workflows);
+    let states_config = Arc::new(states_config);
+    let phases_config = Arc::new(phases_config);
+    let deps_config = Arc::new(new_config.dependencies.clone());
+    let auto_advance = Arc::new(new_config.auto_advance.clone());
+    let attachments_config = Arc::new(new_config.attachments.clone());
+    let mut tags_config = new_config.tags.clone();
+    tags_config.register_workflow_tags(&workflows.all_role_tags());
+    let tags_config = Arc::new(tags_config);
+    let ids_config = Arc::new(new_config.ids.clone());
+
+    // Build new ToolHandler
+    let new_tool_handler = Arc::new(ToolHandler::new(
+        Arc::clone(&reload_ctx.db),
+        reload_ctx.media_dir.clone(),
+        reload_ctx.skills_dir.clone(),
+        Arc::clone(&reload_ctx.server_paths),
+        Arc::clone(&prompts),
+        Arc::clone(&states_config),
+        Arc::clone(&phases_config),
+        Arc::clone(&deps_config),
+        Arc::clone(&auto_advance),
+        Arc::clone(&attachments_config),
+        Arc::clone(&tags_config),
+        ids_config,
+        Arc::clone(&workflows),
+        reload_ctx.default_format,
+        reload_ctx.default_page_size,
+        Arc::clone(&reload_ctx.path_mapper),
+    ));
+
+    // Build new ResourceHandler
+    let new_resource_handler = Arc::new(
+        ResourceHandler::new(
+            Arc::clone(&reload_ctx.db),
+            states_config,
+            phases_config,
+            deps_config,
+            tags_config,
+            workflows,
+        )
+        .with_skills_dir(reload_ctx.skills_dir.clone()),
+    );
+
+    // Atomically swap in the new handlers
+    server.tool_handler.store(new_tool_handler);
+    server.resource_handler.store(new_resource_handler);
+    server.prompts.store(prompts);
+
+    info!("Configuration reloaded successfully");
+}
+
+/// Immutable context needed by the reload path -- values that do not change
+/// when config files are edited on disk.
+#[derive(Clone)]
+struct ReloadContext {
+    db: Arc<Database>,
+    media_dir: std::path::PathBuf,
+    skills_dir: std::path::PathBuf,
+    server_paths: Arc<ServerPaths>,
+    path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
+    default_format: OutputFormat,
+    default_page_size: i32,
+}
+
 /// Run the MCP server
 async fn run_server(
     config: Config,
@@ -497,7 +624,9 @@ async fn run_server(
     let deps_config = Arc::new(config.dependencies.clone());
     let auto_advance = Arc::new(config.auto_advance.clone());
     let attachments_config = Arc::new(config.attachments.clone());
-    let tags_config = Arc::new(config.tags.clone());
+    let mut tags_config = config.tags.clone();
+    tags_config.register_workflow_tags(&workflows.all_role_tags());
+    let tags_config = Arc::new(tags_config);
     let ids_config = Arc::new(config.ids.clone());
 
     // Create path mapper from config
@@ -513,7 +642,7 @@ async fn run_server(
         Arc::clone(&db),
         config.server.media_dir.clone(),
         config.server.skills_dir.clone(),
-        server_paths,
+        Arc::clone(&server_paths),
         prompts,
         Arc::clone(&states_config),
         Arc::clone(&phases_config),
@@ -525,9 +654,23 @@ async fn run_server(
         workflows,
         config.server.default_format,
         config.server.default_page_size,
-        path_mapper,
+        Arc::clone(&path_mapper),
         level_filter,
     );
+
+    // Build the reload context with immutable state needed for config hot-reload
+    let reload_ctx = ReloadContext {
+        db: Arc::clone(&db),
+        media_dir: config.server.media_dir.clone(),
+        skills_dir: config.server.skills_dir.clone(),
+        server_paths: Arc::clone(&server_paths),
+        path_mapper,
+        default_format: config.server.default_format,
+        default_page_size: config.server.default_page_size,
+    };
+
+    // Start config file watcher for hot-reload
+    start_config_file_watcher(&server, reload_ctx, &config);
 
     // Start the HTTP dashboard server only when UI mode is explicitly set to Web.
     // When mode is "none", skip the dashboard entirely (bug fix: dashboard was
@@ -554,6 +697,81 @@ async fn run_server(
     service.waiting().await?;
 
     Ok(())
+}
+
+/// Start the config file watcher and spawn a background task that listens for
+/// change events and triggers a config reload.
+///
+/// The watcher monitors:
+/// - `config.yaml` and `prompts.yaml` in the project config directory
+/// - `workflow-*.yaml` files in the project config directory
+/// - The skills directory for added/modified/removed skill files
+///
+/// If the watcher fails to start (e.g., because the directories don't exist),
+/// the server continues without hot-reload and a warning is logged.
+fn start_config_file_watcher(server: &TaskGraphServer, reload_ctx: ReloadContext, config: &Config) {
+    // Determine the config directory to watch.
+    // Prefer the project's task-graph/ directory; fall back to .task-graph/.
+    let config_dir = if std::path::Path::new("task-graph").exists() {
+        Some(std::path::PathBuf::from("task-graph"))
+    } else if std::path::Path::new(".task-graph").exists() {
+        Some(std::path::PathBuf::from(".task-graph"))
+    } else {
+        None
+    };
+
+    let skills_dir = if config.server.skills_dir.exists() {
+        Some(config.server.skills_dir.clone())
+    } else {
+        None
+    };
+
+    // If there is nothing to watch, skip.
+    if config_dir.is_none() && skills_dir.is_none() {
+        info!("No config or skills directory found to watch; hot-reload disabled");
+        return;
+    }
+
+    let watch_paths = WatchPaths {
+        config_dir,
+        skills_dir,
+    };
+
+    let watcher_config = WatcherConfig::default();
+
+    match start_config_watcher(watch_paths, watcher_config) {
+        Ok(mut handle) => {
+            info!("Config file watcher started for hot-reload");
+
+            // Clone the server reference for the background task
+            let server = server.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    match handle.wait_for_change().await {
+                        Some(event) => {
+                            if event.requires_reload() {
+                                info!("Config change detected: {:?}", event);
+                                reload_config(&server, &reload_ctx);
+                            }
+                        }
+                        None => {
+                            // Sender dropped -- watcher stopped
+                            info!("Config file watcher stopped");
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+        Err(e) => {
+            warn!(
+                "Failed to start config file watcher: {}. \
+                 Server will continue without hot-reload.",
+                e
+            );
+        }
+    }
 }
 
 /// Run the export command

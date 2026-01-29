@@ -130,6 +130,24 @@ pub fn format_tasks_markdown(
     md
 }
 
+/// Maximum title length in list/scan markdown output before truncation.
+pub const MAX_TITLE_DISPLAY_LEN: usize = 80;
+
+/// Truncate a title for display in list/scan output.
+/// Titles longer than MAX_TITLE_DISPLAY_LEN are cut at the limit and "..." is appended.
+/// Multi-line titles are collapsed to the first line.
+pub fn truncate_title(title: &str) -> std::borrow::Cow<'_, str> {
+    // Collapse to first line
+    let first_line = title.split('\n').next().unwrap_or(title).trim();
+    if first_line.len() <= MAX_TITLE_DISPLAY_LEN {
+        std::borrow::Cow::Borrowed(first_line)
+    } else {
+        // Truncate at char boundary
+        let truncated = &first_line[..first_line.floor_char_boundary(MAX_TITLE_DISPLAY_LEN)];
+        std::borrow::Cow::Owned(format!("{}...", truncated.trim_end()))
+    }
+}
+
 /// Format a state name for display (capitalize, replace underscores with spaces).
 fn format_state_name(state: &str) -> String {
     state
@@ -145,9 +163,19 @@ fn format_state_name(state: &str) -> String {
         .join(" ")
 }
 
+/// Priority marker for list/scan output. Only shows for above-default priorities.
+fn priority_marker(priority: i32) -> &'static str {
+    match priority {
+        10 => "!!! ",
+        8..=9 => "!! ",
+        6..=7 => "! ",
+        _ => "",
+    }
+}
+
 /// Format a task in short form for lists.
 fn format_task_short(task: &Task, blocked_by: &[String]) -> String {
-    let priority_marker = if task.priority > 0 { "!!! " } else { "" };
+    let priority_marker = priority_marker(task.priority);
 
     let blocked = if blocked_by.is_empty() {
         String::new()
@@ -170,7 +198,7 @@ fn format_task_short(task: &Task, blocked_by: &[String]) -> String {
     format!(
         "- {}{} `{}`{}{}{}\n",
         priority_marker,
-        task.title,
+        truncate_title(&task.title),
         &task.id[..8.min(task.id.len())],
         owner,
         blocked,
@@ -427,7 +455,7 @@ pub fn format_scan_result_markdown(result: &ScanResult) -> String {
 
 /// Format a task in short form for scan results.
 fn format_scan_task_short(task: &Task) -> String {
-    let priority_marker = if task.priority > 0 { "!!! " } else { "" };
+    let priority_marker = priority_marker(task.priority);
 
     let owner = task
         .worker_id
@@ -443,7 +471,7 @@ fn format_scan_task_short(task: &Task) -> String {
     format!(
         "- {}{} `{}` [{}]{}{}\\n",
         priority_marker,
-        task.title,
+        truncate_title(&task.title),
         &task.id[..8.min(task.id.len())],
         task.status,
         owner,
@@ -582,5 +610,40 @@ mod tests {
         assert!(result.contains("└── Level 1"));
         assert!(result.contains("    └── Level 2"));
         assert!(result.contains("        └── Level 3"));
+    }
+
+    #[test]
+    fn test_truncate_title_short() {
+        let title = "Short title";
+        assert_eq!(truncate_title(title).as_ref(), "Short title");
+    }
+
+    #[test]
+    fn test_truncate_title_at_limit() {
+        let title = "A".repeat(MAX_TITLE_DISPLAY_LEN);
+        assert_eq!(truncate_title(&title).as_ref(), title.as_str());
+    }
+
+    #[test]
+    fn test_truncate_title_over_limit() {
+        let title = "A".repeat(MAX_TITLE_DISPLAY_LEN + 20);
+        let result = truncate_title(&title);
+        assert!(result.ends_with("..."));
+        assert!(result.len() <= MAX_TITLE_DISPLAY_LEN + 3);
+    }
+
+    #[test]
+    fn test_truncate_title_multiline() {
+        let title = "First line\nSecond line\nThird line";
+        assert_eq!(truncate_title(title).as_ref(), "First line");
+    }
+
+    #[test]
+    fn test_truncate_title_long_multiline() {
+        let long_first = "A".repeat(100);
+        let title = format!("{}\nSecond line", long_first);
+        let result = truncate_title(&title);
+        assert!(result.ends_with("..."));
+        assert!(result.len() <= MAX_TITLE_DISPLAY_LEN + 3);
     }
 }

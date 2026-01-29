@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_UI_PORT: u16 = 31994;
 
 /// Default number of words for generated IDs.
-pub const DEFAULT_ID_WORDS: u8 = 4;
+pub const DEFAULT_ID_WORDS: u8 = 2;
 
 /// Case style for generated IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -39,21 +39,29 @@ pub enum IdCase {
 /// ID generation configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdsConfig {
-    /// Number of words for generated task IDs (default: 4).
+    /// Number of words for generated task IDs (default: 2).
     #[serde(default = "default_id_words")]
     pub task_id_words: u8,
 
-    /// Number of words for generated agent IDs (default: 4).
+    /// Number of words for generated agent IDs (default: 2).
     #[serde(default = "default_id_words")]
     pub agent_id_words: u8,
 
     /// Case style for generated IDs (default: kebab-case).
     #[serde(default)]
     pub id_case: IdCase,
+
+    /// Case style for generated agent IDs (default: PascalCase).
+    #[serde(default = "default_agent_id_case")]
+    pub agent_id_case: IdCase,
 }
 
 fn default_id_words() -> u8 {
     DEFAULT_ID_WORDS
+}
+
+fn default_agent_id_case() -> IdCase {
+    IdCase::PascalCase
 }
 
 impl Default for IdsConfig {
@@ -62,6 +70,7 @@ impl Default for IdsConfig {
             task_id_words: DEFAULT_ID_WORDS,
             agent_id_words: DEFAULT_ID_WORDS,
             id_case: IdCase::default(),
+            agent_id_case: default_agent_id_case(),
         }
     }
 }
@@ -497,6 +506,19 @@ impl TagsConfig {
             }
         }
         Ok(warnings)
+    }
+
+    /// Register workflow role tags as known tags.
+    /// Tags that already exist in definitions are left unchanged.
+    pub fn register_workflow_tags(&mut self, role_tags: &[String]) {
+        for tag in role_tags {
+            self.definitions
+                .entry(tag.clone())
+                .or_insert_with(|| TagDefinition {
+                    category: Some("workflow-role".to_string()),
+                    description: Some("Auto-registered from workflow role definition".to_string()),
+                });
+        }
     }
 }
 
@@ -1314,5 +1336,67 @@ impl Prompts {
     /// Get a tool description override if available.
     pub fn get_tool_description(&self, name: &str) -> Option<&str> {
         self.tools.get(name).map(|t| t.description.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn register_workflow_tags_adds_unknown_tags() {
+        let mut tags_config = TagsConfig::default();
+        assert!(tags_config.tag_names().is_empty());
+
+        tags_config.register_workflow_tags(&["worker".to_string(), "lead".to_string()]);
+
+        assert!(tags_config.is_known_tag("worker"));
+        assert!(tags_config.is_known_tag("lead"));
+        assert_eq!(tags_config.tag_names().len(), 2);
+
+        // Verify category
+        let def = tags_config.definitions.get("worker").unwrap();
+        assert_eq!(def.category, Some("workflow-role".to_string()));
+    }
+
+    #[test]
+    fn register_workflow_tags_preserves_existing_definitions() {
+        let mut tags_config = TagsConfig::default();
+        tags_config.definitions.insert(
+            "worker".to_string(),
+            TagDefinition {
+                category: Some("custom".to_string()),
+                description: Some("Manually defined".to_string()),
+            },
+        );
+
+        tags_config.register_workflow_tags(&["worker".to_string(), "lead".to_string()]);
+
+        // "worker" should keep its original definition
+        let worker_def = tags_config.definitions.get("worker").unwrap();
+        assert_eq!(worker_def.category, Some("custom".to_string()));
+        assert_eq!(worker_def.description, Some("Manually defined".to_string()));
+
+        // "lead" should be newly registered
+        let lead_def = tags_config.definitions.get("lead").unwrap();
+        assert_eq!(lead_def.category, Some("workflow-role".to_string()));
+    }
+
+    #[test]
+    fn registered_workflow_tags_suppress_warnings() {
+        let mut tags_config = TagsConfig {
+            unknown_tag: UnknownKeyBehavior::Warn,
+            ..Default::default()
+        };
+
+        // Before registration, should warn
+        let warnings = tags_config.validate_tags(&["worker".to_string()]).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Unknown tag"));
+
+        // After registration, no warnings
+        tags_config.register_workflow_tags(&["worker".to_string()]);
+        let warnings = tags_config.validate_tags(&["worker".to_string()]).unwrap();
+        assert!(warnings.is_empty());
     }
 }

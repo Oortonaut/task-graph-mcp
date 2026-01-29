@@ -14,7 +14,7 @@ pub const MAX_WORKER_ID_LEN: usize = 64;
 /// With 4 words from a large wordlist, collisions are extremely unlikely.
 fn generate_agent_id(ids_config: &IdsConfig) -> String {
     let words = ids_config.agent_id_words;
-    let case = ids_config.id_case;
+    let case = ids_config.agent_id_case;
 
     // Generate with hyphen separator first (petname's default format)
     let base = Petnames::medium()

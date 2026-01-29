@@ -321,6 +321,7 @@ mod tests {
             Some("z-task".to_string()),
             "Z Task".to_string(),
             None,
+            None,
             None, // phase
             None,
             None,
@@ -336,6 +337,7 @@ mod tests {
             Some("a-task".to_string()),
             "A Task".to_string(),
             None,
+            None,
             None, // phase
             None,
             None,
@@ -350,6 +352,7 @@ mod tests {
         db.create_task(
             Some("m-task".to_string()),
             "M Task".to_string(),
+            None,
             None,
             None, // phase
             None,
@@ -383,6 +386,7 @@ mod tests {
             Some("task-1".to_string()),
             "Task 1".to_string(),
             None,
+            None,
             None, // phase
             None,
             None,
@@ -399,6 +403,7 @@ mod tests {
         db.create_task(
             Some("task-2".to_string()),
             "Task 2".to_string(),
+            None,
             None,
             None, // phase
             None,
@@ -444,6 +449,7 @@ mod tests {
             db.create_task(
                 Some(id.to_string()),
                 format!("Task {}", id),
+                None,
                 None,
                 None, // phase
                 None,
@@ -511,6 +517,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None,                                                 // wanted_tags
             Some(vec!["zebra".to_string(), "apple".to_string()]), // tags
             &states_config,
@@ -520,6 +527,7 @@ mod tests {
         db.create_task(
             Some("task-a".to_string()),
             "Task A".to_string(),
+            None,
             None,
             None,
             None,

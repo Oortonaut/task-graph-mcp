@@ -98,7 +98,7 @@ pub fn claim(
     };
 
     // Get transition prompts for claiming (with template expansion)
-    let transition_prompt_list: Vec<String> = {
+    let mut transition_prompt_list: Vec<String> = {
         match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
             Ok((old_status, old_phase)) => {
                 // Create context for template expansion
@@ -131,6 +131,14 @@ pub fn claim(
             "claimed_at": task.claimed_at
         }
     });
+
+    // Add role-specific claiming prompt if available
+    if let Ok(Some(worker)) = db.get_worker(&worker_id)
+        && let Some(role_name) = workflows.match_role(&worker.tags)
+        && let Some(claiming_prompt) = workflows.get_role_prompt(&role_name, "claiming")
+    {
+        transition_prompt_list.push(claiming_prompt.to_string());
+    }
 
     // Add prompts if any
     if !transition_prompt_list.is_empty()

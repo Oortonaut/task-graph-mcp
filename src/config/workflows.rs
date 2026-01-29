@@ -108,6 +108,30 @@ pub struct ComboPrompts {
     pub exit: Option<String>,
 }
 
+/// Definition of a role in a workflow (e.g., "lead", "worker").
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RoleDefinition {
+    /// Human-readable description of this role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Tags that identify agents in this role.
+    #[serde(default)]
+    pub tags: Vec<String>,
+
+    /// Maximum number of tasks this role can claim simultaneously.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_claims: Option<u32>,
+
+    /// Whether this role can assign tasks to other agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_assign: Option<bool>,
+
+    /// Whether this role can create subtasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_create_subtasks: Option<bool>,
+}
+
 /// Unified workflow configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowsConfig {
@@ -146,6 +170,15 @@ pub struct WorkflowsConfig {
     #[serde(default)]
     pub gates: HashMap<String, Vec<GateDefinition>>,
 
+    /// Role definitions (e.g., "lead", "worker") with tags, permissions, and constraints.
+    #[serde(default)]
+    pub roles: HashMap<String, RoleDefinition>,
+
+    /// Role-specific prompts. Outer key is role name, inner key is prompt name
+    /// (e.g., "claiming", "completing"), value is the prompt content.
+    #[serde(default)]
+    pub role_prompts: HashMap<String, HashMap<String, String>>,
+
     /// Cache of named workflow configs (e.g., "swarm" -> workflow-swarm.yaml).
     /// Populated at server startup, not serialized.
     #[serde(skip)]
@@ -168,6 +201,8 @@ impl Default for WorkflowsConfig {
             phases: default_phase_workflows(),
             combos: HashMap::new(),
             gates: HashMap::new(),
+            roles: HashMap::new(),
+            role_prompts: HashMap::new(),
             named_workflows: HashMap::new(),
             default_workflow_key: None,
         }
@@ -185,6 +220,65 @@ impl WorkflowsConfig {
         self.default_workflow_key
             .as_ref()
             .and_then(|key| self.named_workflows.get(key))
+    }
+
+    /// Match worker tags to a role defined in this workflow.
+    /// Returns the role name if any role's tags overlap with the worker's tags.
+    /// If multiple roles match, returns the first match (by sorted key order for determinism).
+    pub fn match_role(&self, worker_tags: &[String]) -> Option<String> {
+        let mut role_names: Vec<&String> = self.roles.keys().collect();
+        role_names.sort();
+        for role_name in role_names {
+            if let Some(role) = self.roles.get(role_name) {
+                if role.tags.iter().any(|t| worker_tags.contains(t)) {
+                    return Some(role_name.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Get all prompts for a matched role.
+    /// Returns an empty HashMap if the role has no prompts defined.
+    pub fn get_role_prompts(&self, role_name: &str) -> HashMap<String, String> {
+        self.role_prompts
+            .get(role_name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Get a specific role prompt by role name and prompt key.
+    pub fn get_role_prompt(&self, role_name: &str, prompt_key: &str) -> Option<&str> {
+        self.role_prompts
+            .get(role_name)
+            .and_then(|prompts| prompts.get(prompt_key))
+            .map(|s| s.as_str())
+    }
+
+    /// Get the role definition for a matched role.
+    pub fn get_role(&self, role_name: &str) -> Option<&RoleDefinition> {
+        self.roles.get(role_name)
+    }
+
+    /// Collect all unique role tags across this workflow and all named workflows.
+    /// Returns a deduplicated list of tag names used in role definitions.
+    pub fn all_role_tags(&self) -> Vec<String> {
+        let mut tags = std::collections::HashSet::new();
+        // Collect from this workflow's roles
+        for role in self.roles.values() {
+            for tag in &role.tags {
+                tags.insert(tag.clone());
+            }
+        }
+        // Collect from all named workflows
+        for workflow in self.named_workflows.values() {
+            for role in workflow.roles.values() {
+                for tag in &role.tags {
+                    tags.insert(tag.clone());
+                }
+            }
+        }
+        tags.into_iter().collect()
     }
 }
 
@@ -653,5 +747,82 @@ mod tests {
         assert!(triggers.contains(&"enter~working".to_string()));
         assert!(triggers.contains(&"exit~working".to_string()));
         assert!(triggers.contains(&"enter%implement".to_string()));
+    }
+
+    #[test]
+    fn test_all_role_tags_from_base_config() {
+        let mut workflows = WorkflowsConfig::default();
+        workflows.roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                tags: vec!["worker".to_string(), "backend".to_string()],
+                ..Default::default()
+            },
+        );
+        workflows.roles.insert(
+            "lead".to_string(),
+            RoleDefinition {
+                tags: vec!["lead".to_string(), "coordinator".to_string()],
+                ..Default::default()
+            },
+        );
+
+        let tags = workflows.all_role_tags();
+        assert_eq!(tags.len(), 4);
+        assert!(tags.contains(&"worker".to_string()));
+        assert!(tags.contains(&"backend".to_string()));
+        assert!(tags.contains(&"lead".to_string()));
+        assert!(tags.contains(&"coordinator".to_string()));
+    }
+
+    #[test]
+    fn test_all_role_tags_includes_named_workflows() {
+        let mut workflows = WorkflowsConfig::default();
+
+        // Add a named workflow with its own roles
+        let mut named = WorkflowsConfig::default();
+        named.roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                tags: vec!["reviewer".to_string()],
+                ..Default::default()
+            },
+        );
+        workflows
+            .named_workflows
+            .insert("review".to_string(), Arc::new(named));
+
+        // Base has no roles, but named workflow does
+        let tags = workflows.all_role_tags();
+        assert_eq!(tags.len(), 1);
+        assert!(tags.contains(&"reviewer".to_string()));
+    }
+
+    #[test]
+    fn test_all_role_tags_deduplicates() {
+        let mut workflows = WorkflowsConfig::default();
+        workflows.roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                tags: vec!["shared-tag".to_string()],
+                ..Default::default()
+            },
+        );
+
+        let mut named = WorkflowsConfig::default();
+        named.roles.insert(
+            "builder".to_string(),
+            RoleDefinition {
+                tags: vec!["shared-tag".to_string()],
+                ..Default::default()
+            },
+        );
+        workflows
+            .named_workflows
+            .insert("build".to_string(), Arc::new(named));
+
+        let tags = workflows.all_role_tags();
+        assert_eq!(tags.len(), 1);
+        assert!(tags.contains(&"shared-tag".to_string()));
     }
 }

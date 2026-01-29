@@ -1,6 +1,7 @@
 //! Worker connection and management tools.
 
 use super::{get_bool, get_i32, get_string, get_string_array, make_tool_with_prompts};
+use crate::config::workflows::WorkflowsConfig;
 use crate::config::{
     DependenciesConfig, IdsConfig, PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig,
 };
@@ -128,6 +129,7 @@ pub fn connect(
     deps_config: &DependenciesConfig,
     tags_config: &TagsConfig,
     ids_config: &IdsConfig,
+    workflows: &WorkflowsConfig,
     args: Value,
 ) -> Result<Value> {
     let worker_id = get_string(&args, "worker_id");
@@ -233,6 +235,39 @@ pub fn connect(
 
     if !tag_warnings.is_empty() {
         response["tag_warnings"] = json!(tag_warnings);
+    }
+
+    // Deliver workflow-specific role information and prompts
+    if let Some(role_name) = workflows.match_role(&worker.tags) {
+        let mut role_info = json!({
+            "role": &role_name,
+        });
+
+        // Include role definition details
+        if let Some(role_def) = workflows.get_role(&role_name) {
+            if let Some(ref desc) = role_def.description {
+                role_info["description"] = json!(desc);
+            }
+            if let Some(max) = role_def.max_claims {
+                role_info["max_claims"] = json!(max);
+            }
+            if let Some(can_assign) = role_def.can_assign {
+                role_info["can_assign"] = json!(can_assign);
+            }
+        }
+
+        response["role"] = role_info;
+
+        // Include role-specific prompts
+        let prompts = workflows.get_role_prompts(&role_name);
+        if !prompts.is_empty() {
+            response["role_prompts"] = json!(prompts);
+        }
+    }
+
+    // Include workflow description if available
+    if let Some(ref desc) = workflows.description {
+        response["workflow_description"] = json!(desc);
     }
 
     Ok(response)

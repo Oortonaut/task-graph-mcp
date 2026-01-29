@@ -5,6 +5,7 @@
 
 use serde_json::json;
 use std::path::PathBuf;
+use task_graph_mcp::config::workflows::WorkflowsConfig;
 use task_graph_mcp::config::{
     DependenciesConfig, IdsConfig, PhasesConfig, ServerPaths, StatesConfig, TagsConfig,
 };
@@ -57,6 +58,7 @@ fn connect_without_workflow_returns_null_workflow() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "test-worker-no-workflow"
         }),
@@ -82,6 +84,7 @@ fn connect_with_workflow_returns_workflow_in_response() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "test-worker-with-workflow",
             "workflow": "swarm"
@@ -109,6 +112,7 @@ fn connect_stores_workflow_in_database() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "db-workflow-worker",
             "workflow": "coordinator"
@@ -140,6 +144,7 @@ fn connect_stores_null_workflow_when_not_provided() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "no-workflow-worker"
         }),
@@ -170,6 +175,7 @@ fn connect_with_force_updates_workflow() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "force-workflow-worker",
             "workflow": "alpha"
@@ -188,6 +194,7 @@ fn connect_with_force_updates_workflow() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "force-workflow-worker",
             "workflow": "beta",
@@ -222,6 +229,7 @@ fn connect_with_force_can_clear_workflow() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "clear-workflow-worker",
             "workflow": "initial"
@@ -238,6 +246,7 @@ fn connect_with_force_can_clear_workflow() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "clear-workflow-worker",
             "force": true
@@ -271,6 +280,7 @@ fn connect_without_force_fails_for_existing_worker() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "duplicate-worker",
             "workflow": "original"
@@ -287,6 +297,7 @@ fn connect_without_force_fails_for_existing_worker() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "duplicate-worker",
             "workflow": "different"
@@ -312,6 +323,7 @@ fn connect_response_includes_all_expected_fields() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "full-response-worker",
             "workflow": "test-workflow",
@@ -351,6 +363,7 @@ fn connect_with_empty_workflow_string_stores_empty() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "empty-workflow-worker",
             "workflow": ""
@@ -385,6 +398,7 @@ fn list_workers_includes_workflow() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "worker-a",
             "workflow": "swarm"
@@ -400,6 +414,7 @@ fn list_workers_includes_workflow() {
         &deps,
         &tags,
         &ids,
+        &WorkflowsConfig::default(),
         json!({
             "worker_id": "worker-b"
         }),

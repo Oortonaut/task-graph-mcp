@@ -1494,6 +1494,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None, // tags
             &StatesConfig::default(),
             &IdsConfig::default(),
@@ -1518,6 +1519,7 @@ mod tests {
             .create_task(
                 None,
                 "Existing task".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -1623,6 +1625,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None, // tags
             &StatesConfig::default(),
             &IdsConfig::default(),
@@ -1654,6 +1657,7 @@ mod tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1670,6 +1674,7 @@ mod tests {
             .create_task(
                 None,
                 "Task B".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -2023,6 +2028,7 @@ mod tests {
             Some("existing-task".to_string()),
             "Existing task".to_string(),
             None,
+            None,
             None, // phase
             None,
             None,
@@ -2141,6 +2147,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None, // tags
             &StatesConfig::default(),
             &IdsConfig::default(),
@@ -2156,6 +2163,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None, // tags
             &StatesConfig::default(),
             &IdsConfig::default(),
@@ -2164,6 +2172,7 @@ mod tests {
         db.create_task(
             Some("task-c".to_string()),
             "Task C".to_string(),
+            None,
             None,
             None,
             None,
@@ -2222,6 +2231,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None, // tags
             &StatesConfig::default(),
             &IdsConfig::default(),
@@ -2261,6 +2271,7 @@ mod tests {
         db.create_task(
             Some("task-1".to_string()),
             "Task 1".to_string(),
+            None,
             None,
             None,
             None,
@@ -2372,6 +2383,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None, // tags
             &StatesConfig::default(),
             &IdsConfig::default(),
@@ -2405,6 +2417,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             None, // tags
             &StatesConfig::default(),
             &IdsConfig::default(),
@@ -2413,6 +2426,7 @@ mod tests {
         db.create_task(
             Some("existing-2".to_string()),
             "Existing 2".to_string(),
+            None,
             None,
             None,
             None,
@@ -2486,6 +2500,7 @@ mod tests {
         db.create_task(
             Some("existing-task".to_string()),
             "Existing Task".to_string(),
+            None,
             None,
             None,
             None,
