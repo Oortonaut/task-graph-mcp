@@ -1,0 +1,26 @@
+# Auto-detect text files and normalize to LF in the repo,
+# check out with OS-native line endings.
+* text=auto
+
+# Source files: always treat as text (OS-native checkout)
+*.rs text
+*.toml text
+*.yaml text
+*.yml text
+*.json text
+*.md text
+*.html text
+*.css text
+*.js text
+*.ts text
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files: never touch
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.db binary
+*.gz binary
