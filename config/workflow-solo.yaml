@@ -1,42 +1,6 @@
-# ============================================================================
-# SOLO WORKFLOW TOPOLOGY
-# ============================================================================
-#
-# PURPOSE:
-#   The solo topology is designed for a single agent working independently on
-#   a task list without external coordination. This is the simplest workflow
-#   model and serves as a baseline for individual productivity.
-#
-# WHEN TO USE:
-#   - Single developer/agent working alone on a project
-#   - Prototyping or exploring a new codebase
-#   - Personal task management without team coordination
-#   - Batch processing tasks that don't require parallelism
-#   - Establishing baseline metrics before scaling to multi-agent workflows
-#
-# KEY CHARACTERISTICS:
-#   - One agent handles all work end-to-end
-#   - Phases tracked as task field (explore -> design -> implement -> test)
-#   - Large, self-contained tasks with minimal inter-task dependencies
-#   - Agent autonomously claims (pulls) tasks when ready
-#   - Coarse granularity: tasks represent substantial chunks of work
-#
-# CONFIGURATION HIGHLIGHTS:
-#   - phase_model: field    - Progress tracked via task.phase field
-#   - coordination: pull    - Agent decides what to work on next
-#   - granularity: coarse   - Larger tasks for deep focus work
-#   - default_deps: loose   - Minimal blocking dependencies between tasks
-#   - Skips 'assigned' state since there's no coordinator to assign work
-#
-# TRADEOFFS:
-#   + Simple mental model, no coordination overhead
-#   + Deep focus on individual tasks
-#   + Good for complex tasks requiring sustained context
-#   - No parallelism (single agent bottleneck)
-#   - No external review or collaboration
-#   - All knowledge siloed in one agent's context
-#
-# ============================================================================
+# SOLO WORKFLOW - Single agent, coarse-grained tasks, pull coordination
+# Use for: individual work, prototyping, personal task management
+# Key: explore -> design -> implement -> test -> review phases
 
 name: solo
 description: Single agent working alone with coarse-grained, independent tasks
@@ -63,137 +27,86 @@ states:
     timed: true
     prompts:
       enter: |
-        You are now working on this task. As a solo worker:
+        **Solo working.** Focus deeply; attach notes for context continuity.
 
-        - Focus deeply on one task at a time
-        - Work through phases sequentially: explore -> design -> implement -> test -> review
-        - Keep detailed notes for future context (you may return to this later)
-        - Attach intermediate results so you can resume if interrupted
+        Transitions: {{valid_exits}}
+        Phase: {{current_phase}} | Valid: {{valid_phases}}
 
-        ## Current State
-
-        From `{{current_status}}` you can transition to:
-        {{valid_exits}}
-
-        Current phase: {{current_phase}}
-        Valid phases: {{valid_phases}}
-
-        ## Solo Work Patterns
-
-        1. **Phase progression**: Use `update(phase="implement")` to track which phase you're in
-        2. **Self-review**: Before completing, review your own work critically
-        3. **Documentation**: Attach notes explaining decisions for your future self
+        - Progress phases via `update(phase="...")`
+        - Self-review before completing
+        - Attach results for your future self
 
       exit: |
-        Before completing this task:
-        - [ ] Attach summary of what was done
-        - [ ] Note any follow-up work needed
-        - [ ] Log costs with `log_metrics()`
+        Before completing:
+        - [ ] Attach summary
+        - [ ] Note follow-up work
+        - [ ] `log_metrics()`
 
   completed:
     exits: [pending]
     timed: false
     prompts:
       enter: |
-        Task completed. Results should be attached.
-        Consider: What follow-up tasks should be created?
+        Done. Results attached? Follow-up tasks needed?
 
   failed:
     exits: [pending]
     timed: false
     prompts:
       enter: |
-        Task blocked. Document:
-        - What was attempted
-        - What blocked progress
-        - Resources needed to unblock
-
-        Set to `pending` when ready to retry.
+        Blocked. Document: attempted, blocker, resources needed. Set `pending` to retry.
 
   cancelled:
     exits: []
     timed: false
 
-# Phase prompts optimized for solo workflow
+# Phase prompts
 phases:
   explore:
     prompts:
       enter: |
-        ## Exploration Phase
-
-        Investigate the problem space before committing to a solution.
-
-        - Read relevant code and documentation
-        - Understand existing patterns
-        - Identify constraints and edge cases
-        - Attach findings as notes
-
+        **Explore.** Read code/docs, understand patterns, identify constraints. Attach findings.
       exit: |
-        Capture exploration findings before moving on.
-        Create a note summarizing what you learned.
+        Attach exploration summary before moving on.
 
   design:
     prompts:
       enter: |
-        ## Design Phase
-
-        Plan your approach before implementing.
-
-        - Outline the solution structure
-        - Consider alternatives and tradeoffs
-        - Identify potential risks
-        - Break into implementation steps if needed
+        **Design.** Outline solution, consider alternatives, identify risks.
 
   implement:
     prompts:
       enter: |
-        ## Implementation Phase
-
-        Build the solution.
-
-        - Follow existing patterns in the codebase
-        - Write tests as you go
-        - Keep commits small and focused
-        - Mark files you're editing with `mark_file`
+        **Implement.** Follow patterns, write tests, keep commits small, `mark_file` before editing.
 
   test:
     prompts:
       enter: |
-        ## Testing Phase
-
-        Verify the implementation works correctly.
-
-        - Run existing tests to ensure no regressions
-        - Add tests for new functionality
-        - Test edge cases and error conditions
-        - Document test coverage
+        **Test.** Run existing tests, add new ones, cover edge cases.
 
   review:
     prompts:
       enter: |
-        ## Self-Review Phase
-
-        Review your own work with fresh eyes.
-
-        - [ ] Does the code match the design?
-        - [ ] Are there any obvious bugs or edge cases?
-        - [ ] Is the code readable and maintainable?
-        - [ ] Are tests comprehensive?
-        - [ ] Is documentation updated?
+        **Self-review checklist:**
+        - [ ] Code matches design?
+        - [ ] Edge cases handled?
+        - [ ] Tests comprehensive?
+        - [ ] Documentation updated?
 
   doc:
     prompts:
       enter: |
-        ## Documentation Phase
+        **Document.** Update README, add comments, API docs, examples as needed.
 
-        Document what was built.
+  security:
+    prompts:
+      enter: |
+        **Security checklist:**
+        - [ ] Input validation
+        - [ ] Auth/authz
+        - [ ] No secrets in code
+        - [ ] Dependencies checked
 
-        - Update README if needed
-        - Add code comments for complex logic
-        - Update API documentation
-        - Create examples if applicable
-
-  # Phases without specific prompts for solo work
   deliver: {}
   triage: {}
   diagnose: {}
@@ -202,44 +115,19 @@ phases:
   deploy: {}
   monitor: {}
   optimize: {}
-  security:
-    prompts:
-      enter: |
-        ## Security Review
 
-        - [ ] Input validation
-        - [ ] Auth/authz checks
-        - [ ] No secrets in code
-        - [ ] Dependency vulnerabilities checked
-
-# State+Phase combinations for solo work
+# State+Phase combos
 combos:
   working+explore:
-    enter: |
-      Solo exploration. Take time to understand the problem fully.
-      Attach notes as you discover important context.
+    enter: Explore thoroughly. Attach notes as you learn.
 
   working+implement:
-    enter: |
-      Solo implementation. You have full context - execute efficiently.
-      - Follow existing patterns
-      - Write tests alongside code
-      - Keep commits atomic
+    enter: Execute with full context. Follow patterns, test alongside code, atomic commits.
 
   working+review:
-    enter: |
-      Self-review. Switch mental modes - pretend you're reviewing someone else's code.
-      - Look for bugs
-      - Check edge cases
-      - Verify test coverage
+    enter: Self-review mode. Check bugs, edge cases, test coverage.
 
-# =============================================================================
-# GATES
-# =============================================================================
-# Solo workflows use warn gates for self-discipline. Since you're working alone,
-# gates serve as reminders rather than hard blocks. Use force=true with reason
-# when legitimately skipping.
-
+# Gates (warn = self-discipline reminders, use force=true with reason to skip)
 gates:
   status:working:
     - type: "gate/tests"
@@ -249,80 +137,19 @@ gates:
       enforcement: warn
       description: "Attach commit hash or note why no commit needed"
 
-# =============================================================================
-# ATTACHMENT GUIDANCE
-# =============================================================================
-# Recommended attachment types for solo workflows. These types are pre-defined
-# in config.yaml with appropriate MIME types and modes.
-#
-# Solo work benefits from thorough documentation since you may return to tasks
-# later with less context. Use attachments to create a record for your future self.
-
+# Attachment types (document for future context)
 attachments:
-  # Primary attachments for solo work
   recommended:
-    note:
-      description: Observations, decisions, and context (appends)
-      when: Throughout work - capture reasoning and discoveries
-      example: |
-        attach(task=id, type="note", content="Chose HashMap over BTreeMap for O(1) lookups")
-
-    plan:
-      description: Approach and design decisions (markdown, replaces)
-      when: Design phase - document your planned approach
-      example: |
-        attach(task=id, type="plan", content="## Approach\n1. Refactor X\n2. Add tests\n3. Update docs")
-
-    result:
-      description: Structured outcome data (JSON, replaces)
-      when: Task completion - record what was accomplished
-      example: |
-        attach(task=id, type="result", content='{"status": "complete", "files_changed": ["src/lib.rs"]}')
-
-    context:
-      description: Essential state needed to resume work (replaces)
-      when: Before pausing - capture where you left off
-      example: |
-        attach(task=id, type="context", content="Next: implement error handling in parse_config()")
-
-  # Documentation and history
+    note: Observations, decisions, reasoning (appends)
+    plan: Approach and design (markdown, replaces)
+    result: Outcome data (JSON, replaces)
+    context: Resume state (replaces)
   documentation:
-    log:
-      description: Chronological record of actions taken (appends)
-      when: Long-running tasks - maintain audit trail
-      example: |
-        attach(task=id, type="log", content="[2024-01-15] Refactored auth module")
-
-    diff:
-      description: Code changes for reference (appends)
-      when: Before committing - preserve what changed
-      example: |
-        attach(task=id, type="diff", content="--- a/src/lib.rs\n+++ b/src/lib.rs\n...")
-
-    commit:
-      description: Git commit hash reference (appends)
-      when: After committing - link task to version control
-      example: |
-        attach(task=id, type="commit", content="abc123f - Implement user authentication")
-
-  # Debugging and troubleshooting
+    log: Chronological actions (appends)
+    diff: Code changes (appends)
+    commit: Git hash reference (appends)
   debugging:
-    error:
-      description: Errors encountered during work (appends)
-      when: Failures or blockers - document for later debugging
-      example: |
-        attach(task=id, type="error", content="Integration test timeout after 30s")
-
-    output:
-      description: Command/tool output (appends)
-      when: Preserving diagnostic information
-      example: |
-        attach(task=id, type="output", content="cargo clippy: 3 warnings\n- unused import...")
-
-  # Metadata
+    error: Failures/blockers (appends)
+    output: Command output (appends)
   metadata:
-    meta:
-      description: Structured task metadata (JSON, replaces)
-      when: Tracking effort, dependencies, or custom fields
-      example: |
-        attach(task=id, type="meta", content='{"estimated_hours": 4, "actual_hours": 3.5}')
+    meta: Structured metadata (JSON, replaces)
