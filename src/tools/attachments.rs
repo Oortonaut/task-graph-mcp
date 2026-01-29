@@ -1,6 +1,6 @@
 //! Attachment management tools.
 
-use super::{get_bool, get_string, make_tool_with_prompts};
+use super::{get_bool, get_string, get_string_or_array, make_tool_with_prompts};
 use crate::config::{AttachmentsConfig, Prompts, UnknownKeyBehavior};
 use crate::db::Database;
 use crate::error::{ErrorCode, ToolError};
@@ -170,18 +170,8 @@ pub fn attach(
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
 
-    // Task can be string or array of strings
-    let task_ids: Vec<String> =
-        if let Some(task_array) = args.get("task").and_then(|v| v.as_array()) {
-            task_array
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        } else if let Some(task_id) = get_string(&args, "task") {
-            vec![task_id]
-        } else {
-            return Err(ToolError::missing_field("task").into());
-        };
+    let task_ids =
+        get_string_or_array(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
 
     if task_ids.is_empty() {
         return Err(ToolError::new(

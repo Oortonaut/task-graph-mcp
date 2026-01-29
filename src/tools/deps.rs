@@ -1,6 +1,9 @@
 //! Dependency management tools.
 
-use super::{get_string, make_tool_with_prompts};
+use super::{
+    IdList, get_string, get_string_or_array, get_string_or_array_or_wildcard,
+    make_tool_with_prompts,
+};
 use crate::config::{DependenciesConfig, Prompts};
 use crate::db::{AddDependencyResult, Database};
 use crate::error::{ToolError, ToolWarning};
@@ -131,30 +134,9 @@ pub fn link(db: &Database, deps_config: &DependenciesConfig, args: Value) -> Res
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
 
-    // Parse from: string or array of strings
-    let from_ids: Vec<String> =
-        if let Some(from_array) = args.get("from").and_then(|v| v.as_array()) {
-            from_array
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        } else if let Some(from_id) = get_string(&args, "from") {
-            vec![from_id]
-        } else {
-            return Err(ToolError::missing_field("from").into());
-        };
-
-    // Parse to: string or array of strings
-    let to_ids: Vec<String> = if let Some(to_array) = args.get("to").and_then(|v| v.as_array()) {
-        to_array
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(to_id) = get_string(&args, "to") {
-        vec![to_id]
-    } else {
-        return Err(ToolError::missing_field("to").into());
-    };
+    let from_ids =
+        get_string_or_array(&args, "from").ok_or_else(|| ToolError::missing_field("from"))?;
+    let to_ids = get_string_or_array(&args, "to").ok_or_else(|| ToolError::missing_field("to"))?;
 
     if from_ids.is_empty() {
         return Err(ToolError::new(
@@ -220,39 +202,39 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
 
-    // Parse from: string or array of strings
-    let from_ids: Vec<String> =
-        if let Some(from_array) = args.get("from").and_then(|v| v.as_array()) {
-            from_array
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        } else if let Some(from_id) = get_string(&args, "from") {
-            vec![from_id]
-        } else {
-            return Err(ToolError::missing_field("from").into());
-        };
+    let from_parsed = get_string_or_array_or_wildcard(&args, "from")
+        .ok_or_else(|| ToolError::missing_field("from"))?;
+    let to_parsed = get_string_or_array_or_wildcard(&args, "to")
+        .ok_or_else(|| ToolError::missing_field("to"))?;
 
-    // Parse to: string or array of strings
-    let to_ids: Vec<String> = if let Some(to_array) = args.get("to").and_then(|v| v.as_array()) {
-        to_array
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(to_id) = get_string(&args, "to") {
-        vec![to_id]
-    } else {
-        return Err(ToolError::missing_field("to").into());
+    let from_is_wildcard = matches!(&from_parsed, IdList::Wildcard);
+    let to_is_wildcard = matches!(&to_parsed, IdList::Wildcard);
+
+    if from_is_wildcard && to_is_wildcard {
+        return Err(ToolError::new(
+            crate::error::ErrorCode::InvalidFieldValue,
+            "Cannot use wildcard '*' for both 'from' and 'to'",
+        )
+        .into());
+    }
+
+    let from_ids = match &from_parsed {
+        IdList::Ids(ids) => ids,
+        IdList::Wildcard => &vec![],
+    };
+    let to_ids = match &to_parsed {
+        IdList::Ids(ids) => ids,
+        IdList::Wildcard => &vec![],
     };
 
-    if from_ids.is_empty() {
+    if !from_is_wildcard && from_ids.is_empty() {
         return Err(ToolError::new(
             crate::error::ErrorCode::InvalidFieldValue,
             "At least one 'from' task ID must be provided",
         )
         .into());
     }
-    if to_ids.is_empty() {
+    if !to_is_wildcard && to_ids.is_empty() {
         return Err(ToolError::new(
             crate::error::ErrorCode::InvalidFieldValue,
             "At least one 'to' task ID must be provided",
@@ -265,21 +247,9 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
     let mut removed = Vec::new();
     let mut errors = Vec::new();
 
-    // Check for wildcard patterns
-    let from_is_wildcard = from_ids.len() == 1 && from_ids[0] == "*";
-    let to_is_wildcard = to_ids.len() == 1 && to_ids[0] == "*";
-
-    if from_is_wildcard && to_is_wildcard {
-        return Err(ToolError::new(
-            crate::error::ErrorCode::InvalidFieldValue,
-            "Cannot use wildcard '*' for both 'from' and 'to'",
-        )
-        .into());
-    }
-
     if to_is_wildcard {
         // Remove all outgoing dependencies from the specified tasks
-        for from_id in &from_ids {
+        for from_id in from_ids {
             match db.remove_all_outgoing_dependencies(from_id, &dep_type) {
                 Ok(deps) => {
                     for dep in deps {
@@ -299,7 +269,7 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
         }
     } else if from_is_wildcard {
         // Remove all incoming dependencies to the specified tasks
-        for to_id in &to_ids {
+        for to_id in to_ids {
             match db.remove_all_incoming_dependencies(to_id, &dep_type) {
                 Ok(deps) => {
                     for dep in deps {
@@ -319,8 +289,8 @@ pub fn unlink(db: &Database, args: Value) -> Result<Value> {
         }
     } else {
         // Remove specific combinations of from x to
-        for from_id in &from_ids {
-            for to_id in &to_ids {
+        for from_id in from_ids {
+            for to_id in to_ids {
                 match db.remove_dependency(from_id, to_id, &dep_type) {
                     Ok(was_removed) => {
                         if was_removed {
@@ -353,51 +323,13 @@ pub fn relink(db: &Database, deps_config: &DependenciesConfig, args: Value) -> R
     // Agent parameter is optional - for tracking/audit purposes
     let _agent_id = get_string(&args, "agent");
 
-    // Parse prev_from: string or array of strings
-    let prev_from_ids: Vec<String> =
-        if let Some(arr) = args.get("prev_from").and_then(|v| v.as_array()) {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        } else if let Some(id) = get_string(&args, "prev_from") {
-            vec![id]
-        } else {
-            return Err(ToolError::missing_field("prev_from").into());
-        };
-
-    // Parse prev_to: string or array of strings
-    let prev_to_ids: Vec<String> = if let Some(arr) = args.get("prev_to").and_then(|v| v.as_array())
-    {
-        arr.iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(id) = get_string(&args, "prev_to") {
-        vec![id]
-    } else {
-        return Err(ToolError::missing_field("prev_to").into());
-    };
-
-    // Parse from: string or array of strings
-    let from_ids: Vec<String> = if let Some(arr) = args.get("from").and_then(|v| v.as_array()) {
-        arr.iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(id) = get_string(&args, "from") {
-        vec![id]
-    } else {
-        return Err(ToolError::missing_field("from").into());
-    };
-
-    // Parse to: string or array of strings
-    let to_ids: Vec<String> = if let Some(arr) = args.get("to").and_then(|v| v.as_array()) {
-        arr.iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect()
-    } else if let Some(id) = get_string(&args, "to") {
-        vec![id]
-    } else {
-        return Err(ToolError::missing_field("to").into());
-    };
+    let prev_from_ids = get_string_or_array(&args, "prev_from")
+        .ok_or_else(|| ToolError::missing_field("prev_from"))?;
+    let prev_to_ids =
+        get_string_or_array(&args, "prev_to").ok_or_else(|| ToolError::missing_field("prev_to"))?;
+    let from_ids =
+        get_string_or_array(&args, "from").ok_or_else(|| ToolError::missing_field("from"))?;
+    let to_ids = get_string_or_array(&args, "to").ok_or_else(|| ToolError::missing_field("to"))?;
 
     if prev_from_ids.is_empty() {
         return Err(ToolError::new(

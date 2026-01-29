@@ -327,10 +327,10 @@ mod agent_tests {
         assert_ne!(agent2.id, agent3.id);
         assert_ne!(agent1.id, agent3.id);
 
-        // IDs should be human-readable (contain hyphens, not UUID format)
+        // IDs should be human-readable petnames (PascalCase by default for agents)
         assert!(
-            agent1.id.contains('-'),
-            "Expected petname format with hyphens, got: {}",
+            agent1.id.chars().next().unwrap().is_uppercase(),
+            "Expected PascalCase petname, got: {}",
             agent1.id
         );
         assert!(
@@ -553,7 +553,8 @@ mod task_tests {
         let task = db
             .create_task(
                 None,                    // id
-                "Test Task".to_string(), // description
+                "Test Task".to_string(), // title
+                None,                    // description
                 None,                    // parent_id
                 None,                    // phase
                 None,                    // priority
@@ -568,7 +569,7 @@ mod task_tests {
             .unwrap();
 
         assert_eq!(task.title, "Test Task");
-        assert_eq!(task.description, Some("Test Task".to_string()));
+        assert_eq!(task.description, None);
         assert_eq!(task.status, "pending");
         assert_eq!(task.priority, PRIORITY_DEFAULT);
         assert!(task.worker_id.is_none());
@@ -582,7 +583,8 @@ mod task_tests {
         let task = db
             .create_task(
                 None,                                  // id
-                "Full Task - Description".to_string(), // description
+                "Full Task - Description".to_string(), // title
+                None,                                  // description
                 None,                                  // parent_id
                 None,                                  // phase
                 Some(8),
@@ -597,10 +599,7 @@ mod task_tests {
             .unwrap();
 
         assert_eq!(task.title, "Full Task - Description");
-        assert_eq!(
-            task.description,
-            Some("Full Task - Description".to_string())
-        );
+        assert_eq!(task.description, None);
         assert_eq!(task.priority, 8);
         assert_eq!(task.points, Some(5));
         assert_eq!(task.time_estimate_ms, Some(3600000));
@@ -616,6 +615,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Parent".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -633,6 +633,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Child 1".to_string(),
+                None,
                 Some(parent.id.clone()),
                 None, // phase
                 None,
@@ -649,6 +650,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Child 2".to_string(),
+                None,
                 Some(parent.id.clone()),
                 None, // phase
                 None,
@@ -677,6 +679,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Find Me".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -714,6 +717,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Original".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -754,6 +758,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Complete Me".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -805,6 +810,7 @@ mod task_tests {
                 None,
                 "Delete Me".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -834,6 +840,7 @@ mod task_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -848,6 +855,7 @@ mod task_tests {
         db.create_task(
             None,
             "Child".to_string(),
+            None,
             Some(parent.id.clone()),
             None, // phase
             None,
@@ -876,6 +884,7 @@ mod task_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -891,6 +900,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Child".to_string(),
+                None,
                 Some(parent.id.clone()),
                 None, // phase
                 None,
@@ -921,6 +931,7 @@ mod task_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -935,6 +946,7 @@ mod task_tests {
         db.create_task(
             None,
             "Child 1".to_string(),
+            None,
             Some(parent.id.clone()),
             None, // phase
             None,
@@ -950,6 +962,7 @@ mod task_tests {
         db.create_task(
             None,
             "Child 2".to_string(),
+            None,
             Some(parent.id.clone()),
             None, // phase
             None,
@@ -978,6 +991,7 @@ mod task_tests {
             None,
             "Pending".to_string(),
             None,
+            None,
             None, // phase
             None,
             None,
@@ -993,6 +1007,7 @@ mod task_tests {
             .create_task(
                 None,
                 "Completed".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1100,6 +1115,7 @@ mod task_claiming_tests {
                 None,
                 "Claim Me".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1134,6 +1150,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Claimed".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1171,6 +1188,7 @@ mod task_claiming_tests {
                 None,
                 "Rust Task".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1205,6 +1223,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Rust Task".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1241,6 +1260,7 @@ mod task_claiming_tests {
                 None,
                 "Flexible Task".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1269,6 +1289,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Release Me".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1306,6 +1327,7 @@ mod task_claiming_tests {
                 None,
                 "Owned".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1335,6 +1357,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Force".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1369,6 +1392,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Update Claim".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1425,6 +1449,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Update Release".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1507,6 +1532,7 @@ mod task_claiming_tests {
                 None,
                 "Force Update".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1565,6 +1591,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "No Force".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1626,6 +1653,7 @@ mod task_claiming_tests {
                 None,
                 "Needs Rust".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1676,6 +1704,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Complete Me".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -1803,6 +1832,7 @@ mod task_claiming_tests {
                 None,
                 "Timed to Timed".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1911,6 +1941,7 @@ mod task_claiming_tests {
                 None,
                 "Same State".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -1982,6 +2013,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Untimed to Untimed".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2093,6 +2125,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2108,6 +2141,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Task B".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2175,6 +2209,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2191,6 +2226,7 @@ mod task_claiming_tests {
                 None,
                 "Task B".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2206,6 +2242,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Task C".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2275,6 +2312,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2290,6 +2328,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Task B".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2379,6 +2418,7 @@ mod task_claiming_tests {
                 None,
                 "Task A".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2394,6 +2434,7 @@ mod task_claiming_tests {
             .create_task(
                 None,
                 "Task B".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2454,6 +2495,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2469,6 +2511,7 @@ mod dependency_tests {
             .create_task(
                 None,
                 "Task 2".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2500,6 +2543,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2515,6 +2559,7 @@ mod dependency_tests {
             .create_task(
                 None,
                 "Task 2".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2546,6 +2591,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2562,6 +2608,7 @@ mod dependency_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2577,6 +2624,7 @@ mod dependency_tests {
             .create_task(
                 None,
                 "Task 3".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2610,6 +2658,7 @@ mod dependency_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2625,6 +2674,7 @@ mod dependency_tests {
             .create_task(
                 None,
                 "Task 2".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2657,6 +2707,7 @@ mod dependency_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2672,6 +2723,7 @@ mod dependency_tests {
             .create_task(
                 None,
                 "Blocked".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2706,6 +2758,7 @@ mod dependency_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -2721,6 +2774,7 @@ mod dependency_tests {
             .create_task(
                 None,
                 "Blocked".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -2767,6 +2821,185 @@ mod dependency_tests {
         // Now task2 is ready
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].id, task2.id);
+    }
+
+    #[test]
+    fn get_ready_tasks_excludes_container_tasks() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Create a container/category task (will have children)
+        let container = db
+            .create_task(
+                None,
+                "Stream A: Core Features".to_string(),
+                None,
+                None,
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Create child tasks under the container (creates 'contains' dependency)
+        let child1 = db
+            .create_task(
+                None,
+                "Implement feature X".to_string(),
+                None,
+                Some(container.id.clone()),
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        let child2 = db
+            .create_task(
+                None,
+                "Implement feature Y".to_string(),
+                None,
+                Some(container.id.clone()),
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Create a standalone leaf task (no children)
+        let leaf = db
+            .create_task(
+                None,
+                "Fix bug Z".to_string(),
+                None,
+                None,
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        let ready = db
+            .get_ready_tasks(None, &states_config, &deps_config, None, None)
+            .unwrap();
+
+        // Container task should NOT appear in ready results (it has children)
+        // Child tasks and standalone leaf task should appear
+        let ready_ids: Vec<&str> = ready.iter().map(|t| t.id.as_str()).collect();
+        assert!(
+            !ready_ids.contains(&container.id.as_str()),
+            "Container task should be excluded from ready results, got: {:?}",
+            ready_ids
+        );
+        assert!(
+            ready_ids.contains(&child1.id.as_str()),
+            "Child task 1 should be in ready results"
+        );
+        assert!(
+            ready_ids.contains(&child2.id.as_str()),
+            "Child task 2 should be in ready results"
+        );
+        assert!(
+            ready_ids.contains(&leaf.id.as_str()),
+            "Standalone leaf task should be in ready results"
+        );
+    }
+
+    #[test]
+    fn get_ready_tasks_includes_task_after_children_removed() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Create a task that initially has a child
+        let parent = db
+            .create_task(
+                None,
+                "Was a container".to_string(),
+                None,
+                None,
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        let child = db
+            .create_task(
+                None,
+                "Child task".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None, // phase
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Parent should NOT be ready (it's a container)
+        let ready = db
+            .get_ready_tasks(None, &states_config, &deps_config, None, None)
+            .unwrap();
+        let ready_ids: Vec<&str> = ready.iter().map(|t| t.id.as_str()).collect();
+        assert!(
+            !ready_ids.contains(&parent.id.as_str()),
+            "Parent with child should not be ready"
+        );
+        assert!(
+            ready_ids.contains(&child.id.as_str()),
+            "Child should be ready"
+        );
+
+        // Remove the contains dependency (soft-delete)
+        db.remove_dependency(&parent.id, &child.id, "contains")
+            .unwrap();
+
+        // Now parent should be ready (no longer a container)
+        let ready = db
+            .get_ready_tasks(None, &states_config, &deps_config, None, None)
+            .unwrap();
+        let ready_ids: Vec<&str> = ready.iter().map(|t| t.id.as_str()).collect();
+        assert!(
+            ready_ids.contains(&parent.id.as_str()),
+            "Parent without children should now be ready"
+        );
     }
 }
 
@@ -3189,6 +3422,7 @@ mod tracking_tests {
                 None,
                 "Think".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -3218,6 +3452,7 @@ mod tracking_tests {
                 None,
                 "Time Me".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -3245,6 +3480,7 @@ mod tracking_tests {
             .create_task(
                 None,
                 "Cost Me".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3291,6 +3527,7 @@ mod stats_tests {
             None,
             "Task 1".to_string(),
             None,
+            None,
             None, // phase
             None,
             Some(3),
@@ -3306,6 +3543,7 @@ mod stats_tests {
             .create_task(
                 None,
                 "Task 2".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3363,6 +3601,7 @@ mod stats_tests {
                 None,
                 "Agent Task".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 Some(3),
@@ -3378,6 +3617,7 @@ mod stats_tests {
         db.create_task(
             None,
             "Other Task".to_string(),
+            None,
             None,
             None, // phase
             None,
@@ -3406,6 +3646,7 @@ mod stats_tests {
                 None,
                 "Parent".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 Some(2),
@@ -3420,6 +3661,7 @@ mod stats_tests {
         db.create_task(
             None,
             "Child".to_string(),
+            None,
             Some(parent.id.clone()),
             None, // phase
             None,
@@ -3435,6 +3677,7 @@ mod stats_tests {
         db.create_task(
             None,
             "Other".to_string(),
+            None,
             None,
             None, // phase
             None,
@@ -3471,6 +3714,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -3501,6 +3745,7 @@ mod state_transition_tests {
             .create_task(
                 None,
                 "Test".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3535,6 +3780,7 @@ mod state_transition_tests {
             .create_task(
                 None,
                 "Test".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3572,6 +3818,7 @@ mod state_transition_tests {
             .create_task(
                 None,
                 "Test".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3619,6 +3866,7 @@ mod state_transition_tests {
                 None,
                 "Test".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -3651,6 +3899,7 @@ mod state_transition_tests {
             .create_task(
                 None,
                 "Test".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3689,6 +3938,7 @@ mod state_transition_tests {
             .create_task(
                 None,
                 "Test".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3735,6 +3985,7 @@ mod state_transition_tests {
             .create_task(
                 None,
                 "Test reopen".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3831,6 +4082,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -3846,6 +4098,7 @@ mod auto_advance_tests {
             .create_task(
                 None,
                 "Blocked".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -3935,6 +4188,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -3950,6 +4204,7 @@ mod auto_advance_tests {
             .create_task(
                 None,
                 "Blocked".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -4019,6 +4274,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker 1".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -4035,6 +4291,7 @@ mod auto_advance_tests {
                 None,
                 "Blocked".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -4050,6 +4307,7 @@ mod auto_advance_tests {
             .create_task(
                 None,
                 "Blocker 2".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -4144,6 +4402,7 @@ mod auto_advance_tests {
                 None,
                 "Blocker".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -4159,6 +4418,7 @@ mod auto_advance_tests {
             .create_task(
                 None,
                 "Blocked".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -4225,6 +4485,7 @@ mod auto_advance_tests {
                 None,
                 "Task 1".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -4241,6 +4502,7 @@ mod auto_advance_tests {
                 None,
                 "Task 2".to_string(),
                 None,
+                None,
                 None, // phase
                 None,
                 None,
@@ -4256,6 +4518,7 @@ mod auto_advance_tests {
             .create_task(
                 None,
                 "Task 3".to_string(),
+                None,
                 None,
                 None, // phase
                 None,
@@ -4330,6 +4593,7 @@ mod attachment_tests {
         db.create_task(
             None,
             "Attachment Test".to_string(),
+            None,
             None,
             None, // phase
             None,
@@ -4512,5 +4776,139 @@ mod attachment_tests {
 
         let all = db.get_attachments_filtered(&task.id, None, None).unwrap();
         assert_eq!(all.len(), 2);
+    }
+}
+
+mod rename_tests {
+    use super::*;
+
+    #[test]
+    fn rename_task_updates_all_references() {
+        let db = setup_db();
+        let sc = default_states_config();
+        let dc = default_deps_config();
+        let ic = default_ids_config();
+
+        // Create two tasks with a dependency between them
+        db.create_task(
+            Some("task-a".to_string()),
+            "Task A".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(vec!["tag1".to_string()]),
+            &sc,
+            &ic,
+        )
+        .unwrap();
+        db.create_task(
+            Some("task-b".to_string()),
+            "Task B".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &sc,
+            &ic,
+        )
+        .unwrap();
+
+        // Add dependency: a blocks b
+        db.add_dependency_soft("task-a", "task-b", "blocks", &dc)
+            .unwrap();
+
+        // Add attachment to task-a
+        db.add_attachment(
+            "task-a",
+            "note".to_string(),
+            "test note".to_string(),
+            "content".to_string(),
+            Some("text/plain".to_string()),
+            None,
+        )
+        .unwrap();
+
+        // Rename task-a -> task-alpha
+        db.rename_task("task-a", "task-alpha").unwrap();
+
+        // Old ID should not exist
+        assert!(db.get_task("task-a").unwrap().is_none());
+
+        // New ID should exist with same title
+        let renamed = db.get_task("task-alpha").unwrap().unwrap();
+        assert_eq!(renamed.title, "Task A");
+        assert!(renamed.tags.contains(&"tag1".to_string()));
+
+        // Dependency should reference the new ID
+        let blockers = db.get_blockers("task-b").unwrap();
+        assert!(blockers.contains(&"task-alpha".to_string()));
+
+        // Attachment should reference the new ID
+        let attachments = db.get_attachments("task-alpha").unwrap();
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].task_id, "task-alpha");
+    }
+
+    #[test]
+    fn rename_task_fails_if_new_id_exists() {
+        let db = setup_db();
+        let sc = default_states_config();
+        let ic = default_ids_config();
+
+        db.create_task(
+            Some("task-a".to_string()),
+            "Task A".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &sc,
+            &ic,
+        )
+        .unwrap();
+        db.create_task(
+            Some("task-b".to_string()),
+            "Task B".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &sc,
+            &ic,
+        )
+        .unwrap();
+
+        let result = db.rename_task("task-a", "task-b");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn rename_task_fails_if_old_id_missing() {
+        let db = setup_db();
+
+        let result = db.rename_task("nonexistent", "new-id");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
     }
 }

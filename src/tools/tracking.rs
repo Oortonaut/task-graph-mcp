@@ -1,6 +1,8 @@
 //! Live status and tracking tools.
 
-use super::{get_f64, get_i64, get_string, get_string_array, make_tool_with_prompts};
+use super::{
+    get_f64, get_i64, get_string, get_string_array, get_string_or_array, make_tool_with_prompts,
+};
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
@@ -151,7 +153,7 @@ pub fn thinking(db: &Database, args: Value) -> Result<Value> {
     let agent_id = get_string(&args, "agent").ok_or_else(|| ToolError::missing_field("agent"))?;
     let thought =
         get_string(&args, "thought").ok_or_else(|| ToolError::missing_field("thought"))?;
-    let task_ids = get_string_array(&args, "tasks");
+    let task_ids = get_string_or_array(&args, "tasks");
 
     // Also refresh heartbeat since updating thought implies activity
     let _ = db.heartbeat(&agent_id);

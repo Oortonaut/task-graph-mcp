@@ -13,6 +13,7 @@ pub mod search;
 pub mod skills;
 pub mod tasks;
 pub mod tracking;
+pub mod workflows;
 
 pub use context::ToolContext;
 
@@ -151,6 +152,9 @@ impl ToolHandler {
         // Gate checking tools
         tools.extend(gates::get_tools(&self.prompts));
 
+        // Workflow discovery tools (no auth needed, callable before connect)
+        tools.extend(workflows::get_tools());
+
         tools
     }
 
@@ -167,16 +171,27 @@ impl ToolHandler {
 
         match name {
             // Worker tools
-            "connect" => json(agents::connect(
-                &self.db,
-                &self.server_paths,
-                &self.states_config,
-                &self.phases_config,
-                &self.deps_config,
-                &self.tags_config,
-                &self.ids_config,
-                arguments,
-            )),
+            "connect" => {
+                // Resolve workflow from args (worker isn't registered yet during connect)
+                let workflow = arguments
+                    .get("workflow")
+                    .and_then(|v| v.as_str())
+                    .and_then(|name| self.workflows.get_named_workflow(name))
+                    .map(|w| Arc::clone(w))
+                    .or_else(|| self.workflows.get_default_workflow().map(|w| Arc::clone(w)))
+                    .unwrap_or_else(|| Arc::clone(&self.workflows));
+                json(agents::connect(
+                    &self.db,
+                    &self.server_paths,
+                    &self.states_config,
+                    &self.phases_config,
+                    &self.deps_config,
+                    &self.tags_config,
+                    &self.ids_config,
+                    &workflow,
+                    arguments,
+                ))
+            }
             "disconnect" => json(agents::disconnect(&self.db, &self.states_config, arguments)),
             "list_agents" => agents::list_agents(
                 &self.db,
@@ -235,6 +250,7 @@ impl ToolHandler {
                 ))
             }
             "delete" => json(tasks::delete(&self.db, arguments)),
+            "rename" => json(tasks::rename(&self.db, arguments)),
             "scan" => json(tasks::scan(&self.db, self.default_format, arguments)),
 
             // Tracking tools
@@ -321,6 +337,9 @@ impl ToolHandler {
                 json(gates::check_gates(&self.db, &self.workflows, arguments))
             }
 
+            // Workflow discovery tools (no connection required)
+            "list_workflows" => json(workflows::list_workflows(&self.workflows)),
+
             _ => Err(ToolError::unknown_tool(name).into()),
         }
     }
@@ -403,4 +422,20 @@ pub fn get_string_or_array(args: &Value, key: &str) -> Option<Vec<String>> {
             })
         }
     })
+}
+
+/// Parsed result that may be a list of IDs or a wildcard "*".
+pub enum IdList {
+    Ids(Vec<String>),
+    Wildcard,
+}
+
+/// Like get_string_or_array, but recognizes "*" as a wildcard sentinel.
+pub fn get_string_or_array_or_wildcard(args: &Value, key: &str) -> Option<IdList> {
+    let vals = get_string_or_array(args, key)?;
+    if vals.len() == 1 && vals[0] == "*" {
+        Some(IdList::Wildcard)
+    } else {
+        Some(IdList::Ids(vals))
+    }
 }

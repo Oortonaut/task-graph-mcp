@@ -1,6 +1,9 @@
 //! File coordination tools (advisory marks for file coordination).
 
-use super::{get_string, get_string_array, get_string_or_array, make_tool_with_prompts};
+use super::{
+    IdList, get_string, get_string_or_array, get_string_or_array_or_wildcard,
+    make_tool_with_prompts,
+};
 use crate::config::Prompts;
 use crate::db::Database;
 use crate::error::ToolError;
@@ -268,10 +271,10 @@ pub fn unmark_file(db: &Database, args: Value) -> Result<Value> {
     }
 
     // Get file parameter - can be string, array, or '*'
-    let file_param = get_string_or_array(&args, "file");
+    let file_param = get_string_or_array_or_wildcard(&args, "file");
 
     match file_param {
-        Some(files) if files.len() == 1 && files[0] == "*" => {
+        Some(IdList::Wildcard) => {
             // Wildcard: unmark all files held by this agent
             let unmarked = db.release_worker_locks_verbose(&worker_id, reason)?;
             Ok(json!({
@@ -283,7 +286,7 @@ pub fn unmark_file(db: &Database, args: Value) -> Result<Value> {
                 "count": unmarked.len()
             }))
         }
-        Some(files) => {
+        Some(IdList::Ids(files)) => {
             // Normalize the file paths before unmarking
             let normalized_files = normalize_file_paths(files);
             // Specific files: unmark each one
@@ -305,7 +308,7 @@ pub fn unmark_file(db: &Database, args: Value) -> Result<Value> {
 }
 
 pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
-    let files = get_string_array(&args, "files");
+    let files = get_string_or_array(&args, "files");
     let worker_id = get_string(&args, "agent");
     let task_id = get_string(&args, "task");
     let format = get_string(&args, "format")

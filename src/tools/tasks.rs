@@ -1,6 +1,9 @@
 //! Task CRUD tools.
 
-use super::{get_bool, get_i32, get_i64, get_string, get_string_array, make_tool_with_prompts};
+use super::{
+    get_bool, get_i32, get_i64, get_string, get_string_array, get_string_or_array,
+    make_tool_with_prompts,
+};
 use crate::config::{
     AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, GateEnforcement, IdsConfig,
     PhasesConfig, Prompts, StatesConfig, TagsConfig, UnknownKeyBehavior,
@@ -33,9 +36,13 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "string",
                     "description": "Custom task ID (optional, petname ID generated if not provided)"
                 },
+                "title": {
+                    "type": "string",
+                    "description": "Short task title (derived from description if omitted)"
+                },
                 "description": {
                     "type": "string",
-                    "description": "Task description (required)"
+                    "description": "Task description (optional if title provided)"
                 },
                 "parent": {
                     "type": "string",
@@ -59,7 +66,7 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "description": "Categorization/discovery tags (what the task IS, for querying)"
                 }
             }),
-            vec!["description"],
+            vec![],
             prompts,
         ),
         make_tool_with_prompts(
@@ -141,6 +148,10 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "parent": {
                     "type": "string",
                     "description": "Filter by parent task ID (use 'null' for root tasks)"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "When true with parent, returns all descendants (subtree) instead of just direct children. Uses contains-dependency traversal."
                 },
                 "agent": {
                     "type": "string",
@@ -306,6 +317,26 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
             prompts,
         ),
         make_tool_with_prompts(
+            "rename",
+            "Change a task's ID. Updates all references (dependencies, attachments, file marks, tags, etc.) atomically.",
+            json!({
+                "worker_id": {
+                    "type": "string",
+                    "description": "Worker ID (for audit)"
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Current task ID"
+                },
+                "new_id": {
+                    "type": "string",
+                    "description": "New task ID"
+                }
+            }),
+            vec!["worker_id", "task", "new_id"],
+            prompts,
+        ),
+        make_tool_with_prompts(
             "scan",
             "Scan the task graph from a starting task in multiple directions. Returns related tasks organized by direction: before (predecessors via blocks/follows), after (successors), above (ancestors via contains), below (descendants). Each direction has depth control: 0=none, N=levels, -1=all.",
             json!({
@@ -350,8 +381,8 @@ pub fn create(
     args: Value,
 ) -> Result<Value> {
     let id = get_string(&args, "id");
-    let description =
-        get_string(&args, "description").ok_or_else(|| ToolError::missing_field("description"))?;
+    let title = get_string(&args, "title");
+    let description = get_string(&args, "description");
     let parent_id = get_string(&args, "parent");
     let phase = get_string(&args, "phase");
     // Support both integer and string priority
@@ -362,6 +393,16 @@ pub fn create(
     let tags = get_string_array(&args, "tags");
     let needed_tags = get_string_array(&args, "needed_tags");
     let wanted_tags = get_string_array(&args, "wanted_tags");
+
+    // Require at least one of title or description
+    if title.is_none() && description.is_none() {
+        return Err(ToolError::missing_field("title or description").into());
+    }
+
+    // Derive effective title: explicit title, or truncated description
+    let effective_title = title.unwrap_or_else(|| {
+        crate::format::truncate_title(description.as_deref().unwrap_or("")).into_owned()
+    });
 
     // Check phase validity (may return warning)
     let phase_warning = if let Some(ref p) = phase {
@@ -384,6 +425,7 @@ pub fn create(
 
     let task = db.create_task(
         id,
+        effective_title,
         description,
         parent_id,
         phase,
@@ -399,6 +441,7 @@ pub fn create(
 
     let mut response = json!({
         "id": &task.id,
+        "title": task.title,
         "description": task.description,
         "status": task.status,
         "phase": task.phase,
@@ -412,6 +455,13 @@ pub fn create(
 
     if !tag_warnings.is_empty() {
         response["tag_warnings"] = json!(tag_warnings);
+    }
+
+    // Warn if title is too long for scannable list output
+    if task.title.len() > crate::format::MAX_TITLE_DISPLAY_LEN || task.title.contains('\n') {
+        response["title_warning"] = json!(
+            "Title exceeds 80 chars or is multi-line. Consider using a short title and keeping detail in the description."
+        );
     }
 
     Ok(response)
@@ -560,6 +610,7 @@ pub fn list_tasks(
     let ready = get_bool(&args, "ready").unwrap_or(false);
     let blocked = get_bool(&args, "blocked").unwrap_or(false);
     let claimed = get_bool(&args, "claimed").unwrap_or(false);
+    let recursive = get_bool(&args, "recursive").unwrap_or(false);
     let limit = get_i32(&args, "limit");
     let phase = get_string(&args, "phase");
 
@@ -575,92 +626,99 @@ pub fn list_tasks(
     let sort_order = get_string(&args, "sort_order");
 
     // Get tasks based on filters
-    let mut tasks = if ready {
-        // Ready tasks: in initial state, unclaimed, all deps satisfied
-        // If agent is provided, also filter by agent's tag qualifications
-        db.get_ready_tasks(
-            agent_id.as_deref(),
-            states_config,
-            deps_config,
-            sort_by.as_deref(),
-            sort_order.as_deref(),
-        )?
-    } else if blocked {
-        // Blocked tasks: have unsatisfied deps
-        db.get_blocked_tasks(
-            states_config,
-            deps_config,
-            sort_by.as_deref(),
-            sort_order.as_deref(),
-        )?
-    } else if claimed {
-        // Claimed tasks: currently owned by any agent
-        db.get_claimed_tasks(None)?
-    } else {
-        // General query with filters
-        // Handle status which can be string or array
-        let status_vec: Option<Vec<String>> = if let Some(status_val) = args.get("status") {
-            if let Some(s) = status_val.as_str() {
-                Some(vec![s.to_string()])
-            } else {
-                status_val.as_array().map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
+    let parent_id_str = get_string(&args, "parent");
+
+    let mut tasks =
+        if recursive && parent_id_str.is_some() && parent_id_str.as_deref() != Some("null") {
+            // Recursive descent: get all descendants of the parent via contains dependencies
+            let pid = parent_id_str.as_deref().unwrap();
+            let mut descendants = db.get_descendants(pid, -1)?;
+
+            // Apply status filter in memory
+            if let Some(status_set) = get_string_or_array(&args, "status") {
+                if !status_set.is_empty() {
+                    descendants.retain(|t| status_set.contains(&t.status));
+                }
             }
+
+            // Apply owner filter in memory
+            if let Some(ref owner) = get_string(&args, "owner") {
+                descendants.retain(|t| t.worker_id.as_deref() == Some(owner.as_str()));
+            }
+
+            descendants
+        } else if ready {
+            // Ready tasks: in initial state, unclaimed, all deps satisfied
+            // If agent is provided, also filter by agent's tag qualifications
+            db.get_ready_tasks(
+                agent_id.as_deref(),
+                states_config,
+                deps_config,
+                sort_by.as_deref(),
+                sort_order.as_deref(),
+            )?
+        } else if blocked {
+            // Blocked tasks: have unsatisfied deps
+            db.get_blocked_tasks(
+                states_config,
+                deps_config,
+                sort_by.as_deref(),
+                sort_order.as_deref(),
+            )?
+        } else if claimed {
+            // Claimed tasks: currently owned by any agent
+            db.get_claimed_tasks(None)?
         } else {
-            None
-        };
-        let owner = get_string(&args, "owner");
-        let parent_id_str = get_string(&args, "parent");
-        let parent_id: Option<Option<&str>> = match &parent_id_str {
-            Some(pid_str) if pid_str == "null" => Some(None), // Root tasks
-            Some(pid_str) => Some(Some(pid_str.as_str())),
-            None => None,
-        };
-
-        // Check if tag filtering or agent qualification filtering is needed
-        let has_tag_filters = tags_any.is_some() || tags_all.is_some() || agent_id.is_some();
-
-        if has_tag_filters {
-            // Use the tag-filtered query
-            // When agent is provided without ready=true, filter by agent's qualification
-            let qualified_agent_tags = if let Some(aid) = &agent_id {
-                Some(db.get_agent_tags(aid)?)
-            } else {
-                None
+            // General query with filters
+            let status_vec = get_string_or_array(&args, "status");
+            let owner = get_string(&args, "owner");
+            let parent_id: Option<Option<&str>> = match &parent_id_str {
+                Some(pid_str) if pid_str == "null" => Some(None), // Root tasks
+                Some(pid_str) => Some(Some(pid_str.as_str())),
+                None => None,
             };
 
-            db.list_tasks_with_tag_filters(
-                status_vec,
-                owner.as_deref(),
-                parent_id,
-                tags_any,
-                tags_all,
-                qualified_agent_tags,
-                limit,
-                0, // offset
-                sort_by.as_deref(),
-                sort_order.as_deref(),
-            )?
-        } else {
-            // Use list_tasks which returns full Task objects (only supports single status)
-            let status = status_vec
-                .as_ref()
-                .and_then(|v| v.first().map(|s| s.as_str()));
-            db.list_tasks(
-                status,
-                phase.as_deref(),
-                owner.as_deref(),
-                parent_id,
-                limit,
-                0, // offset
-                sort_by.as_deref(),
-                sort_order.as_deref(),
-            )?
-        }
-    };
+            // Check if tag filtering or agent qualification filtering is needed
+            let has_tag_filters = tags_any.is_some() || tags_all.is_some() || agent_id.is_some();
+
+            if has_tag_filters {
+                // Use the tag-filtered query
+                // When agent is provided without ready=true, filter by agent's qualification
+                let qualified_agent_tags = if let Some(aid) = &agent_id {
+                    Some(db.get_agent_tags(aid)?)
+                } else {
+                    None
+                };
+
+                db.list_tasks_with_tag_filters(
+                    status_vec,
+                    owner.as_deref(),
+                    parent_id,
+                    tags_any,
+                    tags_all,
+                    qualified_agent_tags,
+                    limit,
+                    0, // offset
+                    sort_by.as_deref(),
+                    sort_order.as_deref(),
+                )?
+            } else {
+                // Use list_tasks which returns full Task objects (only supports single status)
+                let status = status_vec
+                    .as_ref()
+                    .and_then(|v| v.first().map(|s| s.as_str()));
+                db.list_tasks(
+                    status,
+                    phase.as_deref(),
+                    owner.as_deref(),
+                    parent_id,
+                    limit,
+                    0, // offset
+                    sort_by.as_deref(),
+                    sort_order.as_deref(),
+                )?
+            }
+        };
 
     // Apply phase filter for ready/blocked/claimed paths (list_tasks handles it internally)
     if let Some(ref p) = phase {
@@ -1115,7 +1173,7 @@ pub fn update(
 
     // Get transition prompts if status or phase may have changed
     // We update the worker's last seen state and get any matching prompts
-    let transition_prompt_list: Vec<String> = {
+    let mut transition_prompt_list: Vec<String> = {
         // Update worker state and get old state for prompt calculation
         match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
             Ok((old_status, old_phase)) => {
@@ -1174,6 +1232,22 @@ pub fn update(
         if !gate_warnings.is_empty() {
             map.insert("gate_warnings".to_string(), json!(gate_warnings));
         }
+        // Add role-specific prompt based on the new status
+        if let Ok(Some(worker)) = db.get_worker(&worker_id)
+            && let Some(role_name) = workflows.match_role(&worker.tags)
+        {
+            // Map status transitions to role prompt keys
+            let prompt_key = match task.status.as_str() {
+                "completed" => Some("completing"),
+                _ => None,
+            };
+            if let Some(key) = prompt_key
+                && let Some(prompt) = workflows.get_role_prompt(&role_name, key)
+            {
+                transition_prompt_list.push(prompt.to_string());
+            }
+        }
+
         // Include transition prompts if any
         if !transition_prompt_list.is_empty() {
             map.insert("prompts".to_string(), json!(transition_prompt_list));
@@ -1197,6 +1271,21 @@ pub fn delete(db: &Database, args: Value) -> Result<Value> {
     Ok(json!({
         "success": true,
         "soft_deleted": !obliterate
+    }))
+}
+
+pub fn rename(db: &Database, args: Value) -> Result<Value> {
+    let _worker_id =
+        get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
+    let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
+    let new_id = get_string(&args, "new_id").ok_or_else(|| ToolError::missing_field("new_id"))?;
+
+    db.rename_task(&task_id, &new_id)?;
+
+    Ok(json!({
+        "success": true,
+        "old_id": task_id,
+        "new_id": new_id
     }))
 }
 

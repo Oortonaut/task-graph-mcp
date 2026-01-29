@@ -240,11 +240,13 @@ impl Database {
     /// Create a new task.
     /// If id is provided, uses it as the task ID; otherwise generates a petname ID.
     /// If parent_id is provided, creates a 'contains' dependency from parent to this task.
+    /// `title` is the short task title; `description` is optional longer detail.
     #[allow(clippy::too_many_arguments)]
     pub fn create_task(
         &self,
         id: Option<String>,
-        description: String,
+        title: String,
+        description: Option<String>,
         parent_id: Option<String>,
         phase: Option<String>,
         priority: Option<Priority>,
@@ -278,8 +280,8 @@ impl Database {
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     &task_id,
-                    &description, // Use description as title
-                    &description, // Also store as description
+                    &title,
+                    &description,
                     initial_status,
                     &phase,
                     priority.to_string(),
@@ -310,8 +312,8 @@ impl Database {
 
             Ok(Task {
                 id: task_id,
-                title: description.clone(),
-                description: Some(description),
+                title,
+                description,
                 status: initial_status.clone(),
                 phase,
                 priority,
@@ -334,17 +336,19 @@ impl Database {
         })
     }
 
-    /// Convenience method to create a task with just description.
-    /// All other parameters use defaults. Useful for tests.
+    /// Convenience method to create a task with just a description string.
+    /// Uses the description as both title and description. Useful for tests.
     pub fn create_task_simple(
         &self,
         description: impl Into<String>,
         states_config: &StatesConfig,
         ids_config: &IdsConfig,
     ) -> Result<Task> {
+        let desc = description.into();
         self.create_task(
             None,
-            description.into(),
+            desc.clone(),
+            Some(desc),
             None,
             None,
             None,
@@ -412,6 +416,126 @@ impl Database {
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                 Err(e) => Err(e.into()),
             }
+        })
+    }
+
+    /// Rename a task's ID, updating all references atomically.
+    ///
+    /// Disables foreign key enforcement, updates every table that references
+    /// `tasks.id` inside a transaction, then re-enables and verifies FK
+    /// integrity.
+    pub fn rename_task(&self, old_id: &str, new_id: &str) -> Result<()> {
+        // Validate new_id
+        if new_id.is_empty() {
+            return Err(anyhow!("new_id must not be empty"));
+        }
+        if new_id.len() > 64 {
+            return Err(anyhow!("new_id must not exceed 64 characters"));
+        }
+
+        self.with_conn_mut(|conn| {
+            // Pre-check: old_id must exist
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+                params![old_id],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err(anyhow!("Task '{}' not found", old_id));
+            }
+
+            // Pre-check: new_id must not already exist
+            let conflict: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+                params![new_id],
+                |row| row.get(0),
+            )?;
+            if conflict {
+                return Err(anyhow!("Task '{}' already exists", new_id));
+            }
+
+            // Disable FK enforcement for the duration of the update
+            conn.execute_batch("PRAGMA foreign_keys = OFF")?;
+
+            let result = (|| -> Result<()> {
+                let tx = conn.transaction()?;
+
+                // Primary table — triggers tasks_fts_update
+                tx.execute(
+                    "UPDATE tasks SET id = ?1 WHERE id = ?2",
+                    params![new_id, old_id],
+                )?;
+
+                // Attachments — triggers attachments_fts_update per row
+                tx.execute(
+                    "UPDATE attachments SET task_id = ?1 WHERE task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+
+                // Dependencies (both columns)
+                tx.execute(
+                    "UPDATE dependencies SET from_task_id = ?1 WHERE from_task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+                tx.execute(
+                    "UPDATE dependencies SET to_task_id = ?1 WHERE to_task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+
+                // File locks
+                tx.execute(
+                    "UPDATE file_locks SET task_id = ?1 WHERE task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+
+                // Tag junction tables
+                tx.execute(
+                    "UPDATE task_tags SET task_id = ?1 WHERE task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+                tx.execute(
+                    "UPDATE task_needed_tags SET task_id = ?1 WHERE task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+                tx.execute(
+                    "UPDATE task_wanted_tags SET task_id = ?1 WHERE task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+
+                // Sequence table
+                tx.execute(
+                    "UPDATE task_sequence SET task_id = ?1 WHERE task_id = ?2",
+                    params![new_id, old_id],
+                )?;
+
+                tx.commit()?;
+                Ok(())
+            })();
+
+            // Re-enable FK enforcement regardless of success
+            conn.execute_batch("PRAGMA foreign_keys = ON")?;
+
+            // Propagate any error from the transaction
+            result?;
+
+            // Verify FK integrity
+            let mut stmt = conn.prepare("PRAGMA foreign_key_check")?;
+            let violations: Vec<String> = stmt
+                .query_map([], |row| {
+                    let table: String = row.get(0)?;
+                    Ok(table)
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            if !violations.is_empty() {
+                return Err(anyhow!(
+                    "Foreign key violations after rename in tables: {:?}",
+                    violations
+                ));
+            }
+
+            Ok(())
         })
     }
 
@@ -1767,6 +1891,15 @@ fn create_tree_recursive(
         let priority = clamp_priority(input.priority.unwrap_or(PRIORITY_DEFAULT));
         let initial_status = &states_config.initial;
 
+        // Derive title: use explicit title, or derive from description, or empty
+        let title = input.title.clone().unwrap_or_else(|| {
+            input
+                .description
+                .as_deref()
+                .map(|d| crate::format::truncate_title(d).into_owned())
+                .unwrap_or_default()
+        });
+
         // Check phase validity
         if let Some(ref phase) = input.phase
             && let Some(warning) = phases_config.check_phase(phase)?
@@ -1800,7 +1933,7 @@ fn create_tree_recursive(
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 &task_id,
-                &input.title,
+                &title,
                 &input.description,
                 initial_status,
                 &input.phase,
