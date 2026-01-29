@@ -2,6 +2,7 @@
 
 pub mod agents;
 pub mod config;
+pub mod docs;
 pub mod files;
 pub mod skills;
 pub mod stats;

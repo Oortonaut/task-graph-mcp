@@ -22,6 +22,7 @@ mod files;
 mod loader;
 mod merge;
 mod types;
+pub mod watcher;
 pub mod workflows;
 
 pub use files::{FileSource, ResolvedFile};
