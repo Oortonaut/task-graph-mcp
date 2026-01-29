@@ -49,6 +49,7 @@ roles:
         ## Implementation Checklist
         - [ ] Read and understand the design spec
         - [ ] Identify files to modify (use mark_file)
+        - [ ] **Never revert unfamiliar changes** in files - another worker may own those. Check mark_updates() first
         - [ ] Follow existing patterns
         - [ ] Write unit tests alongside code
         - [ ] Document public APIs
@@ -136,7 +137,7 @@ states:
         Claim when ready with `claim()` or reject back to pending if misrouted.
 
   working:
-    exits: [completed, failed, pending]
+    exits: [completed, failed, pending, consult]
     timed: true
     prompts:
       enter: |
@@ -187,6 +188,15 @@ states:
         - What blocked progress
         - Whether to retry or escalate
         - Suggested next steps
+
+  consult:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        **Paused for human review.** This task needs human input before the relay can continue.
+        Attach a note explaining what decision is needed.
+        A human must transition this back to `working` or `pending`.
 
   cancelled:
     exits: []

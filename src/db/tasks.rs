@@ -5,6 +5,7 @@ use super::{Database, now_ms};
 use crate::config::{
     AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig, StatesConfig, TagsConfig,
 };
+use crate::error::ToolError;
 use crate::types::{
     PRIORITY_DEFAULT, Priority, Task, TaskTree, TaskTreeInput, Worker, clamp_priority,
     parse_priority,
@@ -20,7 +21,7 @@ fn generate_task_id(ids_config: &IdsConfig) -> String {
     let case = ids_config.id_case;
 
     // Generate with hyphen separator first (petname's default format)
-    let base = Petnames::large()
+    let base = Petnames::medium()
         .generate_one(words, "-")
         .unwrap_or_else(|| format!("task-{}", super::now_ms()));
 
@@ -737,10 +738,9 @@ impl Database {
                         deps_config,
                     )?;
                     if !unsatisfied_blockers.is_empty() {
-                        return Err(anyhow!(
-                            "Task has unsatisfied dependencies: [{}]",
-                            unsatisfied_blockers.join(", ")
-                        ));
+                        // Return structured error with blocking task IDs so clients
+                        // can monitor them and retry when they complete
+                        return Err(ToolError::deps_not_satisfied(&unsatisfied_blockers).into());
                     }
                 }
 
@@ -1066,6 +1066,7 @@ impl Database {
         owner: Option<&str>,
         parent_id: Option<Option<&str>>,
         limit: Option<i32>,
+        offset: i32,
         sort_by: Option<&str>,
         sort_order: Option<&str>,
     ) -> Result<Vec<Task>> {
@@ -1110,6 +1111,10 @@ impl Database {
 
             if let Some(l) = limit {
                 sql.push_str(&format!(" LIMIT {}", l));
+            }
+
+            if offset > 0 {
+                sql.push_str(&format!(" OFFSET {}", offset));
             }
 
             let params_refs: Vec<&dyn rusqlite::ToSql> =

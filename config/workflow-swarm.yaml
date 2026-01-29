@@ -23,7 +23,7 @@ states:
       enter: Task assigned. Review and claim when ready.
 
   working:
-    exits: [completed, failed, pending]
+    exits: [completed, failed, pending, consult]
     timed: true
     prompts:
       enter: |
@@ -35,6 +35,10 @@ states:
         3. Wait/coordinate if conflicts
 
         **Discipline:** ONE task at a time. `thinking()` updates for visibility.
+
+        - **Never revert unfamiliar changes**: if you find unexpected modifications in a file, do NOT revert them. Another worker may have made those changes. Use `mark_updates()` or `list_marks()` to check, and coordinate before overwriting
+        - **Before editing**: call list_marks() to check if other workers have marked the same files. If conflicts found, coordinate or pick a different task
+        - **Estimate scope first**: if a task touches 5+ files or requires broad symbol renaming, decompose into subtasks before starting. Three focused subtasks are better than one sprawling change
 
         ### Heartbeat & Coordination
         - Call `thinking(agent=your_id, thought="...")` regularly to maintain heartbeat
@@ -63,6 +67,14 @@ states:
     prompts:
       enter: |
         Blocked. Document: attempted, blocker. Use `link(type="blocks")` if dependency issue. Release for others.
+
+  consult:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        **Paused for human review.** Attach a note explaining what decision is needed.
+        A human must transition this back to `working` or `pending`.
 
   cancelled:
     exits: []
@@ -104,6 +116,8 @@ combos:
     enter: |
       Swarm impl: `mark_updates()` -> `mark_file()` -> edit fast -> `unmark_file()`. Keep `thinking()` updated.
 
+      - **Before large refactorings** (touching 3+ files): search for ALL symbols/references first using find_referencing_symbols or grep, mark_file() ALL files you'll modify, then write a plan attachment before coding
+
   working+explore:
     enter: Time-boxed recon. Attach findings immediately. Deep dives = follow-up tasks.
 
@@ -128,6 +142,9 @@ gates:
     - type: "gate/summary"
       enforcement: allow
       description: "Brief summary for other agents (advisory)"
+    - type: "gate/build"
+      enforcement: warn
+      description: "Run cargo check (or equivalent build verification) before marking tasks complete"
 
 # Attachment types (brief, actionable)
 attachments:

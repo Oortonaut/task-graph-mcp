@@ -1324,7 +1324,7 @@ async fn api_tasks_search(
 
     let results = match state
         .db()
-        .search_tasks(&query, Some(limit), false, status_filter)
+        .search_tasks(&query, Some(limit), 0, false, status_filter)
     {
         Ok(r) => r,
         Err(e) => {

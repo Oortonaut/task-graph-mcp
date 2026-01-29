@@ -584,6 +584,11 @@ pub struct ServerConfig {
     /// The named workflow is also cached under both its name and "default".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_workflow: Option<String>,
+
+    /// Default page size for paginated queries (list_tasks, search).
+    /// Applies when no explicit limit is provided. Default: 50. Max: 1000.
+    #[serde(default = "default_page_size")]
+    pub default_page_size: i32,
 }
 
 impl Default for ServerConfig {
@@ -598,6 +603,7 @@ impl Default for ServerConfig {
             log_dir: default_log_dir(),
             ui: UiConfig::default(),
             default_workflow: None,
+            default_page_size: default_page_size(),
         }
     }
 }
@@ -628,6 +634,10 @@ fn default_claim_limit() -> i32 {
 
 fn default_stale_timeout() -> i64 {
     900 // 15 minutes
+}
+
+fn default_page_size() -> i32 {
+    50
 }
 
 /// Path handling configuration.
@@ -718,6 +728,7 @@ fn default_blocking_states() -> Vec<String> {
         "pending".to_string(),
         "assigned".to_string(),
         "working".to_string(),
+        "consult".to_string(),
     ]
 }
 
@@ -755,6 +766,7 @@ fn default_state_definitions() -> HashMap<String, StateDefinition> {
                 "completed".to_string(),
                 "failed".to_string(),
                 "pending".to_string(),
+                "consult".to_string(),
             ],
             timed: true,
         },
@@ -772,6 +784,18 @@ fn default_state_definitions() -> HashMap<String, StateDefinition> {
         "failed".to_string(),
         StateDefinition {
             exits: vec!["pending".to_string()],
+            timed: false,
+        },
+    );
+
+    defs.insert(
+        "consult".to_string(),
+        StateDefinition {
+            exits: vec![
+                "working".to_string(),
+                "pending".to_string(),
+                "cancelled".to_string(),
+            ],
             timed: false,
         },
     );

@@ -1380,7 +1380,7 @@ mod tests {
         assert!(result.fts_rebuilt);
 
         // Verify FTS was populated
-        let results = db.search_tasks("Test", None, false, None).unwrap();
+        let results = db.search_tasks("Test", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].task_id, "task-1");
     }
@@ -1796,7 +1796,7 @@ mod tests {
         assert_eq!(result.rows_imported.get("attachments"), Some(&1));
 
         // Verify attachment FTS was populated
-        let results = db.search_tasks("searchable", None, true, None).unwrap();
+        let results = db.search_tasks("searchable", None, 0, true, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].attachment_matches.len(), 1);
     }
@@ -1967,7 +1967,7 @@ mod tests {
         }).unwrap();
 
         // FTS should have the task due to triggers
-        let results = db.search_tasks("Manual", None, false, None).unwrap();
+        let results = db.search_tasks("Manual", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
 
         // Now delete from FTS to simulate a corrupted/empty FTS state
@@ -1978,14 +1978,14 @@ mod tests {
         .unwrap();
 
         // Search should now find nothing
-        let results = db.search_tasks("Manual", None, false, None).unwrap();
+        let results = db.search_tasks("Manual", None, 0, false, None).unwrap();
         assert!(results.is_empty());
 
         // Rebuild FTS
         db.rebuild_fts_indexes().unwrap();
 
         // Now search should work again
-        let results = db.search_tasks("Manual", None, false, None).unwrap();
+        let results = db.search_tasks("Manual", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].task_id, "test-task");
     }

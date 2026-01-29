@@ -70,6 +70,7 @@ impl TaskGraphServer {
         ids_config: Arc<IdsConfig>,
         workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
+        default_page_size: i32,
         path_mapper: Arc<task_graph_mcp::paths::PathMapper>,
         level_filter: Arc<LogLevelFilter>,
     ) -> Self {
@@ -89,6 +90,7 @@ impl TaskGraphServer {
                 ids_config,
                 Arc::clone(&workflows),
                 default_format,
+                default_page_size,
                 path_mapper,
             )),
             resource_handler: Arc::new(
@@ -522,6 +524,7 @@ async fn run_server(
         ids_config,
         workflows,
         config.server.default_format,
+        config.server.default_page_size,
         path_mapper,
         level_filter,
     );

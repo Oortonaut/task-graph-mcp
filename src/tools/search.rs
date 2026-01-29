@@ -21,6 +21,10 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "type": "integer",
                 "description": "Maximum number of results to return (default: 20, max: 100)"
             },
+            "offset": {
+                "type": "integer",
+                "description": "Number of results to skip for pagination (default: 0)"
+            },
             "include_attachments": {
                 "type": "boolean",
                 "description": "Whether to also search attachment content (default: false)"
@@ -35,17 +39,35 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     )]
 }
 
-pub fn search(db: &Database, args: Value) -> Result<Value> {
+pub fn search(db: &Database, default_page_size: i32, args: Value) -> Result<Value> {
     let query = get_string(&args, "query").ok_or_else(|| ToolError::missing_field("query"))?;
-    let limit = get_i32(&args, "limit");
+    let limit = get_i32(&args, "limit")
+        .unwrap_or(default_page_size.min(20))
+        .clamp(1, 100);
+    let offset = get_i32(&args, "offset").unwrap_or(0).max(0);
     let include_attachments = get_bool(&args, "include_attachments").unwrap_or(false);
     let status_filter = get_string(&args, "status_filter");
 
-    let results = db.search_tasks(&query, limit, include_attachments, status_filter.as_deref())?;
+    // Fetch limit+1 to detect if there are more results
+    let fetch_limit = limit + 1;
+    let results = db.search_tasks(
+        &query,
+        Some(fetch_limit),
+        offset,
+        include_attachments,
+        status_filter.as_deref(),
+    )?;
+
+    let has_more = results.len() > limit as usize;
+    let results: Vec<_> = results.into_iter().take(limit as usize).collect();
+    let result_count = results.len() as i32;
 
     Ok(json!({
         "query": query,
-        "result_count": results.len(),
+        "result_count": result_count,
+        "has_more": has_more,
+        "offset": offset,
+        "limit": limit,
         "results": results
     }))
 }

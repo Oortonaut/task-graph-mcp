@@ -51,10 +51,15 @@ impl Database {
     /// - Column-specific: `title:error` or `description:handling`
     ///
     /// Results are ranked by BM25 relevance score.
+    /// Search tasks with pagination support.
+    ///
+    /// Accepts limit and offset for pagination. The offset parameter skips
+    /// the first N results.
     pub fn search_tasks(
         &self,
         query: &str,
         limit: Option<i32>,
+        offset: i32,
         include_attachments: bool,
         status_filter: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
@@ -86,6 +91,11 @@ impl Database {
 
             sql.push_str(" ORDER BY score LIMIT ?");
             params_vec.push(Box::new(limit));
+
+            if offset > 0 {
+                sql.push_str(" OFFSET ?");
+                params_vec.push(Box::new(offset));
+            }
 
             let params_refs: Vec<&dyn rusqlite::ToSql> =
                 params_vec.iter().map(|b| b.as_ref()).collect();
@@ -209,7 +219,7 @@ mod tests {
     #[test]
     fn test_search_empty_db() {
         let db = Database::open_in_memory().unwrap();
-        let results = db.search_tasks("test", None, false, None).unwrap();
+        let results = db.search_tasks("test", None, 0, false, None).unwrap();
         assert!(results.is_empty());
     }
 
@@ -236,7 +246,7 @@ mod tests {
             .unwrap();
 
         // Search should find it immediately
-        let results = db.search_tasks("indexing", None, false, None).unwrap();
+        let results = db.search_tasks("indexing", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].task_id, task.id);
     }
@@ -264,7 +274,7 @@ mod tests {
             .unwrap();
 
         // Verify initial content is indexed
-        let results = db.search_tasks("Original", None, false, None).unwrap();
+        let results = db.search_tasks("Original", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
 
         // Update the task - trigger should reindex
@@ -281,12 +291,12 @@ mod tests {
         .unwrap();
 
         // Search should find new content
-        let results = db.search_tasks("newkeyword", None, false, None).unwrap();
+        let results = db.search_tasks("newkeyword", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].task_id, task.id);
 
         // Verify updated title is searchable
-        let results = db.search_tasks("Updated", None, false, None).unwrap();
+        let results = db.search_tasks("Updated", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -313,7 +323,7 @@ mod tests {
             .unwrap();
 
         // Verify it's indexed
-        let results = db.search_tasks("Deletable", None, false, None).unwrap();
+        let results = db.search_tasks("Deletable", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 1);
 
         // Delete the task
@@ -321,7 +331,7 @@ mod tests {
             .unwrap();
 
         // Search should find nothing
-        let results = db.search_tasks("Deletable", None, false, None).unwrap();
+        let results = db.search_tasks("Deletable", None, 0, false, None).unwrap();
         assert!(results.is_empty());
     }
 
@@ -377,7 +387,7 @@ mod tests {
         .unwrap();
 
         // Search for "bug" - higher frequency should rank better
-        let results = db.search_tasks("bug", None, false, None).unwrap();
+        let results = db.search_tasks("bug", None, 0, false, None).unwrap();
         assert_eq!(results.len(), 2);
         // The task with more "bug" occurrences should have a better (lower) score
         assert!(results[0].score <= results[1].score);
@@ -417,7 +427,7 @@ mod tests {
         .unwrap();
 
         // Search with include_attachments should find it
-        let results = db.search_tasks("searchable", None, true, None).unwrap();
+        let results = db.search_tasks("searchable", None, 0, true, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].task_id, task.id);
         assert_eq!(results[0].attachment_matches.len(), 1);

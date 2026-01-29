@@ -17,7 +17,7 @@ fn generate_agent_id(ids_config: &IdsConfig) -> String {
     let case = ids_config.id_case;
 
     // Generate with hyphen separator first (petname's default format)
-    let base = Petnames::large()
+    let base = Petnames::medium()
         .generate_one(words, "-")
         .unwrap_or_else(|| format!("worker-{}", now_ms()));
 

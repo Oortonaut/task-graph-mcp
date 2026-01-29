@@ -152,7 +152,7 @@ states:
         A task has been assigned to you by the lead. Review and claim when ready.
 
   working:
-    exits: [completed, failed, pending]
+    exits: [completed, failed, pending, consult]
     timed: true
     prompts:
       enter: |
@@ -200,6 +200,15 @@ states:
         - What was attempted
         - What blocked progress
         - Suggested next steps
+
+  consult:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        **Paused for human review.** This task needs human input before work can continue.
+        Attach a note explaining what decision or review is needed.
+        A human (or lead) must transition this back to `working` or `pending`.
 
   cancelled:
     exits: []
@@ -365,6 +374,7 @@ role_prompts:
       2. **Check dependencies**: Ensure blocking tasks are complete
       3. **Claim the task**: `claim(task="task-id", worker_id="your-id")`
       4. **Mark files**: Before editing, mark files you'll touch
+      5. **Never revert unfamiliar changes**: if you find unexpected modifications in a file, do NOT revert them. Another worker may have made those changes. Use `mark_updates()` or `list_marks()` to check, and coordinate before overwriting
 
       Best practices:
       - Claim one task at a time unless parallel work is possible

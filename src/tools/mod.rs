@@ -46,6 +46,7 @@ pub struct ToolHandler {
     /// Workflow config with named_workflows cache for per-worker selection
     pub workflows: Arc<WorkflowsConfig>,
     pub default_format: OutputFormat,
+    pub default_page_size: i32,
     pub path_mapper: Arc<crate::paths::PathMapper>,
 }
 
@@ -66,6 +67,7 @@ impl ToolHandler {
         ids_config: Arc<IdsConfig>,
         workflows: Arc<WorkflowsConfig>,
         default_format: OutputFormat,
+        default_page_size: i32,
         path_mapper: Arc<crate::paths::PathMapper>,
     ) -> Self {
         Self {
@@ -83,6 +85,7 @@ impl ToolHandler {
             ids_config,
             workflows,
             default_format,
+            default_page_size,
             path_mapper,
         }
     }
@@ -306,7 +309,7 @@ impl ToolHandler {
             "get_schema" => json(schema::get_schema(&self.db, arguments)),
 
             // Search tools
-            "search" => json(search::search(&self.db, arguments)),
+            "search" => json(search::search(&self.db, self.default_page_size, arguments)),
 
             // Query tools (read-only SQL)
             "query" => query::query(&self.db, self.default_format, arguments),

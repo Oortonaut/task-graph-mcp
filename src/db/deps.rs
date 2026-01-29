@@ -948,6 +948,7 @@ impl Database {
         tags_all: Option<Vec<String>>,
         qualified_for_agent_tags: Option<Vec<String>>,
         limit: Option<i32>,
+        offset: i32,
         sort_by: Option<&str>,
         sort_order: Option<&str>,
     ) -> Result<Vec<Task>> {
@@ -1098,6 +1099,10 @@ impl Database {
             // Apply limit in SQL
             if let Some(l) = limit {
                 sql.push_str(&format!(" LIMIT {}", l));
+            }
+
+            if offset > 0 {
+                sql.push_str(&format!(" OFFSET {}", offset));
             }
 
             let params_refs: Vec<&dyn rusqlite::ToSql> =

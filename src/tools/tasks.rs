@@ -640,6 +640,7 @@ pub fn list_tasks(
                 tags_all,
                 qualified_agent_tags,
                 limit,
+                0, // offset
                 sort_by.as_deref(),
                 sort_order.as_deref(),
             )?
@@ -654,6 +655,7 @@ pub fn list_tasks(
                 owner.as_deref(),
                 parent_id,
                 limit,
+                0, // offset
                 sort_by.as_deref(),
                 sort_order.as_deref(),
             )?

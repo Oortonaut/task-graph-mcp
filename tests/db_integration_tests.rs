@@ -1030,10 +1030,10 @@ mod task_tests {
         .unwrap();
 
         let pending = db
-            .list_tasks(Some("pending"), None, None, None, None, None, None)
+            .list_tasks(Some("pending"), None, None, None, None, 0, None, None)
             .unwrap();
         let completed = db
-            .list_tasks(Some("completed"), None, None, None, None, None, None)
+            .list_tasks(Some("completed"), None, None, None, None, 0, None, None)
             .unwrap();
 
         assert_eq!(pending.len(), 1);
