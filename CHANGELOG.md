@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-01-28
+
+### Added
+
+- **Consult status**: Non-timed, blocking state for human review. Workers transition from `working` to `consult` when they need human input; task releases ownership and blocks dependents until moved back
+- **Pagination**: `offset` parameter and metadata (`has_more`, `total_count`) for `list_tasks` and `search` tools. Configurable `default_page_size` (default: 50)
+- **Config file watcher**: File watcher using `notify` crate for detecting config/workflow/skills changes with debouncing
+- **Docs resource handler**: `docs://` resource scheme for serving markdown files from `docs/` directory
+- **Config resources**: `config://` resource scheme for accessing current configuration, states, phases, dependencies, and tags
+- **Metrics documentation**: `docs/METRICS.md` with experiment metrics definitions and SQL examples
+- **Workflow gates**: Exit requirements for all workflow topologies (solo: warn, swarm: allow, relay: reject, hierarchical: warn)
+- **Worker coordination guidance**: Anti-revert rules, scope estimation, file conflict detection, and pre-refactoring guidance in workflow prompts
+- **Heartbeat/polling guidance**: Workflow-specific `thinking()` and `mark_updates()` reminders
+
+### Changed
+
+- Workflow prompts optimized for conciseness (prose headers converted to bullet summaries)
+- `workflow-solo.yaml` set as default workflow
+- Removed generic `workflows.yaml` in favor of topology-specific workflows
+
+### Fixed
+
+- Dashboard starting regardless of `ui.mode` setting (exhaustive match on `UiMode` enum)
+- `claim()` now returns structured `blocked_by` info when failing on unsatisfied dependencies
+- MCP `list_resources()` now returns all defined resources
+- 74 clippy warnings resolved
+
 ## [0.2.0] - 2026-01-28
 
 ### Added
