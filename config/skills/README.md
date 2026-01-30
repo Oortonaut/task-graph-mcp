@@ -6,12 +6,14 @@ Claude Code skills for multi-agent task coordination with task-graph-mcp.
 
 | Skill | Role | Description |
 |-------|------|-------------|
-| `task-graph-basics` | Foundation | Shared patterns, tool reference, connection workflow |
-| `task-graph-coordinator` | Orchestrator | Create task trees, assign work, monitor progress |
-| `task-graph-worker` | Executor | Claim tasks, report progress, complete work |
+| `task-graph-basics` | Foundation | Shared patterns, tool reference, connection workflow, task trees, search |
 | `task-graph-reporting` | Analytics | Generate reports, track costs and velocity |
 | `task-graph-migration` | Import | Migrate from GitHub Issues, Linear, Jira, markdown |
 | `task-graph-repair` | Maintenance | Fix orphaned tasks, broken deps, stale claims |
+
+> **Coordination patterns** (roles, phases, states, push/pull models, gates)
+> are defined by workflow configs, not skills. See `config/workflow-*.yaml` and
+> `docs/WORKFLOW_TOPOLOGIES.md`.
 
 ## Installation
 
@@ -45,7 +47,7 @@ python skills\scripts\install.py --target C:\path\to\skills
 
 ```bash
 # Install only specific skills
-python skills/scripts/install.py --skills task-graph-basics,task-graph-worker
+python skills/scripts/install.py --skills task-graph-basics,task-graph-reporting
 
 # Preview what would be installed
 python skills/scripts/install.py --dry-run
@@ -67,19 +69,16 @@ After installation, skills are available in Claude Code:
 ```
 # View skill help
 /task-graph-basics
-/task-graph-coordinator
-/task-graph-worker
+/task-graph-reporting
 
 # Or reference in prompts
-"Use the task-graph-worker skill to claim and complete tasks"
+"Use the task-graph-basics skill to understand available tools"
 ```
 
 ## Skill Dependencies
 
 ```
 task-graph-basics (foundation)
-    ├── task-graph-coordinator
-    ├── task-graph-worker
     ├── task-graph-reporting
     ├── task-graph-migration
     └── task-graph-repair
@@ -89,38 +88,17 @@ All skills reference `task-graph-basics` for shared tool documentation.
 
 ## Multi-Agent Workflows
 
-### Coordinator + Workers
+Coordination patterns are defined by workflow configs loaded at connect time:
 
-1. **Coordinator** creates task tree with tag requirements
-2. **Workers** connect with capability tags
-3. Workers claim matching tasks via `list_tasks(ready=true, agent=id)`
-4. Workers report progress via `thinking()`
-5. Coordinator monitors via `list_tasks()` and `list_agents()`
+| Workflow | Pattern | Use Case |
+|----------|---------|----------|
+| `workflow-solo.yaml` | Single agent | Prototyping, simple projects |
+| `workflow-hierarchical.yaml` | Lead + worker pool | Complex projects, mixed expertise |
+| `workflow-swarm.yaml` | Parallel generalists | Parallelizable work, large backlogs |
+| `workflow-relay.yaml` | Specialist handoffs | Formal processes, review gates |
+| `workflow-push.yaml` | Coordinator assigns all | Experiments, tight control |
 
-### Example Session
-
-**Coordinator:**
-```
-connect(name="coordinator", tags=["planning"])
-create_tree(tree={
-  "title": "Feature X",
-  "children": [
-    {"title": "Design", "agent_tags_all": ["design"]},
-    {"title": "Implement", "agent_tags_all": ["backend"]},
-    {"title": "Test", "agent_tags_all": ["testing"]}
-  ]
-}, sibling_type="follows")
-```
-
-**Worker (backend):**
-```
-connect(name="backend-dev", tags=["backend", "rust"])
-list_tasks(ready=true, agent=agent_id)  # Finds "Implement"
-claim(agent=agent_id, task=implement_task_id)
-thinking(agent=agent_id, thought="Working on implementation...")
-# ... do work ...
-complete(agent=agent_id, task=implement_task_id)
-```
+See `docs/WORKFLOW_TOPOLOGIES.md` for topology selection guidance.
 
 ## MCP Resources (Built-in)
 
@@ -132,8 +110,6 @@ skills://list
 
 # Get specific skill content
 skills://basics
-skills://coordinator
-skills://worker
 skills://reporting
 skills://migration
 skills://repair

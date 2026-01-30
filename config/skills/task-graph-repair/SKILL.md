@@ -376,7 +376,6 @@ attach(task=root_id, name="repair-log-{date}",
 
 | Skill | When to Use |
 |-------|-------------|
-| `task-graph-basics` | Tool reference |
-| `task-graph-coordinator` | After repair, resume coordination |
+| `task-graph-basics` | Tool reference, task trees |
 | `task-graph-reporting` | Verify data integrity |
 | `task-graph-migration` | Re-migrate if severe corruption |

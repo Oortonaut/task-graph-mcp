@@ -379,6 +379,5 @@ attach(
 
 | Skill | When to Use |
 |-------|-------------|
-| `task-graph-basics` | Tool reference |
-| `task-graph-coordinator` | Understand task structure |
+| `task-graph-basics` | Tool reference, task trees, query patterns |
 | `task-graph-repair` | Fix data issues before reporting |

@@ -380,6 +380,5 @@ delete(task=migration_root_id, cascade=true)
 
 | Skill | When to Use |
 |-------|-------------|
-| `task-graph-basics` | Tool reference |
-| `task-graph-coordinator` | After migration, organize work |
+| `task-graph-basics` | Tool reference, task trees |
 | `task-graph-repair` | Fix migration issues |

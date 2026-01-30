@@ -1,9 +1,9 @@
 ---
 name: task-graph-basics
-description: Foundation skill for task-graph-mcp - connection workflow, tool reference, and shared patterns for multi-worker coordination
+description: Foundation skill for task-graph-mcp - connection workflow, tool reference, task trees, search, and shared patterns for multi-worker coordination
 license: Apache-2.0
 metadata:
-  version: 1.1.0
+  version: 2.0.0
   suite: task-graph-mcp
   role: foundation
 ---
@@ -14,6 +14,11 @@ Foundation skill providing shared patterns, tool reference, and connection workf
 
 **This skill is automatically referenced by all other task-graph skills.**
 
+> **Coordination patterns** (roles, phases, states, gates) are defined by
+> workflow configs (`workflow-solo.yaml`, `workflow-hierarchical.yaml`, etc.)
+> loaded at connect time. This skill covers the tools and patterns that are
+> common across all workflows.
+
 ---
 
 ## Quick Start
@@ -21,7 +26,7 @@ Foundation skill providing shared patterns, tool reference, and connection workf
 ```
 # First thing in any session - connect as a worker
 connect(tags=["code", "image-in"])
-→ Returns worker_id (SAVE THIS for all subsequent calls)
+  Returns worker_id (SAVE THIS for all subsequent calls)
 
 # Find work
 list_tasks(ready=true, worker_id=worker_id)
@@ -39,30 +44,28 @@ update(worker_id=worker_id, task=task_id, state="completed")
 Every worker MUST connect before using task-graph tools:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ 1. CONNECT                                          │
-│    connect(                                         │
-│      worker_id="worker-17",   # Only if assigned!   │
-│      tags=["code", "audio-out"], # Capabilities     │
-│    )                                                │
-│    → Returns: worker_id                             │
-│    → SAVE THIS ID for all subsequent calls          │
-├─────────────────────────────────────────────────────┤
-│ 2. WORK (use worker_id in all calls)                │
-│    list_tasks, claim, thinking, update, etc.        │
-├─────────────────────────────────────────────────────┤
-│ 3. DISCONNECT (when done)                           │
-│    disconnect(worker_id=worker_id)                  │
-│    → Releases all claims and locks                  │
-└─────────────────────────────────────────────────────┘
+1. CONNECT
+   connect(
+     worker_id="worker-17",   # Only if assigned!
+     tags=["code", "audio-out"], # Capabilities
+   )
+    Returns: worker_id
+    SAVE THIS ID for all subsequent calls
+
+2. WORK (use worker_id in all calls)
+   list_tasks, claim, thinking, update, etc.
+
+3. DISCONNECT (when done)
+   disconnect(worker_id=worker_id)
+    Releases all claims and locks
 ```
 
 **Choosing a worker_id:**
 - Only provide a worker_id if you've been assigned one that seems unique
-- `"claude"` → BAD (too generic, will collide)
-- `"coordinator"` → Likely OK (role-based, probably unique)
-- `"worker-17"` → Good (explicitly assigned)
-- If you don't have an assigned name, **omit worker_id entirely** — a unique
+- `"claude"` -> BAD (too generic, will collide)
+- `"coordinator"` -> Likely OK (role-based, probably unique)
+- `"worker-17"` -> Good (explicitly assigned)
+- If you don't have an assigned name, **omit worker_id entirely** -- a unique
   petname will be generated for you automatically
 
 **Tags enable task affinity:**
@@ -99,9 +102,9 @@ Every worker MUST connect before using task-graph tools:
 | `claim` | Take ownership (shortcut) | `worker_id`, `task`, `force` |
 
 **Ownership via `update`:**
-- `update(state="working")` → Claims task (sets owner)
-- `update(state="pending")` → Releases task (clears owner)
-- `update(state="completed")` → Completes task (clears owner)
+- `update(state="working")` -> Claims task (sets owner)
+- `update(state="pending")` -> Releases task (clears owner)
+- `update(state="completed")` -> Completes task (clears owner)
 - Use `force=true` to take from another worker
 
 ### Dependencies
@@ -154,25 +157,36 @@ Every worker MUST connect before using task-graph tools:
 - Returns snippets with highlighted matches
 - Filter by task status (e.g., `status_filter="pending"`)
 
+### Workflows
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `list_workflows` | Available workflow configs | |
+| `check_gates` | Check gate requirements | `task` |
+
 ---
 
 ## Task States
 
-Default state machine (configurable via YAML):
+States and transitions are defined by the active workflow config. The default
+state machine (present in all workflows) is:
 
 ```
-pending ──→ working ──→ completed
-   │             │
-   │             └──→ failed ──→ pending (retry)
-   │
-   └──→ cancelled
+pending --> working --> completed
+   |             |
+   |             +--> failed --> pending (retry)
+   |
+   +--> cancelled
 ```
 
-| State | Timed | Exits To |
-|-------|-------|----------|
+Workflows may add additional states (e.g., `assigned`, `consult`). See the
+loaded workflow for the full state machine.
+
+| Common State | Timed | Typical Exits |
+|--------------|-------|---------------|
 | `pending` | No | `working`, `cancelled` |
 | `working` | Yes | `completed`, `failed`, `pending` |
-| `completed` | No | (terminal) |
+| `completed` | No | (terminal or `pending`) |
 | `failed` | No | `pending` |
 | `cancelled` | No | (terminal) |
 
@@ -188,16 +202,14 @@ pending ──→ working ──→ completed
 The `update` tool handles ownership based on state transitions:
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ Transition to TIMED state (e.g., working)          │
-│ → CLAIMS task: validates tags, checks limit, sets owner│
-├────────────────────────────────────────────────────────┤
-│ Transition to NON-TIMED state (e.g., pending)          │
-│ → RELEASES task: clears owner                          │
-├────────────────────────────────────────────────────────┤
-│ Transition to TERMINAL state (e.g., completed)         │
-│ → COMPLETES task: checks children, releases file locks │
-└────────────────────────────────────────────────────────┘
+Transition to TIMED state (e.g., working)
+  CLAIMS task: validates tags, checks limit, sets owner
+
+Transition to NON-TIMED state (e.g., pending)
+  RELEASES task: clears owner
+
+Transition to TERMINAL state (e.g., completed)
+  COMPLETES task: checks children, releases file locks
 ```
 
 **Force parameter:**
@@ -238,8 +250,72 @@ Use `create_tree` for hierarchical task structures:
 
 **Reference existing tasks:**
 ```json
-{ "ref": "existing-task-id" }  // Include in tree, other fields ignored
+{ "ref": "existing-task-id" }
 ```
+
+### Parallel Workstreams with Cross-Branch Dependencies
+
+For complex patterns with parallel tracks, build the tree then add links:
+
+```json
+{
+  "tree": {
+    "title": "Sprint 5",
+    "children": [
+      {
+        "title": "Backend Track",
+        "children": [
+          {"title": "API endpoints", "id": "api", "needed_tags": ["backend"]},
+          {"title": "Database migrations", "id": "db", "needed_tags": ["database"]}
+        ]
+      },
+      {
+        "title": "Frontend Track",
+        "children": [
+          {"title": "Component library", "id": "comp", "needed_tags": ["frontend"]},
+          {"title": "Page integration", "id": "page", "needed_tags": ["frontend"]}
+        ]
+      }
+    ]
+  }
+}
+```
+
+```
+# Sequential deps within each track:
+link(from="api", to="db", type="follows")
+link(from="comp", to="page", type="follows")
+
+# Cross-branch deps:
+link(from="api", to="page", type="blocks")
+```
+
+### Scope Expansion via Relink
+
+When a task's scope grows, move children atomically with `relink`:
+
+```
+# Task "Backend" has children A, B, C, D
+# Split: keep A, B in Backend; move C, D to new "Database" sibling
+
+# 1. Create new sibling task
+create(title="Database", parent=grandparent_id)
+  new_task_id
+
+# 2. Atomic move
+relink(
+  prev_from="backend-task-id",
+  prev_to=["child-c", "child-d"],
+  from=new_task_id,
+  to=["child-c", "child-d"],
+  type="contains"
+)
+```
+
+**Why relink vs unlink+link?**
+- Single transaction: all changes succeed or none do
+- No intermediate state where children are orphaned
+- Validates constraints (single parent, no cycles) before committing
 
 ---
 
@@ -284,6 +360,17 @@ search(query="auth", include_attachments=true, status_filter="pending")
 # Returns: pending tasks matching "auth" in title, description, or attachments
 ```
 
+### Search vs list_tasks
+
+| Use Case | Tool |
+|----------|------|
+| Find ready tasks for your tags | `list_tasks(ready=true)` |
+| Find tasks by keyword | `search(query="keyword")` |
+| Filter by status only | `list_tasks(status="pending")` |
+| Find tasks with specific content | `search(query="...")` |
+| Check your claimed tasks | `list_tasks(owner=worker_id)` |
+| Find tasks mentioning a topic | `search(query="topic")` |
+
 ---
 
 ## Best Practices
@@ -292,7 +379,7 @@ search(query="auth", include_attachments=true, status_filter="pending")
 - Save your `worker_id` after connecting
 - Use `thinking()` frequently to show progress
 - Mark files before editing (`mark_file`)
-- Check `mark_updates` before editing shared files or when seeing edit conflicts.
+- Check `mark_updates` before editing shared files or when seeing edit conflicts
 - Log costs with `log_cost` for tracking
 
 ### Never Do
@@ -319,8 +406,6 @@ search(query="auth", include_attachments=true, status_filter="pending")
 
 | Skill | Purpose |
 |-------|---------|
-| `task-graph-coordinator` | Orchestrate work, create task trees |
-| `task-graph-worker` | Claim and complete tasks |
 | `task-graph-reporting` | Analyze metrics and progress |
 | `task-graph-migration` | Import from other systems |
 | `task-graph-repair` | Fix orphaned/broken tasks |

@@ -22,7 +22,7 @@ pub fn get_tools() -> Vec<Tool> {
             json!({
                 "name": {
                     "type": "string",
-                    "description": "The skill name (e.g., 'basics', 'coordinator', 'worker')"
+                    "description": "The skill name (e.g., 'basics', 'reporting', 'migration', 'repair')"
                 }
             }),
             vec!["name"],

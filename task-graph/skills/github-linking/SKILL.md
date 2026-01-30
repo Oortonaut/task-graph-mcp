@@ -281,6 +281,5 @@ Not every label needs a tag. Only map labels that affect task routing or filteri
 
 | Skill | When to Use |
 |-------|-------------|
-| `task-graph-basics` | Tool reference |
+| `task-graph-basics` | Tool reference, task trees |
 | `task-graph-migration` | Bulk import from GitHub Issues |
-| `task-graph-coordinator` | Organize linked tasks into trees |

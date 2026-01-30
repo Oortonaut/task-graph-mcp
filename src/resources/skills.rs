@@ -18,9 +18,6 @@ use std::path::{Path, PathBuf};
 /// These are the SKILL.md files from the config/skills/ directory.
 pub mod embedded {
     pub const BASICS: &str = include_str!("../../config/skills/task-graph-basics/SKILL.md");
-    pub const COORDINATOR: &str =
-        include_str!("../../config/skills/task-graph-coordinator/SKILL.md");
-    pub const WORKER: &str = include_str!("../../config/skills/task-graph-worker/SKILL.md");
     pub const REPORTING: &str = include_str!("../../config/skills/task-graph-reporting/SKILL.md");
     pub const MIGRATION: &str = include_str!("../../config/skills/task-graph-migration/SKILL.md");
     pub const REPAIR: &str = include_str!("../../config/skills/task-graph-repair/SKILL.md");
@@ -40,20 +37,8 @@ pub const SKILLS: &[SkillInfo] = &[
     SkillInfo {
         name: "basics",
         full_name: "task-graph-basics",
-        description: "Foundation - tool reference, connection workflow, shared patterns",
+        description: "Foundation - tool reference, connection workflow, task trees, search, shared patterns",
         role: "foundation",
-    },
-    SkillInfo {
-        name: "coordinator",
-        full_name: "task-graph-coordinator",
-        description: "Orchestrator - create task trees, assign work, monitor progress",
-        role: "coordinator",
-    },
-    SkillInfo {
-        name: "worker",
-        full_name: "task-graph-worker",
-        description: "Executor - claim tasks, report progress, complete work",
-        role: "worker",
     },
     SkillInfo {
         name: "reporting",
@@ -79,8 +64,6 @@ pub const SKILLS: &[SkillInfo] = &[
 fn get_embedded_skill(name: &str) -> Option<&'static str> {
     match name {
         "basics" | "task-graph-basics" => Some(embedded::BASICS),
-        "coordinator" | "task-graph-coordinator" => Some(embedded::COORDINATOR),
-        "worker" | "task-graph-worker" => Some(embedded::WORKER),
         "reporting" | "task-graph-reporting" => Some(embedded::REPORTING),
         "migration" | "task-graph-migration" => Some(embedded::MIGRATION),
         "repair" | "task-graph-repair" => Some(embedded::REPAIR),
@@ -282,7 +265,7 @@ mod tests {
     fn test_normalize_name() {
         assert_eq!(normalize_name("basics"), "basics");
         assert_eq!(normalize_name("task-graph-basics"), "basics");
-        assert_eq!(normalize_name("task-graph-coordinator"), "coordinator");
+        assert_eq!(normalize_name("task-graph-reporting"), "reporting");
     }
 
     #[test]
@@ -295,7 +278,7 @@ mod tests {
     #[test]
     fn test_list_skills() {
         let result = list_skills(None).unwrap();
-        assert_eq!(result["count"], 6);
+        assert_eq!(result["count"], 4);
     }
 
     #[test]

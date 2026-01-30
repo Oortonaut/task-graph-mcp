@@ -266,6 +266,4 @@ get(task="_lock:git-commit")
 
 | Skill | When to Use |
 |-------|-------------|
-| `task-graph-basics` | Tool reference and connection workflow |
-| `task-graph-worker` | Full worker lifecycle |
-| `task-graph-coordinator` | Setting up multi-agent projects |
+| `task-graph-basics` | Tool reference, connection workflow, task trees |
