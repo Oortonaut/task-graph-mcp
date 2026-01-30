@@ -354,19 +354,21 @@ Environment variables:
 
 | URI | Description |
 |-----|-------------|
-| `tasks://all` | Full task graph with dependencies |
-| `tasks://ready` | Tasks ready to claim |
-| `tasks://blocked` | Tasks blocked by dependencies |
-| `tasks://claimed` | All claimed tasks |
-| `tasks://worker/{id}` | Tasks owned by a worker |
-| `tasks://tree/{id}` | Task with all descendants |
-| `files://marks` | All file marks |
-| `workers://all` | Registered workers |
-| `workflow://current` | Current workflow configuration |
-| `workflow://{name}` | Named workflow (solo, swarm, relay, hierarchical) |
-| `config://current` | Current server configuration |
-| `plan://acp` | ACP-compatible plan export |
-| `stats://summary` | Aggregate statistics |
+| `query://tasks/all` | Full task graph with dependencies |
+| `query://tasks/ready` | Tasks ready to claim |
+| `query://tasks/blocked` | Tasks blocked by dependencies |
+| `query://tasks/claimed` | All claimed tasks |
+| `query://tasks/agent/{id}` | Tasks owned by an agent |
+| `query://tasks/tree/{id}` | Task with all descendants |
+| `query://files/marks` | All file marks |
+| `query://agents/all` | Registered agents |
+| `query://stats/summary` | Aggregate statistics |
+| `config://current` | All configuration in one response |
+| `config://states` | Task state definitions |
+| `config://phases` | Phase definitions |
+| `config://dependencies` | Dependency type definitions |
+| `config://tags` | Tag definitions |
+| `docs://{path}` | Live filesystem mapping to `$install/docs/` |
 
 ## Task Tree Structure
 
@@ -607,6 +609,7 @@ Worker B: mark_file("worker-b", "src/main.rs", "adding tests")
 | [DESIGN.md](docs/DESIGN.md) | Architecture and design decisions |
 | [WORKFLOW_TOPOLOGIES.md](docs/WORKFLOW_TOPOLOGIES.md) | Multi-agent workflow patterns (solo, swarm, relay, hierarchical) |
 | [EXPORT_IMPORT.md](docs/EXPORT_IMPORT.md) | Data export and import functionality |
+| [PROCESSES.md](docs/PROCESSES.md) | Release process, changelog maintenance |
 
 ## License
 
