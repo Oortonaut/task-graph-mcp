@@ -994,7 +994,8 @@ mod task_tests {
         )
         .unwrap();
 
-        let children = db.get_children(&parent.id).unwrap();
+        let mut children = db.get_children(&parent.id).unwrap();
+        children.sort_by(|a, b| a.title.cmp(&b.title));
 
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].title, "Child 1");
