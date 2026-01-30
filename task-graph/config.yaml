@@ -6,3 +6,35 @@ dependencies:
     motivates:
       display: horizontal
       blocks: none
+    tracks:
+      display: horizontal
+      blocks: none
+      # Informational link: task-graph task tracks an external item
+      # Usage: link(from="task-id", to="github-issue-task", type="tracks")
+
+attachments:
+  definitions:
+    github/issue:
+      mime: "application/json"
+      mode: replace
+      # Stores GitHub issue reference: {"repo": "owner/repo", "number": 42, "url": "..."}
+    github/pr:
+      mime: "application/json"
+      mode: replace
+      # Stores GitHub PR reference: {"repo": "owner/repo", "number": 99, "url": "..."}
+    github/comment:
+      mime: "text/plain"
+      mode: append
+      # Appends notable GitHub comment text or links
+
+tags:
+  definitions:
+    github:
+      category: integration
+      description: "Task linked to a GitHub issue or PR"
+    bug:
+      category: type
+      description: "Bug fix (mirrors GitHub label)"
+    enhancement:
+      category: type
+      description: "Feature or enhancement (mirrors GitHub label)"

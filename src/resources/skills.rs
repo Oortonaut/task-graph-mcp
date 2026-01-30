@@ -9,16 +9,9 @@
 //! 1. User override (`~/.task-graph/skills/`)
 //! 2. Project override (`task-graph/skills/` or `.task-graph/skills/`)
 //! 3. Embedded default (compiled into binary from `config/skills/`)
-//!
-//! ## Security
-//!
-//! Custom (non-override) skills require explicit approval before content is served.
-//! Approvals are stored in the skills directory as `.approved` (one skill name per line).
-//! Built-in skills and overrides of built-in skills are trusted by default.
 
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Embedded skill content (compiled into binary).
@@ -106,95 +99,6 @@ fn is_builtin_skill(name: &str) -> bool {
     SKILLS.iter().any(|s| s.name == normalized)
 }
 
-/// Get the path to the approvals file.
-fn get_approvals_path(skills_dir: &Path) -> PathBuf {
-    skills_dir.join(".approved")
-}
-
-/// Load the set of approved custom skill names.
-pub fn load_approved_skills(skills_dir: Option<&Path>) -> HashSet<String> {
-    let mut approved = HashSet::new();
-
-    if let Some(dir) = skills_dir {
-        let approvals_path = get_approvals_path(dir);
-        if approvals_path.exists()
-            && let Ok(content) = std::fs::read_to_string(&approvals_path)
-        {
-            for line in content.lines() {
-                let name = line.trim();
-                if !name.is_empty() && !name.starts_with('#') {
-                    approved.insert(name.to_string());
-                }
-            }
-        }
-    }
-
-    approved
-}
-
-/// Check if a custom skill is approved.
-pub fn is_skill_approved(skills_dir: Option<&Path>, name: &str) -> bool {
-    // Built-in skills are always approved
-    if is_builtin_skill(name) {
-        return true;
-    }
-
-    let approved = load_approved_skills(skills_dir);
-    let normalized = normalize_name(name);
-    approved.contains(normalized) || approved.contains(name)
-}
-
-/// Approve a custom skill by adding it to the approvals file.
-pub fn approve_skill(skills_dir: &Path, name: &str) -> Result<()> {
-    validate_skill_name(name)?;
-
-    // Don't allow approving built-in skills (they're already trusted)
-    if is_builtin_skill(name) {
-        return Ok(());
-    }
-
-    let approvals_path = get_approvals_path(skills_dir);
-
-    // Load existing approvals
-    let mut approved = load_approved_skills(Some(skills_dir));
-    let normalized = normalize_name(name).to_string();
-
-    if approved.contains(&normalized) {
-        return Ok(()); // Already approved
-    }
-
-    approved.insert(normalized.clone());
-
-    // Write back
-    let content: Vec<String> = approved.into_iter().collect();
-    std::fs::write(&approvals_path, content.join("\n") + "\n")?;
-
-    Ok(())
-}
-
-/// Revoke approval for a custom skill.
-pub fn revoke_skill(skills_dir: &Path, name: &str) -> Result<()> {
-    validate_skill_name(name)?;
-
-    let approvals_path = get_approvals_path(skills_dir);
-    let mut approved = load_approved_skills(Some(skills_dir));
-    let normalized = normalize_name(name).to_string();
-
-    approved.remove(&normalized);
-    approved.remove(name);
-
-    // Write back
-    let content: Vec<String> = approved.into_iter().collect();
-    if content.is_empty() {
-        // Remove file if empty
-        let _ = std::fs::remove_file(&approvals_path);
-    } else {
-        std::fs::write(&approvals_path, content.join("\n") + "\n")?;
-    }
-
-    Ok(())
-}
-
 /// Validate skill name to prevent path traversal attacks.
 /// Only allows alphanumeric characters, hyphens, and underscores.
 fn validate_skill_name(name: &str) -> Result<()> {
@@ -280,10 +184,8 @@ fn is_overridden(skills_dir: Option<&Path>, name: &str) -> bool {
     }
 }
 
-/// List all skills as JSON, indicating which are overridden and approved.
+/// List all skills as JSON, indicating which are overridden.
 pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
-    let approved_set = load_approved_skills(skills_dir);
-
     let mut skills_list: Vec<Value> = SKILLS
         .iter()
         .map(|s| {
@@ -296,8 +198,6 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
                 "uri": format!("skills://{}", s.name),
                 "overridden": overridden,
                 "source": if overridden { "local" } else { "embedded" },
-                "approved": true,  // Built-in skills are always approved
-                "trusted": true,
             })
         })
         .collect();
@@ -323,20 +223,14 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
                         continue;
                     }
 
-                    // It's a custom skill - check if approved
-                    let is_approved =
-                        approved_set.contains(normalized) || approved_set.contains(&name);
-
                     skills_list.push(json!({
                         "name": normalized,
                         "full_name": name,
-                        "description": "Custom skill (requires approval)",
+                        "description": "Custom skill",
                         "role": "custom",
                         "uri": format!("skills://{}", normalized),
                         "overridden": false,
                         "source": "local",
-                        "approved": is_approved,
-                        "trusted": false,
                     }));
                 }
             }
@@ -351,50 +245,14 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
 }
 
 /// Get a skill's content as JSON.
-/// For custom (non-built-in) skills, checks approval status.
-/// Unapproved custom skills return a preview instead of full content.
 pub fn get_skill_resource(skills_dir: Option<&Path>, name: &str) -> Result<Value> {
     validate_skill_name(name)?;
 
     let normalized = normalize_name(name);
     let is_builtin = is_builtin_skill(name);
     let overridden = is_overridden(skills_dir, name);
-    let approved = is_skill_approved(skills_dir, name);
 
     let info = SKILLS.iter().find(|s| s.name == normalized);
-
-    // For custom unapproved skills, don't return full content
-    if !is_builtin && !approved {
-        // Try to get a preview (first 500 chars)
-        let preview = match get_skill(skills_dir, name) {
-            Ok(content) => {
-                let preview_len = content.len().min(500);
-                let mut preview: String = content.chars().take(preview_len).collect();
-                if content.len() > 500 {
-                    preview.push_str("\n\n[... content truncated - skill requires approval ...]");
-                }
-                Some(preview)
-            }
-            Err(_) => None,
-        };
-
-        return Ok(json!({
-            "name": normalized,
-            "full_name": name,
-            "role": "custom",
-            "description": "Custom skill (requires approval)",
-            "content": null,
-            "preview": preview,
-            "mime_type": "text/markdown",
-            "overridden": false,
-            "source": "local",
-            "approved": false,
-            "trusted": false,
-            "error": "Skill requires approval. Use approve_skill tool or add to .task-graph/skills/.approved",
-        }));
-    }
-
-    // Approved or built-in - return full content
     let content = get_skill(skills_dir, name)?;
 
     Ok(json!({
@@ -403,12 +261,9 @@ pub fn get_skill_resource(skills_dir: Option<&Path>, name: &str) -> Result<Value
         "role": info.map(|i| i.role).unwrap_or("custom"),
         "description": info.map(|i| i.description).unwrap_or("Custom skill"),
         "content": content,
-        "preview": null,
         "mime_type": "text/markdown",
         "overridden": overridden,
         "source": if is_builtin && !overridden { "embedded" } else { "local" },
-        "approved": true,
-        "trusted": is_builtin,
     }))
 }
 
