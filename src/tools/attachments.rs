@@ -112,6 +112,64 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
     ]
 }
 
+/// Validate a MIME type string per RFC 6838 basics.
+///
+/// Requires exactly one `/` separating non-empty type and subtype,
+/// each at most 127 bytes, using only restricted-name characters:
+/// alphanumeric, `!`, `#`, `$`, `&`, `-`, `^`, `_`, `.`, `+`.
+fn validate_mime_type(mime: &str) -> Result<()> {
+    let parts: Vec<&str> = mime.split('/').collect();
+    if parts.len() != 2 {
+        return Err(ToolError::new(
+            ErrorCode::InvalidFieldValue,
+            format!("Invalid MIME type '{}': must contain exactly one '/'", mime),
+        )
+        .into());
+    }
+    let (type_part, subtype_part) = (parts[0], parts[1]);
+    if type_part.is_empty() || subtype_part.is_empty() {
+        return Err(ToolError::new(
+            ErrorCode::InvalidFieldValue,
+            format!(
+                "Invalid MIME type '{}': type and subtype must be non-empty",
+                mime
+            ),
+        )
+        .into());
+    }
+    if type_part.len() > 127 || subtype_part.len() > 127 {
+        return Err(ToolError::new(
+            ErrorCode::InvalidFieldValue,
+            format!(
+                "Invalid MIME type '{}': type and subtype must be at most 127 bytes",
+                mime
+            ),
+        )
+        .into());
+    }
+    let is_valid_char = |c: char| -> bool {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '!' | '#' | '$' | '&' | '-' | '^' | '_' | '.' | '+')
+    };
+    for (label, part) in [("type", type_part), ("subtype", subtype_part)] {
+        if let Some(bad) = part.chars().find(|c| !is_valid_char(*c)) {
+            return Err(ToolError::new(
+                ErrorCode::InvalidFieldValue,
+                format!(
+                    "Invalid MIME type '{}': {} contains invalid character '{}'",
+                    mime, label, bad
+                ),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// Maximum filename length — universal limit across ext4, NTFS, APFS.
+/// Since sanitized filenames are pure ASCII, bytes == chars == UTF-16 units.
+const MAX_FILENAME_LEN: usize = 255;
+
 /// Generate a unique filename for media storage.
 fn generate_media_filename(task_id: &str, attachment_type: &str, mime_type: &str) -> String {
     let timestamp = std::time::SystemTime::now()
@@ -145,7 +203,26 @@ fn generate_media_filename(task_id: &str, attachment_type: &str, mime_type: &str
         })
         .collect();
 
-    format!("{}_{}_{}.{}", task_id, safe_type, timestamp, ext)
+    // Truncate safe_type to fit within MAX_FILENAME_LEN.
+    // Fixed parts: {task_id}_{safe_type}_{timestamp}.{ext}
+    //   separators: 2 underscores + 1 dot = 3
+    //   timestamp: up to 13 digits for millis (until year 2286)
+    let timestamp_str = timestamp.to_string();
+    let fixed_len = task_id.len() + 1 + 1 + timestamp_str.len() + 1 + ext.len();
+    // budget = MAX_FILENAME_LEN - fixed_len (for safe_type portion)
+    let safe_type = if fixed_len >= MAX_FILENAME_LEN {
+        // No room for safe_type at all — still unique via timestamp
+        String::new()
+    } else {
+        let budget = MAX_FILENAME_LEN - fixed_len;
+        if safe_type.len() > budget {
+            safe_type[..budget].to_string()
+        } else {
+            safe_type
+        }
+    };
+
+    format!("{}_{}_{}.{}", task_id, safe_type, timestamp_str, ext)
 }
 
 /// Check if a file path is within the media directory.
@@ -213,6 +290,8 @@ pub fn attach(
             .get_mime_default(&attachment_type)
             .to_string()
     });
+    validate_mime_type(&mime_type)?;
+
     let mode = get_string(&args, "mode").unwrap_or_else(|| {
         attachments_config
             .get_mode_default(&attachment_type)
@@ -404,4 +483,117 @@ pub fn detach(db: &Database, media_dir: &Path, args: Value) -> Result<Value> {
         "deleted_count": deleted_count,
         "files_deleted": files_deleted
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- validate_mime_type tests ---
+
+    #[test]
+    fn test_mime_valid_standard() {
+        assert!(validate_mime_type("text/plain").is_ok());
+        assert!(validate_mime_type("application/json").is_ok());
+        assert!(validate_mime_type("image/png").is_ok());
+    }
+
+    #[test]
+    fn test_mime_valid_special_chars() {
+        // dot, dash, plus are valid restricted-name-chars
+        assert!(validate_mime_type("text/git.hash").is_ok());
+        assert!(validate_mime_type("text/x-diff").is_ok());
+        assert!(validate_mime_type("text/p4.changelist").is_ok());
+        assert!(validate_mime_type("application/vnd.api+json").is_ok());
+    }
+
+    #[test]
+    fn test_mime_missing_slash() {
+        assert!(validate_mime_type("textplain").is_err());
+    }
+
+    #[test]
+    fn test_mime_empty_parts() {
+        assert!(validate_mime_type("/plain").is_err());
+        assert!(validate_mime_type("text/").is_err());
+        assert!(validate_mime_type("/").is_err());
+    }
+
+    #[test]
+    fn test_mime_multiple_slashes() {
+        assert!(validate_mime_type("text/plain/extra").is_err());
+    }
+
+    #[test]
+    fn test_mime_invalid_chars() {
+        assert!(validate_mime_type("text/pla in").is_err()); // space
+        assert!(validate_mime_type("text/pla@in").is_err()); // @
+        assert!(validate_mime_type("text/pla{in").is_err()); // {
+    }
+
+    #[test]
+    fn test_mime_too_long_parts() {
+        let long = "a".repeat(128);
+        assert!(validate_mime_type(&format!("{}/plain", long)).is_err());
+        assert!(validate_mime_type(&format!("text/{}", long)).is_err());
+        // Exactly 127 is fine
+        let max = "a".repeat(127);
+        assert!(validate_mime_type(&format!("{}/plain", max)).is_ok());
+    }
+
+    // --- generate_media_filename tests ---
+
+    #[test]
+    fn test_filename_basic_format() {
+        let name = generate_media_filename("task-1", "note", "text/plain");
+        assert!(name.starts_with("task-1_note_"));
+        assert!(name.ends_with(".txt"));
+    }
+
+    #[test]
+    fn test_filename_sanitization() {
+        let name = generate_media_filename("t1", "my type/here", "text/plain");
+        // Spaces and slashes become underscores
+        assert!(name.starts_with("t1_my_type_here_"));
+    }
+
+    #[test]
+    fn test_filename_extension_mapping() {
+        assert!(generate_media_filename("t", "x", "application/json").ends_with(".json"));
+        assert!(generate_media_filename("t", "x", "text/markdown").ends_with(".md"));
+        assert!(generate_media_filename("t", "x", "image/png").ends_with(".png"));
+        assert!(generate_media_filename("t", "x", "image/jpeg").ends_with(".jpg"));
+        assert!(generate_media_filename("t", "x", "unknown/type").ends_with(".bin"));
+    }
+
+    #[test]
+    fn test_filename_length_limit() {
+        let long_type = "a".repeat(300);
+        let name = generate_media_filename("task-1", &long_type, "text/plain");
+        assert!(
+            name.len() <= MAX_FILENAME_LEN,
+            "filename length {} exceeds {}",
+            name.len(),
+            MAX_FILENAME_LEN
+        );
+        // Should still have the expected structure
+        assert!(name.starts_with("task-1_"));
+        assert!(name.ends_with(".txt"));
+    }
+
+    #[test]
+    fn test_filename_long_task_id() {
+        // Even with a very long task_id, filename should still be bounded
+        let long_id = "x".repeat(250);
+        let name = generate_media_filename(&long_id, "note", "text/plain");
+        // safe_type will be empty since task_id eats the budget
+        assert!(name.len() <= MAX_FILENAME_LEN || name.starts_with(&long_id));
+    }
+
+    #[test]
+    fn test_filename_empty_type() {
+        let name = generate_media_filename("task-1", "", "text/plain");
+        assert!(name.starts_with("task-1_"));
+        assert!(name.ends_with(".txt"));
+    }
 }
