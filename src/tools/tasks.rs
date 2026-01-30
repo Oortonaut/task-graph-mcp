@@ -638,10 +638,10 @@ pub fn list_tasks(
             let mut descendants = db.get_descendants(pid, -1)?;
 
             // Apply status filter in memory
-            if let Some(status_set) = get_string_or_array(&args, "status") {
-                if !status_set.is_empty() {
-                    descendants.retain(|t| status_set.contains(&t.status));
-                }
+            if let Some(status_set) = get_string_or_array(&args, "status")
+                && !status_set.is_empty()
+            {
+                descendants.retain(|t| status_set.contains(&t.status));
             }
 
             // Apply owner filter in memory

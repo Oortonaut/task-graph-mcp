@@ -391,6 +391,7 @@ impl Database {
     /// Create a task tree from nested input.
     /// Uses child_type for parent-child dependencies (default: "contains").
     /// Uses sibling_type for sibling dependencies (default: none/parallel).
+    #[allow(clippy::type_complexity)]
     pub fn create_task_tree(
         &self,
         opts: CreateTreeOptions<'_>,

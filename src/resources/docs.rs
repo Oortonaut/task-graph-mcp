@@ -36,28 +36,26 @@ fn find_markdown_files(dir: &Path, base: &Path, files: &mut Vec<DocInfo>) -> Res
             find_markdown_files(&path, base, files)?;
         } else if path.is_file() {
             // Check if it's a markdown file
-            if let Some(ext) = path.extension() {
-                if ext == "md" || ext == "markdown" {
-                    let relative = path
-                        .strip_prefix(base)
-                        .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
-                        .unwrap_or_else(|_| {
-                            path.file_name().unwrap().to_string_lossy().to_string()
-                        });
+            if let Some(ext) = path.extension()
+                && (ext == "md" || ext == "markdown")
+            {
+                let relative = path
+                    .strip_prefix(base)
+                    .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
+                    .unwrap_or_else(|_| path.file_name().unwrap().to_string_lossy().to_string());
 
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
 
-                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
 
-                    files.push(DocInfo {
-                        relative_path: relative,
-                        name,
-                        size,
-                    });
-                }
+                files.push(DocInfo {
+                    relative_path: relative,
+                    name,
+                    size,
+                });
             }
         }
     }
@@ -163,12 +161,11 @@ pub fn get_doc_resource(docs_dir: Option<&Path>, path: &str) -> Result<Value> {
     let file_path = dir.join(path);
 
     // Security check: ensure resolved path is within docs_dir
-    if let Ok(canonical_file) = file_path.canonicalize() {
-        if let Ok(canonical_dir) = dir.canonicalize() {
-            if !canonical_file.starts_with(&canonical_dir) {
-                return Err(anyhow::anyhow!("Invalid doc path: outside docs directory"));
-            }
-        }
+    if let Ok(canonical_file) = file_path.canonicalize()
+        && let Ok(canonical_dir) = dir.canonicalize()
+        && !canonical_file.starts_with(&canonical_dir)
+    {
+        return Err(anyhow::anyhow!("Invalid doc path: outside docs directory"));
     }
 
     if !file_path.exists() {

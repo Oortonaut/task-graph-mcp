@@ -42,6 +42,7 @@ pub struct ToolHandler {
 }
 
 impl ToolHandler {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Arc<Database>,
         media_dir: PathBuf,
@@ -152,13 +153,8 @@ impl ToolHandler {
                     .get("workflow")
                     .and_then(|v| v.as_str())
                     .and_then(|name| self.config.workflows.get_named_workflow(name))
-                    .map(|w| Arc::clone(w))
-                    .or_else(|| {
-                        self.config
-                            .workflows
-                            .get_default_workflow()
-                            .map(|w| Arc::clone(w))
-                    })
+                    .map(Arc::clone)
+                    .or_else(|| self.config.workflows.get_default_workflow().map(Arc::clone))
                     .unwrap_or_else(|| Arc::clone(&self.config.workflows));
                 json(agents::connect(
                     agents::ConnectOptions {

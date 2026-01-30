@@ -153,31 +153,31 @@ pub fn start_config_watcher(
     // Set up watches for each configured path
     let watcher = debouncer.watcher();
 
-    if config.watch_config {
-        if let Some(ref config_dir) = paths.config_dir {
-            if config_dir.exists() {
-                info!("Watching config directory: {}", config_dir.display());
-                watcher.watch(config_dir, notify::RecursiveMode::NonRecursive)?;
-            } else {
-                warn!(
-                    "Config directory does not exist, skipping watch: {}",
-                    config_dir.display()
-                );
-            }
+    if config.watch_config
+        && let Some(ref config_dir) = paths.config_dir
+    {
+        if config_dir.exists() {
+            info!("Watching config directory: {}", config_dir.display());
+            watcher.watch(config_dir, notify::RecursiveMode::NonRecursive)?;
+        } else {
+            warn!(
+                "Config directory does not exist, skipping watch: {}",
+                config_dir.display()
+            );
         }
     }
 
-    if config.watch_skills {
-        if let Some(ref skills_dir) = paths.skills_dir {
-            if skills_dir.exists() {
-                info!("Watching skills directory: {}", skills_dir.display());
-                watcher.watch(skills_dir, notify::RecursiveMode::Recursive)?;
-            } else {
-                warn!(
-                    "Skills directory does not exist, skipping watch: {}",
-                    skills_dir.display()
-                );
-            }
+    if config.watch_skills
+        && let Some(ref skills_dir) = paths.skills_dir
+    {
+        if skills_dir.exists() {
+            info!("Watching skills directory: {}", skills_dir.display());
+            watcher.watch(skills_dir, notify::RecursiveMode::Recursive)?;
+        } else {
+            warn!(
+                "Skills directory does not exist, skipping watch: {}",
+                skills_dir.display()
+            );
         }
     }
 
@@ -266,10 +266,10 @@ fn classify_events(
     // If we have multiple paths, create a batch event
     if changed_paths.len() > 1 {
         result.push(ConfigChangeEvent::BatchChange(changed_paths));
-    } else if let Some(path) = changed_paths.into_iter().next() {
-        if let Some(event) = classify_path(&path, paths) {
-            result.push(event);
-        }
+    } else if let Some(path) = changed_paths.into_iter().next()
+        && let Some(event) = classify_path(&path, paths)
+    {
+        result.push(event);
     }
 
     result
@@ -291,18 +291,18 @@ fn classify_path(path: &Path, paths: &WatchPaths) -> Option<ConfigChangeEvent> {
             return Some(ConfigChangeEvent::ConfigYaml(path.to_path_buf()));
         }
         // Other YAML files in config dir are treated as config
-        if let Some(ref config_dir) = paths.config_dir {
-            if path.starts_with(config_dir) {
-                return Some(ConfigChangeEvent::ConfigYaml(path.to_path_buf()));
-            }
+        if let Some(ref config_dir) = paths.config_dir
+            && path.starts_with(config_dir)
+        {
+            return Some(ConfigChangeEvent::ConfigYaml(path.to_path_buf()));
         }
     }
 
     // Check if it's in the skills directory
-    if let Some(ref skills_dir) = paths.skills_dir {
-        if path.starts_with(skills_dir) {
-            return Some(ConfigChangeEvent::SkillsChanged(path.to_path_buf()));
-        }
+    if let Some(ref skills_dir) = paths.skills_dir
+        && path.starts_with(skills_dir)
+    {
+        return Some(ConfigChangeEvent::SkillsChanged(path.to_path_buf()));
     }
 
     None

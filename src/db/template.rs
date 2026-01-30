@@ -291,13 +291,13 @@ fn prepare_snapshot(
                 }
 
                 // Prefix titles if requested
-                if let Some(ref prefix) = options.title_prefix {
-                    if let Some(title) = obj.get("title").and_then(|v| v.as_str()) {
-                        obj.insert(
-                            "title".to_string(),
-                            Value::String(format!("{}: {}", prefix, title)),
-                        );
-                    }
+                if let Some(ref prefix) = options.title_prefix
+                    && let Some(title) = obj.get("title").and_then(|v| v.as_str())
+                {
+                    obj.insert(
+                        "title".to_string(),
+                        Value::String(format!("{}: {}", prefix, title)),
+                    );
                 }
 
                 // Clear runtime fields
@@ -442,13 +442,13 @@ impl Database {
         let metadata = analyze_template(snapshot, name, source_path)?;
 
         // Step 2: Validate parent task exists if specified
-        if let Some(ref parent_id) = options.parent_task_id {
-            if !self.task_exists(parent_id)? {
-                return Err(anyhow!(
-                    "Parent task '{}' not found. Cannot attach template.",
-                    parent_id
-                ));
-            }
+        if let Some(ref parent_id) = options.parent_task_id
+            && !self.task_exists(parent_id)?
+        {
+            return Err(anyhow!(
+                "Parent task '{}' not found. Cannot attach template.",
+                parent_id
+            ));
         }
 
         // Step 3: Prepare the snapshot (remap IDs, apply transformations)
@@ -564,7 +564,7 @@ mod tests {
                     "title": "Root Task",
                     "description": "The root of the template",
                     "status": "pending",
-                    "priority": 5,
+                    "priority": "5",
                     "worker_id": null,
                     "claimed_at": null,
                     "needed_tags": [],
@@ -586,7 +586,7 @@ mod tests {
                     "title": "Child Task 1",
                     "description": "First child",
                     "status": "pending",
-                    "priority": 5,
+                    "priority": "5",
                     "worker_id": null,
                     "claimed_at": null,
                     "needed_tags": [],

@@ -29,6 +29,7 @@ pub struct PathMapper {
     style: PathStyle,
 }
 
+#[allow(clippy::result_large_err)]
 impl PathMapper {
     /// Create a PathMapper from configuration.
     ///

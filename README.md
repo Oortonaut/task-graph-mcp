@@ -299,6 +299,7 @@ Environment variables:
 | `delete(worker_id: worker_str, task: task_str, cascade?: bool, reason?: str, obliterate?: bool, force?: bool)` | Delete task. Soft delete by default; `obliterate=true` for permanent. |
 | `scan(task: task_str, before?: int, after?: int, above?: int, below?: int)` | Scan task graph in multiple directions. Depth: 0=none, N=levels, -1=all. |
 | `search(query: str, limit?: int = 20, include_attachments?: bool, status_filter?: status_str)` | FTS5 search. Supports phrases, prefix*, AND/OR/NOT, title:word. |
+| `rename(worker_id: worker_str, task: task_str, new_id: task_str)` | Atomically rename a task ID across all referencing tables. |
 
 ### Task Claiming
 
@@ -349,6 +350,8 @@ Environment variables:
 |------|-------------|
 | `check_gates(task: task_str)` | Check gate requirements before status/phase transition. Returns unsatisfied gates with pass/warn/fail status. |
 | `query(sql: str, params?: str[], limit?: int = 100, format?: str)` | Execute read-only SQL. SELECT only. Requires permission. |
+| `get_schema(table?: str, include_sql?: bool)` | Get database schema. Returns table names, columns, types, and foreign keys. |
+| `list_workflows()` | List available workflow configurations (solo, swarm, relay, hierarchical, etc.). |
 
 ## MCP Resources
 
@@ -368,7 +371,13 @@ Environment variables:
 | `config://phases` | Phase definitions |
 | `config://dependencies` | Dependency type definitions |
 | `config://tags` | Tag definitions |
-| `docs://{path}` | Live filesystem mapping to `$install/docs/` |
+| `docs://index` | List all available documentation files |
+| `docs://search/{query}` | Full-text search across documentation |
+| `docs://skills/list` | List available skills |
+| `docs://skills/{name}` | Get specific skill content |
+| `docs://workflows/list` | List available workflows |
+| `docs://workflows/{name}` | Get workflow details |
+| `docs://{path}` | Specific documentation file content |
 
 ## Task Tree Structure
 

@@ -268,14 +268,13 @@ pub fn remap_snapshot(
     // Helper closure: remap an ID field in a JSON object, returning the object unchanged
     // if the old ID is not in the map (external reference).
     let remap_field = |obj: &mut serde_json::Map<String, Value>, field: &str| {
-        if let Some(val) = obj.get(field) {
-            if let Some(old_id) = val.as_str() {
-                if let Some(new_id) = id_map.get(old_id) {
-                    obj.insert(field.to_string(), Value::String(new_id.clone()));
-                }
-                // If not in map, it's an external reference -- leave it unchanged
-            }
+        if let Some(val) = obj.get(field)
+            && let Some(old_id) = val.as_str()
+            && let Some(new_id) = id_map.get(old_id)
+        {
+            obj.insert(field.to_string(), Value::String(new_id.clone()));
         }
+        // If old_id not in map, it's an external reference -- left unchanged
     };
 
     // Phase 2: Remap IDs in all tables.

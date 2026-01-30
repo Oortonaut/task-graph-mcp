@@ -78,6 +78,7 @@ struct TaskGraphServer {
 }
 
 impl TaskGraphServer {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         db: Arc<Database>,
         media_dir: std::path::PathBuf,

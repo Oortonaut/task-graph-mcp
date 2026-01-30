@@ -1361,6 +1361,7 @@ pub struct AppConfig {
 
 impl AppConfig {
     /// Create a new `AppConfig` from individually wrapped configs.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         states: Arc<StatesConfig>,
         phases: Arc<PhasesConfig>,

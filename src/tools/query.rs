@@ -89,6 +89,7 @@ pub fn get_tools() -> Vec<Tool> {
 }
 
 /// Validate that a SQL query is read-only (SELECT only).
+#[allow(clippy::result_large_err)]
 fn validate_readonly_sql(sql: &str) -> Result<(), ToolError> {
     // Normalize whitespace and convert to uppercase for checking
     let normalized = sql.trim().to_uppercase();

@@ -229,10 +229,10 @@ impl WorkflowsConfig {
         let mut role_names: Vec<&String> = self.roles.keys().collect();
         role_names.sort();
         for role_name in role_names {
-            if let Some(role) = self.roles.get(role_name) {
-                if role.tags.iter().any(|t| worker_tags.contains(t)) {
-                    return Some(role_name.clone());
-                }
+            if let Some(role) = self.roles.get(role_name)
+                && role.tags.iter().any(|t| worker_tags.contains(t))
+            {
+                return Some(role_name.clone());
             }
         }
         None

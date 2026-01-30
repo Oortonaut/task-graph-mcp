@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-01-29
+
+### Added
+
+- **Template system**: Template instantiation with entry/exit point detection, ID remapping, parent attachment, and builder-pattern options
+- **Rename tool**: Atomically rename task IDs across all 9 referencing tables
+- **List workflows tool**: Discover available workflow configurations before connecting
+- **Get schema tool**: Inspect database schema, columns, types, and foreign keys
+- **Documentation search**: `docs://search/{query}` full-text search and `docs://index` listing via MCP resources
+- **Workflow roles**: Role definitions with tags, permissions, and role-specific prompts delivered on connect and claim
+- **Config hot-reload**: File watcher for config/workflow/skills changes with debounced atomic reload via ArcSwap
+- **Context-sensitive prompts**: 7 template variables (`task_id`, `task_title`, `task_priority`, `task_tags`, `agent_id`, `agent_role`, `agent_tags`) for richer transition guidance
+- **MCP resource subscriptions**: Change notification system for resource URIs
+- **Import enhancements**: `--parent` flag for attaching imports under parent tasks, `--remap-ids` for fresh ID generation
+- **GitHub linking skill**: Bidirectional linking between GitHub issues/PRs and task-graph tasks via attachments, tags, and `tracks` dependency type
+- **MIME type validation**: RFC 6838-compliant validation and 255-char filename limits for attachments
+- **Experiment framework**: Push/pull/hybrid experiment configs, workflow-push topology, runner and comparison scripts, browser task templates
+- **Process documentation**: `docs/PROCESSES.md` with release process and changelog maintenance
+
+### Changed
+
+- **BREAKING**: MCP resource URIs consolidated from 9 schemes to 3 (`query://`, `config://`, `docs://`)
+- Default generated IDs shortened from 4 words to 2; PascalCase for agent IDs via `agent_id_case` config
+- Workflow role tags auto-registered in TagsConfig to suppress unknown tag warnings
+- Title truncation and tiered priority markers in list/scan output
+- Container tasks excluded from ready task queries
+- `TaskTreeInput.title` now optional (derived from description)
+- Token-optimized workflow prompts (~33% reduction across all topologies)
+- Skill system simplified: removed approval/trust gate, skills served directly
+- Unified string-or-array parsing across dependency, attachment, task, tracking, and file tools
+
+### Fixed
+
+- Template test fixtures using integer priority instead of string
+- 31 clippy warnings resolved (collapsible_if, too_many_arguments, result_large_err, redundant_closure, type_complexity)
+
 ## [0.2.1] - 2026-01-28
 
 ### Added

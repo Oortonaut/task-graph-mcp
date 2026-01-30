@@ -1,6 +1,6 @@
 [package]
 name = "task-graph-mcp"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "MCP server for agent task workflows with phases, prompts, gates, and multi-agent coordination"
 license = "Apache-2.0"
