@@ -27,6 +27,9 @@ attachments:
       mode: append
       # Appends notable GitHub comment text or links
 
+feedback:
+  enabled: true
+
 tags:
   definitions:
     github:
