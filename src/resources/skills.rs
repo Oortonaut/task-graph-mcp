@@ -71,6 +71,23 @@ fn get_embedded_skill(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Extract the `description` field from YAML frontmatter in a SKILL.md file.
+/// Returns None if frontmatter is missing or has no description.
+fn parse_frontmatter_description(content: &str) -> Option<String> {
+    let content = content.trim_start();
+    if !content.starts_with("---") {
+        return None;
+    }
+    let after_open = &content[3..];
+    let close = after_open.find("\n---")?;
+    let yaml_block = &after_open[..close];
+    let mapping: serde_yaml::Value = serde_yaml::from_str(yaml_block).ok()?;
+    mapping
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
 /// Normalize skill name (strip "task-graph-" prefix if present).
 fn normalize_name(name: &str) -> &str {
     name.strip_prefix("task-graph-").unwrap_or(name)
@@ -173,10 +190,14 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
         .iter()
         .map(|s| {
             let overridden = is_overridden(skills_dir, s.name);
+            let description = get_skill(skills_dir, s.name)
+                .ok()
+                .and_then(|content| parse_frontmatter_description(&content))
+                .unwrap_or_else(|| s.description.to_string());
             json!({
                 "name": s.name,
                 "full_name": s.full_name,
-                "description": s.description,
+                "description": description,
                 "role": s.role,
                 "uri": format!("skills://{}", s.name),
                 "overridden": overridden,
@@ -206,10 +227,15 @@ pub fn list_skills(skills_dir: Option<&Path>) -> Result<Value> {
                         continue;
                     }
 
+                    let description = std::fs::read_to_string(&skill_md)
+                        .ok()
+                        .and_then(|content| parse_frontmatter_description(&content))
+                        .unwrap_or_else(|| "Custom skill".to_string());
+
                     skills_list.push(json!({
                         "name": normalized,
                         "full_name": name,
-                        "description": "Custom skill",
+                        "description": description,
                         "role": "custom",
                         "uri": format!("skills://{}", normalized),
                         "overridden": false,
@@ -276,9 +302,49 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_frontmatter_description() {
+        let md = "---\nname: foo\ndescription: A great skill\n---\n# Heading\n";
+        assert_eq!(
+            parse_frontmatter_description(md),
+            Some("A great skill".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_frontmatter_no_description() {
+        let md = "---\nname: foo\n---\n# Heading\n";
+        assert_eq!(parse_frontmatter_description(md), None);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_missing() {
+        assert_eq!(parse_frontmatter_description("# No frontmatter"), None);
+    }
+
+    #[test]
     fn test_list_skills() {
         let result = list_skills(None).unwrap();
         assert_eq!(result["count"], 4);
+    }
+
+    #[test]
+    fn test_list_skills_has_frontmatter_descriptions() {
+        let result = list_skills(None).unwrap();
+        let skills = result["skills"].as_array().unwrap();
+        for skill in skills {
+            let desc = skill["description"].as_str().unwrap();
+            // Embedded skills should have real descriptions from frontmatter, not the fallback
+            assert!(
+                !desc.is_empty(),
+                "Skill {} has empty description",
+                skill["name"]
+            );
+            assert_ne!(
+                desc, "Custom skill",
+                "Skill {} still using fallback description",
+                skill["name"]
+            );
+        }
     }
 
     #[test]
