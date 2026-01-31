@@ -33,16 +33,6 @@ fn default_auto_advance() -> AutoAdvanceConfig {
     AutoAdvanceConfig::default()
 }
 
-/// Helper to create a default PhasesConfig for testing.
-fn default_phases_config() -> PhasesConfig {
-    PhasesConfig::default()
-}
-
-/// Helper to create a default TagsConfig for testing.
-fn default_tags_config() -> TagsConfig {
-    TagsConfig::default()
-}
-
 /// Helper to create a default IdsConfig for testing.
 fn default_ids_config() -> IdsConfig {
     IdsConfig::default()
@@ -581,6 +571,388 @@ mod agent_tests {
         assert_eq!(worker2.unwrap().workflow, Some("workflow-beta".to_string()));
         assert!(worker3.unwrap().workflow.is_none());
     }
+
+    // --- Overlay DB persistence tests ---
+
+    #[test]
+    fn register_worker_with_overlays_stores_them() {
+        let db = setup_db();
+
+        let agent = db
+            .register_worker(
+                Some("overlay-worker".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec!["git".to_string(), "troubleshooting".to_string()],
+            )
+            .expect("Failed to register agent with overlays");
+
+        assert_eq!(
+            agent.overlays,
+            vec!["git".to_string(), "troubleshooting".to_string()]
+        );
+    }
+
+    #[test]
+    fn register_worker_without_overlays_stores_empty() {
+        let db = setup_db();
+
+        let agent = db
+            .register_worker(
+                Some("no-overlay-worker".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .expect("Failed to register agent without overlays");
+
+        assert!(agent.overlays.is_empty());
+    }
+
+    #[test]
+    fn get_worker_returns_overlays_in_worker_struct() {
+        let db = setup_db();
+
+        db.register_worker(
+            Some("get-overlay-worker".to_string()),
+            vec!["test-tag".to_string()],
+            false,
+            &default_ids_config(),
+            None,
+            vec!["git".to_string()],
+        )
+        .expect("Failed to register agent");
+
+        let found = db
+            .get_worker("get-overlay-worker")
+            .expect("Failed to get worker")
+            .expect("Worker not found");
+
+        assert_eq!(found.overlays, vec!["git".to_string()]);
+        assert_eq!(found.tags, vec!["test-tag"]);
+    }
+
+    #[test]
+    fn get_worker_returns_empty_overlays_when_none_stored() {
+        let db = setup_db();
+
+        db.register_worker(
+            Some("no-overlay-get-worker".to_string()),
+            vec![],
+            false,
+            &default_ids_config(),
+            None,
+            vec![],
+        )
+        .expect("Failed to register agent");
+
+        let found = db
+            .get_worker("no-overlay-get-worker")
+            .expect("Failed to get worker")
+            .expect("Worker not found");
+
+        assert!(found.overlays.is_empty());
+    }
+
+    #[test]
+    fn update_worker_overlays_round_trip() {
+        let db = setup_db();
+
+        // Register with no overlays
+        db.register_worker(
+            Some("update-overlay-worker".to_string()),
+            vec![],
+            false,
+            &default_ids_config(),
+            None,
+            vec![],
+        )
+        .expect("Failed to register agent");
+
+        // Update overlays
+        let updated = db
+            .update_worker_overlays(
+                "update-overlay-worker",
+                vec!["git".to_string(), "user-request".to_string()],
+            )
+            .expect("Failed to update overlays");
+
+        assert_eq!(
+            updated.overlays,
+            vec!["git".to_string(), "user-request".to_string()]
+        );
+
+        // Verify via get_worker (DB round-trip)
+        let found = db
+            .get_worker("update-overlay-worker")
+            .expect("Failed to get worker")
+            .expect("Worker not found");
+
+        assert_eq!(
+            found.overlays,
+            vec!["git".to_string(), "user-request".to_string()]
+        );
+    }
+
+    #[test]
+    fn update_worker_overlays_with_empty_list_stores_null() {
+        let db = setup_db();
+
+        // Register with overlays
+        db.register_worker(
+            Some("clear-overlay-worker".to_string()),
+            vec![],
+            false,
+            &default_ids_config(),
+            None,
+            vec!["git".to_string()],
+        )
+        .expect("Failed to register agent");
+
+        // Clear overlays by passing empty vec
+        let updated = db
+            .update_worker_overlays("clear-overlay-worker", vec![])
+            .expect("Failed to clear overlays");
+
+        assert!(updated.overlays.is_empty());
+
+        // Verify via get_worker (the NULL in DB parses back to empty vec)
+        let found = db
+            .get_worker("clear-overlay-worker")
+            .expect("Failed to get worker")
+            .expect("Worker not found");
+
+        assert!(found.overlays.is_empty());
+    }
+
+    #[test]
+    fn update_worker_overlays_fails_for_unknown_worker() {
+        let db = setup_db();
+
+        let result = db.update_worker_overlays("nonexistent-worker", vec!["git".to_string()]);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Worker not found"));
+    }
+
+    #[test]
+    fn overlays_persist_across_force_reconnection() {
+        let db = setup_db();
+
+        // First registration with overlays
+        let agent1 = db
+            .register_worker(
+                Some("reconnect-overlay-worker".to_string()),
+                vec!["old-tag".to_string()],
+                false,
+                &default_ids_config(),
+                None,
+                vec!["git".to_string()],
+            )
+            .expect("Failed to register agent initially");
+        assert_eq!(agent1.overlays, vec!["git".to_string()]);
+
+        // Force reconnect with different overlays
+        let agent2 = db
+            .register_worker(
+                Some("reconnect-overlay-worker".to_string()),
+                vec!["new-tag".to_string()],
+                true,
+                &default_ids_config(),
+                None,
+                vec!["troubleshooting".to_string(), "user-request".to_string()],
+            )
+            .expect("Failed to force reconnect");
+
+        assert_eq!(
+            agent2.overlays,
+            vec!["troubleshooting".to_string(), "user-request".to_string()]
+        );
+        assert_eq!(agent2.tags, vec!["new-tag"]);
+
+        // Verify via get_worker that the database has the updated overlays
+        let found = db
+            .get_worker("reconnect-overlay-worker")
+            .expect("Failed to get worker")
+            .expect("Worker not found");
+        assert_eq!(
+            found.overlays,
+            vec!["troubleshooting".to_string(), "user-request".to_string()]
+        );
+    }
+
+    #[test]
+    fn overlays_can_be_cleared_on_force_reconnection() {
+        let db = setup_db();
+
+        // First registration with overlays
+        let agent1 = db
+            .register_worker(
+                Some("clear-overlay-reconnect".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec!["git".to_string(), "troubleshooting".to_string()],
+            )
+            .expect("Failed to register agent");
+        assert_eq!(agent1.overlays.len(), 2);
+
+        // Force reconnect with no overlays (empty vec)
+        let agent2 = db
+            .register_worker(
+                Some("clear-overlay-reconnect".to_string()),
+                vec![],
+                true,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .expect("Failed to force reconnect");
+
+        assert!(agent2.overlays.is_empty());
+
+        // Verify via get_worker
+        let found = db
+            .get_worker("clear-overlay-reconnect")
+            .expect("Failed to get worker")
+            .expect("Worker not found");
+        assert!(found.overlays.is_empty());
+    }
+
+    #[test]
+    fn list_workers_returns_overlays_in_results() {
+        let db = setup_db();
+
+        db.register_worker(
+            Some("list-overlay-1".to_string()),
+            vec![],
+            false,
+            &default_ids_config(),
+            None,
+            vec!["git".to_string()],
+        )
+        .expect("Failed to register first worker");
+
+        db.register_worker(
+            Some("list-overlay-2".to_string()),
+            vec![],
+            false,
+            &default_ids_config(),
+            None,
+            vec!["git".to_string(), "troubleshooting".to_string()],
+        )
+        .expect("Failed to register second worker");
+
+        db.register_worker(
+            Some("list-overlay-3".to_string()),
+            vec![],
+            false,
+            &default_ids_config(),
+            None,
+            vec![], // No overlays
+        )
+        .expect("Failed to register third worker");
+
+        let workers = db.list_workers().expect("Failed to list workers");
+        assert_eq!(workers.len(), 3);
+
+        let worker1 = workers.iter().find(|w| w.id == "list-overlay-1");
+        let worker2 = workers.iter().find(|w| w.id == "list-overlay-2");
+        let worker3 = workers.iter().find(|w| w.id == "list-overlay-3");
+
+        assert!(worker1.is_some());
+        assert!(worker2.is_some());
+        assert!(worker3.is_some());
+
+        assert_eq!(worker1.unwrap().overlays, vec!["git".to_string()]);
+        assert_eq!(
+            worker2.unwrap().overlays,
+            vec!["git".to_string(), "troubleshooting".to_string()]
+        );
+        assert!(worker3.unwrap().overlays.is_empty());
+    }
+
+    #[test]
+    fn update_worker_overlays_preserves_other_fields() {
+        let db = setup_db();
+
+        // Register with tags, workflow, and no overlays
+        db.register_worker(
+            Some("preserve-fields-worker".to_string()),
+            vec!["rust".to_string(), "backend".to_string()],
+            false,
+            &default_ids_config(),
+            Some("swarm".to_string()),
+            vec![],
+        )
+        .expect("Failed to register agent");
+
+        // Update only overlays
+        let updated = db
+            .update_worker_overlays("preserve-fields-worker", vec!["git".to_string()])
+            .expect("Failed to update overlays");
+
+        // Verify overlays updated
+        assert_eq!(updated.overlays, vec!["git".to_string()]);
+        // Verify other fields are preserved
+        assert_eq!(
+            updated.tags,
+            vec!["rust".to_string(), "backend".to_string()]
+        );
+        assert_eq!(updated.workflow, Some("swarm".to_string()));
+        assert_eq!(updated.id, "preserve-fields-worker");
+    }
+
+    #[test]
+    fn update_worker_overlays_multiple_times() {
+        let db = setup_db();
+
+        db.register_worker(
+            Some("multi-overlay-worker".to_string()),
+            vec![],
+            false,
+            &default_ids_config(),
+            None,
+            vec![],
+        )
+        .expect("Failed to register agent");
+
+        // First update: add one overlay
+        let updated1 = db
+            .update_worker_overlays("multi-overlay-worker", vec!["git".to_string()])
+            .expect("Failed to update overlays first time");
+        assert_eq!(updated1.overlays, vec!["git".to_string()]);
+
+        // Second update: add a second overlay
+        let updated2 = db
+            .update_worker_overlays(
+                "multi-overlay-worker",
+                vec!["git".to_string(), "troubleshooting".to_string()],
+            )
+            .expect("Failed to update overlays second time");
+        assert_eq!(
+            updated2.overlays,
+            vec!["git".to_string(), "troubleshooting".to_string()]
+        );
+
+        // Third update: remove one overlay
+        let updated3 = db
+            .update_worker_overlays("multi-overlay-worker", vec!["troubleshooting".to_string()])
+            .expect("Failed to update overlays third time");
+        assert_eq!(updated3.overlays, vec!["troubleshooting".to_string()]);
+
+        // Verify final state via get_worker
+        let found = db
+            .get_worker("multi-overlay-worker")
+            .expect("Failed to get worker")
+            .expect("Worker not found");
+        assert_eq!(found.overlays, vec!["troubleshooting".to_string()]);
+    }
 }
 
 mod task_tests {
@@ -1103,6 +1475,499 @@ mod task_tests {
         assert_eq!(pending[0].title, "Pending");
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].title, "Completed");
+    }
+
+    // =========================================================================
+    // Offset pagination tests for list_tasks
+    // =========================================================================
+
+    /// Helper: create N tasks with deterministic IDs for pagination tests.
+    /// Returns the IDs in creation order (oldest first).
+    fn create_n_tasks(db: &Database, n: usize) -> Vec<String> {
+        let states_config = default_states_config();
+        let ids_config = default_ids_config();
+        let mut ids = Vec::with_capacity(n);
+        for i in 0..n {
+            let id = format!("page-task-{}", i);
+            db.create_task(
+                Some(id.clone()),
+                format!("Task {}", i),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+            ids.push(id);
+        }
+        ids
+    }
+
+    #[test]
+    fn list_tasks_offset_zero_returns_from_beginning() {
+        let db = setup_db();
+        let ids = create_n_tasks(&db, 5);
+
+        // Default sort is created_at DESC, so use asc for deterministic order
+        let tasks = db
+            .list_tasks(ListTasksQuery {
+                offset: 0,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(tasks.len(), 5);
+        // With asc order, the first created task should be first
+        assert_eq!(tasks[0].id, ids[0]);
+        assert_eq!(tasks[4].id, ids[4]);
+    }
+
+    #[test]
+    fn list_tasks_offset_skips_first_n_results() {
+        let db = setup_db();
+        let ids = create_n_tasks(&db, 5);
+
+        // Skip the first 2 results (ascending order so skip task-0 and task-1)
+        // Note: SQLite requires LIMIT before OFFSET, so we pass a large limit
+        let tasks = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(i32::MAX),
+                offset: 2,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[0].id, ids[2]);
+        assert_eq!(tasks[1].id, ids[3]);
+        assert_eq!(tasks[2].id, ids[4]);
+    }
+
+    #[test]
+    fn list_tasks_offset_exceeding_total_returns_empty() {
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 5);
+
+        // Offset past all results
+        // Note: SQLite requires LIMIT before OFFSET, so we pass a large limit
+        let tasks = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(i32::MAX),
+                offset: 100,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn list_tasks_offset_equal_to_count_returns_empty() {
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 5);
+
+        // Offset exactly equal to total count
+        // Note: SQLite requires LIMIT before OFFSET, so we pass a large limit
+        let tasks = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(i32::MAX),
+                offset: 5,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn list_tasks_limit_and_offset_pages_through_results() {
+        let db = setup_db();
+        let ids = create_n_tasks(&db, 7);
+
+        // Page 1: offset=0, limit=3
+        let page1 = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(3),
+                offset: 0,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page1.len(), 3);
+        assert_eq!(page1[0].id, ids[0]);
+        assert_eq!(page1[1].id, ids[1]);
+        assert_eq!(page1[2].id, ids[2]);
+
+        // Page 2: offset=3, limit=3
+        let page2 = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(3),
+                offset: 3,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page2.len(), 3);
+        assert_eq!(page2[0].id, ids[3]);
+        assert_eq!(page2[1].id, ids[4]);
+        assert_eq!(page2[2].id, ids[5]);
+
+        // Page 3: offset=6, limit=3 (only 1 remaining)
+        let page3 = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(3),
+                offset: 6,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page3.len(), 1);
+        assert_eq!(page3[0].id, ids[6]);
+
+        // Page 4: offset=9, limit=3 (nothing left)
+        let page4 = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(3),
+                offset: 9,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(page4.is_empty());
+    }
+
+    #[test]
+    fn list_tasks_limit_without_offset_returns_first_n() {
+        let db = setup_db();
+        let ids = create_n_tasks(&db, 5);
+
+        let tasks = db
+            .list_tasks(ListTasksQuery {
+                limit: Some(2),
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].id, ids[0]);
+        assert_eq!(tasks[1].id, ids[1]);
+    }
+
+    #[test]
+    fn list_tasks_offset_with_status_filter() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let ids = create_n_tasks(&db, 5);
+
+        // Move two tasks to working state
+        for id in &ids[0..2] {
+            db.update_task(
+                id,
+                None,
+                None,
+                Some("working".to_string()),
+                None,
+                None,
+                None,
+                &states_config,
+            )
+            .unwrap();
+        }
+
+        // Query pending tasks (3 remaining) with offset=1
+        // Note: SQLite requires LIMIT before OFFSET, so we pass a large limit
+        let tasks = db
+            .list_tasks(ListTasksQuery {
+                status: Some("pending"),
+                limit: Some(i32::MAX),
+                offset: 1,
+                sort_by: Some("created_at"),
+                sort_order: Some("asc"),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // 3 pending tasks (ids[2..5]), skip 1 => 2 left
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].id, ids[3]);
+        assert_eq!(tasks[1].id, ids[4]);
+    }
+
+    /// Test the N+1 fetch pattern and has_more flag at the tool level.
+    /// The tool-level list_tasks fetches limit+1 rows, checks if len > limit
+    /// to determine has_more, then truncates to limit.
+    #[test]
+    fn list_tasks_tool_has_more_true_when_more_results_exist() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 5);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Request limit=3 from 5 total tasks => has_more should be true
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "limit": 3,
+                "offset": 0,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(result["has_more"], json!(true));
+        assert_eq!(result["offset"], json!(0));
+        assert_eq!(result["limit"], json!(3));
+    }
+
+    #[test]
+    fn list_tasks_tool_has_more_false_at_end() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 5);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Request offset=3, limit=3: only 2 remaining => has_more should be false
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "limit": 3,
+                "offset": 3,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(result["has_more"], json!(false));
+        assert_eq!(result["offset"], json!(3));
+        assert_eq!(result["limit"], json!(3));
+    }
+
+    #[test]
+    fn list_tasks_tool_has_more_false_exact_fit() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 6);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Request limit=3, offset=3 with exactly 6 tasks: 3 remaining fits exactly
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "limit": 3,
+                "offset": 3,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 3);
+        // Exactly 3 remaining and we asked for 3 => no more
+        assert_eq!(result["has_more"], json!(false));
+    }
+
+    #[test]
+    fn list_tasks_tool_paging_covers_all_results() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let ids = create_n_tasks(&db, 5);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Collect all task IDs across pages (limit=2)
+        let mut all_ids: Vec<String> = Vec::new();
+        let mut current_offset = 0;
+
+        loop {
+            let result = list_tasks(
+                &db,
+                &states_config,
+                &deps_config,
+                OutputFormat::Json,
+                json!({
+                    "limit": 2,
+                    "offset": current_offset,
+                    "sort_by": "created_at",
+                    "sort_order": "asc",
+                    "format": "json"
+                }),
+            )
+            .unwrap();
+
+            let tasks = result["tasks"].as_array().unwrap();
+            for t in tasks {
+                all_ids.push(t["id"].as_str().unwrap().to_string());
+            }
+
+            let has_more = result["has_more"].as_bool().unwrap();
+            if !has_more {
+                break;
+            }
+            current_offset += 2;
+        }
+
+        // Should have collected all 5 tasks in order
+        assert_eq!(all_ids.len(), 5);
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(&all_ids[i], id);
+        }
+    }
+
+    #[test]
+    fn list_tasks_tool_no_limit_returns_all_with_has_more_false() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 5);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // No limit => all tasks returned, has_more is false
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 5);
+        assert_eq!(result["has_more"], json!(false));
+        assert_eq!(result["limit"], json!(null));
+    }
+
+    #[test]
+    fn list_tasks_tool_has_more_with_offset_in_middle() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let ids = create_n_tasks(&db, 10);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // offset=3, limit=4 with 10 tasks => 7 remaining, return 4, has_more=true
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "limit": 4,
+                "offset": 3,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 4);
+        assert_eq!(tasks[0]["id"].as_str().unwrap(), ids[3]);
+        assert_eq!(tasks[3]["id"].as_str().unwrap(), ids[6]);
+        assert_eq!(result["has_more"], json!(true));
+    }
+
+    /// Test that the tool-level list_tasks correctly reports next_offset in markdown mode.
+    #[test]
+    fn list_tasks_tool_markdown_shows_more_results_hint() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 5);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Request limit=2 from 5 total tasks in markdown format
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Markdown,
+            json!({
+                "limit": 2,
+                "offset": 0,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "markdown"
+            }),
+        )
+        .unwrap();
+
+        // Markdown result is wrapped in json as {"format": "markdown", "content": "..."}
+        let text = result["content"].as_str().unwrap_or("");
+        assert!(
+            text.contains("offset=2"),
+            "Markdown output should hint at next offset, got: {}",
+            text
+        );
     }
 
     /// Test that the tool-level create function properly handles needed_tags and wanted_tags.

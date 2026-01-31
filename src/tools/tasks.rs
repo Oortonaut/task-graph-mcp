@@ -745,7 +745,7 @@ pub fn list_tasks(
     }
 
     // Detect has_more using N+1 pattern, then truncate to actual limit
-    let has_more = limit.map_or(false, |l| tasks.len() > l as usize);
+    let has_more = limit.is_some_and(|l| tasks.len() > l as usize);
     if let Some(l) = limit {
         tasks.truncate(l as usize);
     }

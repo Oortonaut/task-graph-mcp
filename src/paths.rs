@@ -471,7 +471,7 @@ mod tests {
         let mapper = PathMapper::new().unwrap();
         let result = mapper.normalize("src/main.rs").unwrap();
         assert!(result.contains("src/main.rs"));
-        assert!(result.starts_with(&*mapper.root()));
+        assert!(result.starts_with(mapper.root()));
     }
 
     #[test]
@@ -576,8 +576,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_windows_drive_mapping() {
-        let mut config = PathsConfig::default();
-        config.map_windows_drives = true;
+        let config = PathsConfig {
+            map_windows_drives: true,
+            ..Default::default()
+        };
 
         let mapper = PathMapper::from_config(&config, None).unwrap();
         // Note: This test would need a valid Windows path within the sandbox

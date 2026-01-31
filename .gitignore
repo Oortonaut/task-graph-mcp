@@ -8,3 +8,4 @@ nul
 *.db-shm
 *.db-wal
 *.log
+.mcpregistry_*

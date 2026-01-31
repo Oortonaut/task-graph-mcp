@@ -56,13 +56,35 @@ cargo publish
      - macOS ARM (aarch64)
      - Windows x86_64
 
+### Publish to MCP Registry
+
+The release workflow automatically builds MCPB bundles and attaches them to the GitHub release along with a generated `server.json` containing SHA-256 hashes.
+
+To publish to the MCP registry after the GitHub release completes:
+
+1. Download the `server.json` from the GitHub release page.
+2. Authenticate (first time only):
+   ```bash
+   mcp-publisher login github
+   ```
+3. Publish:
+   ```bash
+   mcp-publisher publish
+   ```
+
+The `server.json` in the repo root is a template with placeholder hashes. The CI-generated version in each GitHub release contains the real hashes.
+
 ### Post-Release Verification
 
 1. Verify crates.io install:
    ```bash
    cargo install task-graph-mcp
    ```
-2. Check the GitHub release page — binaries present, release notes correct.
+2. Check the GitHub release page — binaries, MCPB bundles, and release notes correct.
+3. Verify MCP registry listing:
+   ```
+   https://registry.modelcontextprotocol.io/servers/io.github.Oortonaut/task-graph-mcp
+   ```
 
 ## Changelog Process
 

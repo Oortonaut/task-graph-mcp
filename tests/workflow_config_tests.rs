@@ -832,8 +832,10 @@ mod named_workflows_cache_tests {
 
     #[test]
     fn default_workflow_key_with_missing_workflow_returns_none() {
-        let mut base = task_graph_mcp::config::workflows::WorkflowsConfig::default();
-        base.default_workflow_key = Some("nonexistent".to_string());
+        let base = task_graph_mcp::config::workflows::WorkflowsConfig {
+            default_workflow_key: Some("nonexistent".to_string()),
+            ..Default::default()
+        };
 
         // Key is set but workflow doesn't exist in cache
         assert!(base.get_default_workflow().is_none());

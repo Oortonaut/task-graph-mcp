@@ -20,15 +20,19 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
+            binary: task-graph-mcp
           - target: x86_64-apple-darwin
             os: macos-latest
             archive: tar.gz
+            binary: task-graph-mcp
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
+            binary: task-graph-mcp
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
+            binary: task-graph-mcp.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -55,11 +59,109 @@ jobs:
           7z a ../../../task-graph-mcp-${{ matrix.target }}.zip task-graph-mcp.exe
           cd ../../..
 
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create MCPB bundle
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          BINARY="${{ matrix.binary }}"
+
+          mkdir -p mcpb-staging
+          cp "target/${TARGET}/release/${BINARY}" mcpb-staging/
+
+          cat > mcpb-staging/manifest.json << EOF
+          {
+            "manifest_version": "0.3",
+            "name": "task-graph-mcp",
+            "version": "${VERSION}",
+            "description": "MCP server for agent task workflows with phases, prompts, gates, and multi-agent coordination",
+            "author": {
+              "name": "Oortonaut",
+              "url": "https://github.com/Oortonaut"
+            },
+            "license": "Apache-2.0",
+            "repository": "https://github.com/Oortonaut/task-graph-mcp",
+            "server": {
+              "type": "binary",
+              "entry_point": "${BINARY}",
+              "mcp_config": {
+                "command": "${BINARY}",
+                "args": [],
+                "env": {}
+              }
+            },
+            "tools": [
+              {"name": "connect", "description": "Register agent and join workflow"},
+              {"name": "create", "description": "Create a new task"},
+              {"name": "create_tree", "description": "Create a task hierarchy from YAML"},
+              {"name": "update", "description": "Update task state, description, or dependencies"},
+              {"name": "get", "description": "Get full task details"},
+              {"name": "list_tasks", "description": "List and filter tasks"},
+              {"name": "delete", "description": "Delete a task"},
+              {"name": "rename", "description": "Rename a task ID"},
+              {"name": "claim", "description": "Claim a ready task"},
+              {"name": "scan", "description": "Get task tree with agent context"},
+              {"name": "thinking", "description": "Record agent reasoning"},
+              {"name": "query", "description": "Run read-only SQL queries"},
+              {"name": "link", "description": "Add dependency between tasks"},
+              {"name": "unlink", "description": "Remove dependency between tasks"},
+              {"name": "mark_file", "description": "Lock a file for an agent"},
+              {"name": "unmark_file", "description": "Release a file lock"},
+              {"name": "list_marks", "description": "List active file locks"},
+              {"name": "check_gates", "description": "Evaluate workflow gate conditions"},
+              {"name": "list_workflows", "description": "List available workflows"},
+              {"name": "add_overlay", "description": "Add a dynamic workflow overlay"},
+              {"name": "remove_overlay", "description": "Remove a workflow overlay"},
+              {"name": "give_feedback", "description": "Record inter-agent feedback"},
+              {"name": "list_feedback", "description": "List recorded agent feedback"},
+              {"name": "list_skills", "description": "List available bundled skills"},
+              {"name": "get_skill", "description": "Get bundled skill content"},
+              {"name": "cleanup_stale", "description": "Evict stale workers"}
+            ],
+            "keywords": ["mcp", "agent-workflow", "multi-agent", "task-management", "coordination"]
+          }
+          EOF
+
+          cd mcpb-staging
+          if command -v zip &> /dev/null; then
+            zip -r "../task-graph-mcp-${TARGET}.mcpb" .
+          elif command -v 7z &> /dev/null; then
+            7z a -tzip "../task-graph-mcp-${TARGET}.mcpb" .
+          else
+            echo "No zip tool available" && exit 1
+          fi
+          cd ..
+
+          # Compute SHA-256
+          if command -v sha256sum &> /dev/null; then
+            SHA=$(sha256sum "task-graph-mcp-${TARGET}.mcpb" | awk '{print $1}')
+          elif command -v shasum &> /dev/null; then
+            SHA=$(shasum -a 256 "task-graph-mcp-${TARGET}.mcpb" | awk '{print $1}')
+          else
+            SHA=$(openssl dgst -sha256 "task-graph-mcp-${TARGET}.mcpb" | awk '{print $NF}')
+          fi
+          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "${TARGET}=${SHA}" > "mcpb-sha256-${TARGET}.txt"
+        id: mcpb
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: task-graph-mcp-${{ matrix.target }}
-          path: task-graph-mcp-${{ matrix.target }}.${{ matrix.archive }}
+          path: |
+            task-graph-mcp-${{ matrix.target }}.${{ matrix.archive }}
+            task-graph-mcp-${{ matrix.target }}.mcpb
+            mcpb-sha256-${{ matrix.target }}.txt
 
   release:
     name: Create Release
@@ -68,6 +170,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -77,11 +180,89 @@ jobs:
         with:
           path: artifacts
 
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate server.json with SHA-256 hashes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Read SHA-256 hashes
+          SHA_LINUX=$(cat artifacts/task-graph-mcp-x86_64-unknown-linux-gnu/mcpb-sha256-x86_64-unknown-linux-gnu.txt | cut -d= -f2)
+          SHA_MACOS_X86=$(cat artifacts/task-graph-mcp-x86_64-apple-darwin/mcpb-sha256-x86_64-apple-darwin.txt | cut -d= -f2)
+          SHA_MACOS_ARM=$(cat artifacts/task-graph-mcp-aarch64-apple-darwin/mcpb-sha256-aarch64-apple-darwin.txt | cut -d= -f2)
+          SHA_WINDOWS=$(cat artifacts/task-graph-mcp-x86_64-pc-windows-msvc/mcpb-sha256-x86_64-pc-windows-msvc.txt | cut -d= -f2)
+
+          cat > server.json << EOF
+          {
+            "\$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+            "name": "io.github.Oortonaut/task-graph-mcp",
+            "description": "MCP server for agent task workflows with phases, prompts, gates, and multi-agent coordination",
+            "version": "${VERSION}",
+            "repository": {
+              "url": "https://github.com/Oortonaut/task-graph-mcp",
+              "source": "github"
+            },
+            "packages": [
+              {
+                "registryType": "mcpb",
+                "identifier": "https://github.com/Oortonaut/task-graph-mcp/releases/download/v${VERSION}/task-graph-mcp-x86_64-unknown-linux-gnu.mcpb",
+                "version": "${VERSION}",
+                "fileSha256": "${SHA_LINUX}",
+                "transport": { "type": "stdio" }
+              },
+              {
+                "registryType": "mcpb",
+                "identifier": "https://github.com/Oortonaut/task-graph-mcp/releases/download/v${VERSION}/task-graph-mcp-x86_64-apple-darwin.mcpb",
+                "version": "${VERSION}",
+                "fileSha256": "${SHA_MACOS_X86}",
+                "transport": { "type": "stdio" }
+              },
+              {
+                "registryType": "mcpb",
+                "identifier": "https://github.com/Oortonaut/task-graph-mcp/releases/download/v${VERSION}/task-graph-mcp-aarch64-apple-darwin.mcpb",
+                "version": "${VERSION}",
+                "fileSha256": "${SHA_MACOS_ARM}",
+                "transport": { "type": "stdio" }
+              },
+              {
+                "registryType": "mcpb",
+                "identifier": "https://github.com/Oortonaut/task-graph-mcp/releases/download/v${VERSION}/task-graph-mcp-x86_64-pc-windows-msvc.mcpb",
+                "version": "${VERSION}",
+                "fileSha256": "${SHA_WINDOWS}",
+                "transport": { "type": "stdio" }
+              }
+            ]
+          }
+          EOF
+
+          echo "Generated server.json:"
+          cat server.json
+
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
         with:
           draft: false
           files: |
-            artifacts/**/*
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            artifacts/**/*.mcpb
+            server.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL https://registry.modelcontextprotocol.io/publisher/install.sh | sh || true
+          which mcp-publisher || echo "mcp-publisher not available, skipping registry publish"
+
+      - name: Publish to MCP Registry
+        if: success()
+        run: |
+          if command -v mcp-publisher &> /dev/null; then
+            mcp-publisher login github-oidc
+            mcp-publisher publish
+          else
+            echo "::warning::mcp-publisher not installed. Publish server.json manually after release."
+          fi

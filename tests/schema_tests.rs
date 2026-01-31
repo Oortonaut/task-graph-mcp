@@ -18,7 +18,7 @@ fn get_schema_returns_all_tables() {
 
     // Should have multiple tables
     assert!(
-        schema.tables.len() > 0,
+        !schema.tables.is_empty(),
         "Schema should have at least one table"
     );
 
@@ -29,7 +29,7 @@ fn get_schema_returns_all_tables() {
     // tasks table should have columns
     let tasks_table = tasks_table.unwrap();
     assert!(
-        tasks_table.columns.len() > 0,
+        !tasks_table.columns.is_empty(),
         "tasks table should have columns"
     );
 
@@ -86,7 +86,7 @@ fn get_schema_includes_foreign_keys() {
     let deps_table = deps_table.unwrap();
     // Dependencies table should have foreign keys to tasks
     assert!(
-        deps_table.foreign_keys.len() > 0,
+        !deps_table.foreign_keys.is_empty(),
         "dependencies table should have foreign keys"
     );
 }
@@ -126,7 +126,7 @@ fn get_table_names_returns_only_names() {
     let names = db.get_table_names().expect("Failed to get table names");
 
     // Should have multiple tables
-    assert!(names.len() > 0, "Should have at least one table name");
+    assert!(!names.is_empty(), "Should have at least one table name");
 
     // Should include expected tables
     assert!(

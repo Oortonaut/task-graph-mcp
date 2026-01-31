@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.3.0] - 2026-01-31
+
+### Added
+
+- **Agent feedback tools**: `give_feedback` and `list_feedback` for inter-agent communication during workflows
+- **Dynamic overlay management**: `add_overlay` and `remove_overlay` tools for runtime workflow customization
+- **Worker overlays**: Agents can request overlays on `connect` for role-specific workflow behavior
+- **Troubleshooting overlay**: Pre-built overlay for debugging agent issues (`overlay-troubleshooting.yaml`)
+- **Git overlay**: Pre-built overlay for git-aware workflows (`overlay-git.yaml`)
+- **Offset pagination**: `offset` parameter for `list_tasks` with `has_more` metadata
+- **Skill frontmatter parsing**: Skill index listings now include `description` from SKILL.md frontmatter
+- **Kanban workflow**: New `workflow-kanban.yaml` topology for board-style task management
+- **Sprint workflow**: New `workflow-sprint.yaml` topology for time-boxed iteration planning
+- **MCP registry publishing**: MCPB bundle generation and `server.json` in release workflow
+- **Browser project template**: Template for coordination experiments
+- **Experiment and design documentation**: Distributed swarm, authorization, database backends, experiment framework
+
+### Changed
+
+- Basics skill rewritten to v2.0.0 with unified coordinator/worker guidance
+- Workflow role sections expanded across all topologies (solo, swarm, relay, hierarchical, push)
+- Agent feedback enabled in default project config
+- Overlay file changes detected by config watcher and hot-reloaded
+
+### Removed
+
+- `task-graph-coordinator` skill (merged into basics v2.0.0)
+- `task-graph-worker` skill (merged into basics v2.0.0)
+
+### Fixed
+
+- Flaky child ordering test (deterministic rowid tiebreaker)
+- Release notes preservation in CI workflow
+- Clippy warnings: `map_or` → `is_some_and`, `len() > 0` → `!is_empty()`, field reassignment, unnecessary deref
+
 ## [0.2.2] - 2026-01-29
 
 ### Added
