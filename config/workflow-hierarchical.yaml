@@ -69,15 +69,33 @@ states:
     timed: false
     prompts:
       enter: |
-        Task failed. Document: what was attempted, what blocked, suggested next steps.
+        Task failed. **Recovery procedure:**
+
+        1. **Preserve work:** `attach(type="error", content="...")` with what was attempted and what blocked
+        2. **Clean up resources:**
+           - `unmark_file()` all held files -- dangling marks block other workers
+           - Release any held locks: `update(task="_lock:git-commit", status="pending")` if you hold the git lock
+        3. **Classify the failure:**
+           - *Transient* (network, timeout, flaky test): set back to `pending` for retry
+           - *Dependency blocked*: `link(type="blocks", from="blocking-task")` and document in error attachment
+           - *Needs human decision*: move to `consult` instead with clear question
+           - *Permanent* (wrong approach, impossible constraint): stay `failed`, document why
+        4. **Notify lead:** `thinking(thought="FAILED: <one-line reason>")` so lead can reassign or decompose differently
+        5. **Suggest next steps:** attach concrete recommendations (retry, reassign, decompose smaller, escalate)
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
       enter: |
-        **Paused for human review.** Attach a note explaining what decision is needed.
-        A human (or lead) must transition this back to `working` or `pending`.
+        **Paused for human review.** Before pausing:
+        1. `unmark_file()` all held files -- you may be paused for a long time
+        2. Release any locks: `update(task="_lock:git-commit", status="pending")` if held
+        3. `attach(type="note", content="...")` explaining:
+           - What specific decision or input is needed
+           - What options you see and their trade-offs
+           - What you have completed so far
+        4. A human (or lead) must transition this back to `working` or `pending`
 
   cancelled:
     exits: []
@@ -184,6 +202,18 @@ combos:
   working+security:
     enter: "Security: input validation, auth, secrets, deps. Attach findings. Escalate critical."
 
+  failed+implement:
+    enter: |
+      Implementation failed. Before leaving:
+      - `unmark_file()` all held files and release git lock if held
+      - `attach(type="error")` with: files modified, tests that failed, build errors
+      - If partially committed: attach the commit hash so the next worker can continue or revert
+
+  failed+test:
+    enter: |
+      Testing failed. Attach: which tests failed, repro commands, whether this is a test bug or code bug.
+      If flaky: note the flaky test so the next attempt can distinguish real failures.
+
   assigned+implement:
     enter: "Implementation assigned. Read task description and attached context before claiming."
 
@@ -208,6 +238,16 @@ role_prompts:
       Monitor: `list_agents()` for active workers, `list_tasks(status="working")` for active work.
       Watch for long-running tasks, overloaded workers, blocked deps.
       Reassign: `update(task="id", assignee="other-worker", force=true)`.
+
+    failure_handling: |
+      **When a worker task fails:**
+      1. Read the error attachment to understand the failure class
+      2. *Transient failure*: `update(task="id", status="pending")` to re-queue for retry (same or different worker)
+      3. *Dependency failure*: check `list_tasks(status="failed")` for cascading failures; fix root cause first
+      4. *Scope issue*: decompose the failed task into smaller subtasks via `create_tree()`
+      5. *Repeated failure* (same task failed 2+ times): escalate to `consult` with summary of all attempts
+      6. **Cascading failure check:** when a task fails, `list_tasks(parent="<parent-id>")` to check
+         if sibling tasks should be paused (`update(status="pending")`) to avoid wasted work
 
   worker:
     claiming: |

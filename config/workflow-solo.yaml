@@ -47,13 +47,34 @@ states:
     exits: [pending]
     timed: false
     prompts:
-      enter: "Blocked. Document: attempted, blocker, resources needed. Set `pending` to retry."
+      enter: |
+        Blocked. **Recovery procedure:**
+
+        1. **Preserve progress:** `attach(type="error", content="...")` with what was attempted and what blocked
+        2. **Clean up resources:**
+           - `unmark_file()` all held files so they are available on retry
+           - Release any held locks: `update(task="_lock:git-commit", status="pending")` if applicable
+        3. **Classify and decide:**
+           - *Transient* (build flake, network issue): set back to `pending` and retry immediately
+           - *Missing info*: move to `consult` with a specific question for the human
+           - *Wrong approach*: stay `failed`, attach what you learned, create a new task with revised approach
+           - *Dependency*: `link(type="blocks", from="blocking-task")` and note what must resolve first
+        4. **Context for future self:** attach enough detail that you (or another session) can resume
+           without re-reading the entire codebase -- include file paths, function names, partial progress
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: "**Paused for human review.** Attach note explaining decision or review needed."
+      enter: |
+        **Paused for human review.** Before pausing:
+        1. `unmark_file()` all held files so they are available if you resume in a new session
+        2. Release any locks: `update(task="_lock:git-commit", status="pending")` if held
+        3. `attach(type="note", content="...")` explaining:
+           - What specific decision or input is needed
+           - What you have completed so far and what remains
+           - Enough context to resume without re-reading everything
+        4. A human must transition this back to `working` or `pending`
 
   cancelled:
     exits: []
@@ -167,6 +188,19 @@ combos:
 
   working+deploy:
     enter: "Build, tag, ship. Monitor post-deploy. Note rollback plan."
+
+  failed+implement:
+    enter: |
+      Implementation failed. Before leaving:
+      - `unmark_file()` all held files
+      - `attach(type="error")` with: files modified, build/test errors, partial progress
+      - If partially committed: note the commit hash so you can resume or revert
+      - Attach enough context to resume in a new session without re-exploring
+
+  failed+deploy:
+    enter: |
+      Deployment failed. Document: what step failed, rollback status, whether partial deploy occurred.
+      If rolled back: note the rollback commit. If stuck: move to `consult` with specific recovery question.
 
   working+optimize:
     enter: "Measure baseline. One change at a time. Measure after. Keep only what helps."

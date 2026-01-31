@@ -1,0 +1,276 @@
+# KANBAN WORKFLOW - Continuous flow with WIP limits and visual board metaphor
+# Use for: steady-state maintenance, support queues, continuous delivery teams
+# Coordination: pull-based with WIP limits enforced via gates
+
+name: kanban
+description: Continuous flow board with WIP limits, pull-based task selection, and cycle-time tracking
+
+settings:
+  initial_state: backlog
+  disconnect_state: backlog
+  blocking_states: [backlog, todo, in_progress, review]
+  unknown_phase: warn
+
+# ---------------------------------------------------------------------------
+# States (columns on the kanban board)
+# ---------------------------------------------------------------------------
+states:
+  backlog:
+    exits: [todo, cancelled]
+    timed: false
+    prompts:
+      enter: >
+        Item is in the backlog. Groom before pulling to todo:
+        ensure description is clear, acceptance criteria defined, and size estimated.
+
+  todo:
+    exits: [in_progress, backlog, cancelled]
+    timed: false
+    prompts:
+      enter: >
+        Ready to be pulled. All prerequisites met, description is clear, and
+        acceptance criteria are defined. Pull when you have WIP capacity.
+
+  in_progress:
+    exits: [review, todo, blocked, cancelled]
+    timed: true
+    prompts:
+      enter: |
+        **Kanban: in progress.** Focus on finishing over starting.
+
+        - `thinking()` regularly for heartbeat + visibility
+        - `mark_file()` before editing; `list_marks()` first for conflicts
+        - Never revert unfamiliar changes: check `mark_updates()` / `list_marks()` first
+        - `mark_updates()` every 30-60s during long ops
+        - Stale workers (5+ min no heartbeat) get evicted
+        - **WIP limit**: finish or move to blocked before pulling new work
+        - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release via `update(task="_lock:git-commit", status="backlog")`
+
+        Transitions: {{valid_exits}}
+        Phase: {{current_phase}} | Valid: {{valid_phases}}
+
+      exit: "Unmark files, attach results, `log_metrics()`. Move to review or blocked."
+
+  review:
+    exits: [done, in_progress, todo]
+    timed: true
+    prompts:
+      enter: |
+        **Review column.** Verify acceptance criteria, test coverage, code quality.
+        - Approve -> done
+        - Request changes -> in_progress (same assignee fixes)
+        - Reject -> todo (back to ready pool)
+
+      exit: "Attach review verdict. Approve, request changes, or reject with rationale."
+
+  blocked:
+    exits: [in_progress, todo, backlog, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        **Blocked.** Document the blocker clearly:
+        - What is blocking this item?
+        - Who or what can unblock it?
+        - `link(type="blocks")` to the blocking task if applicable
+        Moving here frees your WIP slot -- pull another item if capacity allows.
+
+  done:
+    exits: [backlog]
+    timed: false
+    prompts:
+      enter: "Item complete. Acceptance criteria met, review passed, results attached."
+
+  cancelled:
+    exits: []
+    timed: false
+
+# ---------------------------------------------------------------------------
+# Phases (type of work within any column)
+# ---------------------------------------------------------------------------
+phases:
+  triage:
+    prompts:
+      enter: "**Triage.** Classify, size, set priority. Ensure description and acceptance criteria are clear."
+      exit: "Tags/priority set, description has acceptance criteria, ready to pull."
+
+  explore:
+    prompts:
+      enter: "**Explore.** Investigate unknowns, read code/docs, identify constraints. Time-box."
+      exit: "Attach findings. Create follow-up items for unknowns discovered."
+
+  design:
+    prompts:
+      enter: "**Design.** Outline approach, consider alternatives, identify risks."
+      exit: "Design note attached, approach decided."
+
+  plan:
+    prompts:
+      enter: "**Plan.** Break down if too large for a single WIP slot. Create child items."
+      exit: "Subtasks created if needed, estimates set."
+
+  implement:
+    prompts:
+      enter: "**Implement.** `mark_file()` first. Follow patterns. Tests alongside code. Small commits."
+      exit: "Compiles, tests pass, commit attached."
+
+  test:
+    prompts:
+      enter: "**Test.** Run existing tests, add new ones, cover edge cases and error paths."
+      exit: "Test results attached, all passing."
+
+  review:
+    prompts:
+      enter: "**Review.** Check correctness, test coverage, edge cases, docs."
+      exit: "Findings documented, approval or rejection clear."
+
+  doc:
+    prompts:
+      enter: "**Document.** Update docs to match implementation."
+      exit: "Doc changes committed."
+
+  security:
+    prompts:
+      enter: "**Security.** Input validation, auth/authz, no secrets in code, dependency audit."
+      exit: "Findings attached, critical issues flagged."
+
+  diagnose:
+    prompts:
+      enter: "**Diagnose.** Reproduce, narrow to root cause, document findings."
+      exit: "Root cause documented, fix approach outlined."
+
+  integrate:
+    prompts:
+      enter: "**Integrate.** Full test suite, check conflicts via `mark_updates()`."
+
+  deliver:
+    prompts:
+      enter: "**Deliver.** All tests green, version bumps and changelog if applicable."
+
+  deploy:
+    prompts:
+      enter: "**Deploy.** Release build, tag, monitor initial deployment."
+
+  monitor:
+    prompts:
+      enter: "**Monitor.** Watch for issues post-deploy. Time-box. Attach observations."
+
+  optimize:
+    prompts:
+      enter: "**Optimize.** Measure baseline, change one thing, re-measure. Keep only improvements."
+
+# ---------------------------------------------------------------------------
+# State+Phase combos
+# ---------------------------------------------------------------------------
+combos:
+  in_progress+implement:
+    enter: |
+      Implementing. `mark_file()` first. Finish this before pulling new work.
+      - **3+ files**: search ALL symbols first, mark_file() ALL, plan attachment before coding
+      - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release
+
+  in_progress+explore:
+    enter: "Exploring. Time-box strictly -- kanban values finishing over starting."
+
+  in_progress+test:
+    enter: "Testing alongside implementation. Attach results before moving to review."
+
+  in_progress+diagnose:
+    enter: "Diagnosing bug. Reproduce, narrow root cause, document. Fix in implement phase."
+
+  in_progress+design:
+    enter: "Designing approach. Keep it brief -- attach design note, then implement."
+
+  in_progress+security:
+    enter: "Security check. Input validation, auth, secrets, deps. Attach findings."
+
+  review+review:
+    enter: "Code review. Check against acceptance criteria. Approve, request changes, or reject."
+
+  todo+triage:
+    enter: "Triaging ready item. Verify size, priority, and acceptance criteria before pull."
+
+  backlog+triage:
+    enter: "Grooming backlog item. Clarify description, add acceptance criteria, estimate size."
+
+  backlog+plan:
+    enter: "Planning backlog item. Break down if too large. Create child items."
+
+# ---------------------------------------------------------------------------
+# Roles
+# ---------------------------------------------------------------------------
+roles:
+  kanban_agent:
+    description: Agent pulling and completing work items within WIP limits
+    tags: [worker, implementer, code, kanban]
+    max_claims: 2
+    can_assign: false
+    can_create_subtasks: true
+
+# ---------------------------------------------------------------------------
+# Role prompts
+# ---------------------------------------------------------------------------
+role_prompts:
+  kanban_agent:
+    pull_guidance: |
+      **Kanban pull discipline:**
+      1. Check your current WIP -- only pull if under limit
+      2. `list_tasks(ready=true)` to see the todo column
+      3. Pull highest priority item: `claim(task="id")`
+      4. **Finish before starting.** Move to review or blocked before pulling again.
+      5. Blocked items free your WIP slot.
+
+    wip_discipline: |
+      **WIP limits are the core kanban mechanism.**
+      - Finishing > starting. Always.
+      - If at WIP limit, help unblock others or review existing items.
+      - Never hoard items. One active, one in review at most.
+
+    cycle_time: |
+      **Track cycle time** (todo -> done) to identify bottlenecks.
+      - `log_metrics()` on completion with time data
+      - Long cycle times? Item was too large -- decompose next time.
+      - Blocked time is waste -- minimize by clarifying requirements upfront.
+
+# ---------------------------------------------------------------------------
+# Gates (WIP limits and quality checks)
+# ---------------------------------------------------------------------------
+gates:
+  status:in_progress:
+    - type: "gate/wip-limit"
+      enforcement: warn
+      description: "Check WIP limit before pulling. Finish existing work first."
+    - type: "gate/acceptance-criteria"
+      enforcement: warn
+      description: "Item should have clear acceptance criteria before starting"
+
+  status:review:
+    - type: "gate/tests"
+      enforcement: warn
+      description: "Tests should pass before moving to review"
+    - type: "gate/commit"
+      enforcement: warn
+      description: "Changes should be committed before review"
+
+  status:done:
+    - type: "gate/review-approval"
+      enforcement: warn
+      description: "Review should approve before marking done"
+    - type: "gate/acceptance-criteria-met"
+      enforcement: warn
+      description: "All acceptance criteria should be verified"
+
+# ---------------------------------------------------------------------------
+# Attachment types
+# ---------------------------------------------------------------------------
+attachments:
+  recommended:
+    result: Completion data with cycle-time metrics (JSON)
+    note: Context, decisions, observations (appends)
+    error: Blockers or failures (appends)
+    commit: Git hash (appends)
+  quality:
+    review: Review verdict and findings (replaces)
+    output: Test or command output (appends)
+  metadata:
+    meta: Cycle-time and throughput metrics (JSON, replaces)
+    context: Resume state for handoffs (replaces)

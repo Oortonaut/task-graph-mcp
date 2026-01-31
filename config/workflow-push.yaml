@@ -90,16 +90,35 @@ states:
     timed: false
     prompts:
       enter: |
-        Task failed. Document: what was attempted, what blocked, suggested next steps.
-        The coordinator will decide whether to reassign or cancel.
+        Task failed. **Recovery procedure (push-model):**
+
+        1. **Preserve work:** `attach(type="error", content="...")` with what was attempted and what blocked
+        2. **Clean up resources:**
+           - `unmark_file()` all held files -- coordinator may reassign to another worker
+           - Release any held locks: `update(task="_lock:git-commit", status="pending")` if you hold the git lock
+        3. **Classify for coordinator:**
+           - *Transient* (flaky test, timeout): note "retryable" in error attachment
+           - *Dependency blocked*: `link(type="blocks", from="blocking-task")` and note the dependency
+           - *Needs decomposition*: suggest how coordinator should split the task
+           - *Needs human decision*: recommend coordinator move to `consult`
+        4. **Wait for coordinator:** do NOT self-select the next task. The coordinator will read your
+           error attachment and decide whether to reassign, decompose, or cancel.
+        5. **Signal visibility:** `thinking(thought="FAILED: <one-line reason>")` so coordinator sees it promptly
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: >
-        **Paused for coordinator review.** Attach a note explaining what decision
-        is needed. The coordinator (or a human) must transition this back.
+      enter: |
+        **Paused for coordinator review.** Before pausing:
+        1. `unmark_file()` all held files -- coordinator may reassign the work
+        2. Release any locks: `update(task="_lock:git-commit", status="pending")` if held
+        3. `attach(type="note", content="...")` explaining:
+           - What specific decision or input is needed
+           - What you have completed so far
+           - Whether partial work should be preserved or reverted
+        4. `thinking(thought="CONSULT: <one-line reason>")` so coordinator sees it promptly
+        5. **Wait for coordinator** -- do NOT self-select other tasks while consulting
 
   cancelled:
     exits: []
@@ -222,6 +241,14 @@ combos:
   assigned+explore:
     enter: "Exploration assigned by coordinator. Read scope constraints before claiming."
 
+  failed+implement:
+    enter: |
+      Implementation failed. Before leaving:
+      - `unmark_file()` all held files and release git lock if held
+      - `attach(type="error")` with: files modified, tests that failed, build errors
+      - If partially committed: attach the commit hash so coordinator can assess
+      - Signal: `thinking(thought="FAILED impl: <reason>")` for coordinator visibility
+
 # ---------------------------------------------------------------------------
 # Role-specific prompts
 # ---------------------------------------------------------------------------
@@ -255,6 +282,16 @@ role_prompts:
       Monitor: `list_agents()` for workers, `list_tasks(status="working")` for progress.
       Watch for: stuck workers (no heartbeat), overloaded workers, dependency bottlenecks.
       Reassign: `update(task="id", assignee="other-worker", force=true)`.
+
+    failure_handling: |
+      **When a worker task fails:**
+      1. Read the error attachment to understand the failure class
+      2. *Retryable failure*: `update(task="id", status="pending")` then reassign to same or different worker
+      3. *Dependency failure*: check `list_tasks(status="failed")` for cascading failures; fix root cause first
+      4. *Scope issue*: decompose the failed task into smaller subtasks, assign individually
+      5. *Repeated failure* (same task failed 2+ times): move to `consult` with summary of all attempts
+      6. **Stale worker recovery:** if a worker goes silent (no heartbeat 5+ min), it gets evicted automatically;
+         verify its tasks returned to `pending`, clean up any dangling file marks via `list_marks()`
 
   worker:
     passive_wait: |

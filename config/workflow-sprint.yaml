@@ -1,0 +1,404 @@
+# SPRINT WORKFLOW - Time-boxed iterations with planning, execution, and review cycles
+# Use for: teams working in fixed-length sprints, velocity tracking, iterative delivery
+# Coordination: planned work pulled during sprint, unplanned work goes to backlog
+
+name: sprint
+description: Time-boxed sprint iterations with planning, execution, review, and velocity tracking
+
+settings:
+  initial_state: backlog
+  disconnect_state: backlog
+  blocking_states: [backlog, planned, active, review]
+  unknown_phase: warn
+
+# ---------------------------------------------------------------------------
+# States (sprint lifecycle)
+# ---------------------------------------------------------------------------
+states:
+  backlog:
+    exits: [planned, cancelled]
+    timed: false
+    prompts:
+      enter: >
+        Item is in the product backlog. Refine before sprint planning:
+        clear description, acceptance criteria, story points estimated.
+        Items are pulled into a sprint during the planning phase.
+
+  planned:
+    exits: [active, backlog, cancelled]
+    timed: false
+    prompts:
+      enter: >
+        **Committed to current sprint.** This item was selected during sprint
+        planning and counts toward sprint velocity. Pull when ready to start,
+        respecting priority order.
+
+  active:
+    exits: [review, planned, blocked, cancelled]
+    timed: true
+    prompts:
+      enter: |
+        **Sprint: actively working.** Complete within the sprint timebox.
+
+        - `thinking()` regularly for heartbeat + visibility
+        - `mark_file()` before editing; `list_marks()` first for conflicts
+        - Never revert unfamiliar changes: check `mark_updates()` / `list_marks()` first
+        - `mark_updates()` every 30-60s during long ops
+        - Stale workers (5+ min no heartbeat) get evicted
+        - **Sprint focus**: finish committed items before picking up extras
+        - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release via `update(task="_lock:git-commit", status="backlog")`
+
+        Transitions: {{valid_exits}}
+        Phase: {{current_phase}} | Valid: {{valid_phases}}
+
+      exit: "Unmark files, attach results, `log_metrics()`. Move to review when ready."
+
+  review:
+    exits: [done, active, planned]
+    timed: true
+    prompts:
+      enter: |
+        **Sprint review.** Verify the item meets acceptance criteria and definition of done.
+        - Approve -> done (counts toward sprint velocity)
+        - Request changes -> active (fix within sprint if time allows)
+        - Defer -> planned (carries over to next sprint)
+
+      exit: "Attach review verdict. Accepted items count toward velocity."
+
+  blocked:
+    exits: [active, planned, backlog, cancelled]
+    timed: false
+    prompts:
+      enter: |
+        **Blocked.** Document the impediment clearly:
+        - What is blocking this item?
+        - Can it be resolved within the sprint?
+        - `link(type="blocks")` to blocking task if applicable
+        Flag at daily standup. Unresolved by sprint end -> carry over or return to backlog.
+
+  done:
+    exits: [backlog]
+    timed: false
+    prompts:
+      enter: >
+        Sprint item complete. Acceptance criteria met, review passed.
+        Points count toward sprint velocity. `log_metrics()` with points and time.
+
+  cancelled:
+    exits: []
+    timed: false
+
+# ---------------------------------------------------------------------------
+# Phases (sprint ceremonies and work types)
+# ---------------------------------------------------------------------------
+phases:
+  planning:
+    prompts:
+      enter: |
+        **Sprint planning.** Select items from backlog for this sprint:
+        - Review team velocity (previous sprint points completed)
+        - Pull highest-priority items that fit sprint capacity
+        - Break down large items into sprint-sized chunks
+        - Set `points` on each item for velocity tracking
+      exit: "Sprint backlog committed. Total points should match team velocity."
+
+  standup:
+    prompts:
+      enter: |
+        **Daily standup.** Quick status sync:
+        - What did you complete since last standup?
+        - What are you working on next?
+        - Any blockers or impediments?
+        Use `list_tasks(status="active")` and `list_tasks(status="blocked")`.
+      exit: "Blockers identified. Action items assigned."
+
+  explore:
+    prompts:
+      enter: "**Explore.** Investigate unknowns, read code/docs, identify constraints. Time-box within sprint."
+      exit: "Attach findings. Flag risks to sprint commitment."
+
+  design:
+    prompts:
+      enter: "**Design.** Outline approach within sprint scope. Keep it just enough to implement."
+      exit: "Design note attached. Ready for implementation."
+
+  implement:
+    prompts:
+      enter: "**Implement.** `mark_file()` first. Follow patterns. Tests alongside code. Sprint-sized commits."
+      exit: "Compiles, tests pass, commit attached."
+
+  test:
+    prompts:
+      enter: "**Test.** Run existing tests, add new ones, cover edge cases."
+      exit: "Test results attached, all passing."
+
+  review:
+    prompts:
+      enter: "**Review.** Check against acceptance criteria and definition of done."
+      exit: "Findings documented, approval or rejection clear."
+
+  retro:
+    prompts:
+      enter: |
+        **Sprint retrospective.** Reflect on the sprint:
+        - What went well? (keep doing)
+        - What could improve? (action items)
+        - Velocity: planned vs actual points completed
+        - Carry-over items and reasons
+      exit: "Action items documented. Improvements committed for next sprint."
+
+  plan:
+    prompts:
+      enter: "**Plan.** Break down sprint items into tasks. Set estimates and dependencies."
+      exit: "Tasks created, estimates set, dependencies linked."
+
+  triage:
+    prompts:
+      enter: "**Triage.** Classify incoming work. Sprint-ready items get pointed. Others go to backlog."
+      exit: "Items classified, pointed, and prioritized."
+
+  diagnose:
+    prompts:
+      enter: "**Diagnose.** Reproduce bug, narrow to root cause. Time-box within sprint."
+      exit: "Root cause documented, fix approach outlined."
+
+  security:
+    prompts:
+      enter: "**Security.** Input validation, auth/authz, no secrets, dependency audit."
+      exit: "Findings attached, critical issues flagged."
+
+  doc:
+    prompts:
+      enter: "**Document.** Update docs as part of definition of done."
+      exit: "Doc changes committed."
+
+  integrate:
+    prompts:
+      enter: "**Integrate.** Full test suite, check conflicts. Sprint items should integrate cleanly."
+
+  deliver:
+    prompts:
+      enter: "**Deliver.** Sprint increment ready for release. All items done, tests green."
+
+  deploy:
+    prompts:
+      enter: "**Deploy.** Release sprint increment. Tag with sprint number if applicable."
+
+  monitor:
+    prompts:
+      enter: "**Monitor.** Watch for issues from sprint deliverables. Attach observations."
+
+  optimize:
+    prompts:
+      enter: "**Optimize.** Measure baseline, change one thing, re-measure."
+
+# ---------------------------------------------------------------------------
+# State+Phase combos
+# ---------------------------------------------------------------------------
+combos:
+  backlog+triage:
+    enter: "Grooming backlog. Classify, point, add acceptance criteria. Sprint-ready items get refined."
+
+  backlog+planning:
+    enter: "Sprint planning: select from backlog based on priority and team velocity."
+
+  planned+planning:
+    enter: "Finalizing sprint commitment. Verify points, dependencies, and capacity."
+
+  active+implement:
+    enter: |
+      Implementing sprint item. Focus on completing within the sprint timebox.
+      - **3+ files**: search ALL symbols first, mark_file() ALL, plan attachment before coding
+      - **Git lock**: `claim(task="_lock:git-commit")` -> commit -> release
+
+  active+explore:
+    enter: "Exploring within sprint. Time-box strictly -- every hour counts in a sprint."
+
+  active+test:
+    enter: "Testing sprint item. Attach results before moving to review."
+
+  active+diagnose:
+    enter: "Diagnosing bug within sprint. Reproduce, narrow root cause, document. Fix in implement."
+
+  active+design:
+    enter: "Quick design within sprint scope. Just enough to implement. Attach design note."
+
+  active+security:
+    enter: "Security check on sprint item. Attach findings."
+
+  review+review:
+    enter: "Reviewing sprint item against acceptance criteria and definition of done."
+
+  done+retro:
+    enter: "Sprint retro. Review velocity, carry-overs, and improvements for next sprint."
+
+# ---------------------------------------------------------------------------
+# Roles
+# ---------------------------------------------------------------------------
+roles:
+  sprint_lead:
+    description: Facilitates sprint ceremonies, manages sprint backlog, tracks velocity
+    tags: [lead, coordinator, scrum-master]
+    max_claims: 5
+    can_assign: true
+    can_create_subtasks: true
+
+  sprint_member:
+    description: Pulls and completes sprint items, participates in ceremonies
+    tags: [worker, implementer, code, sprint]
+    max_claims: 2
+    can_assign: false
+    can_create_subtasks: true
+
+# ---------------------------------------------------------------------------
+# Role prompts
+# ---------------------------------------------------------------------------
+role_prompts:
+  sprint_lead:
+    planning_guidance: |
+      **Sprint planning facilitation:**
+      1. Review previous sprint velocity: `project_history()` or `get_metrics()`
+      2. `list_tasks(status="backlog")` to see refined backlog
+      3. Select items by priority, up to team velocity capacity
+      4. Move selected items: `update(task="id", status="planned")`
+      5. Ensure each item has `points` set for velocity tracking
+
+    standup_guidance: |
+      **Daily standup facilitation:**
+      1. `list_tasks(status="active")` - who is working on what
+      2. `list_tasks(status="blocked")` - identify impediments
+      3. `list_agents()` - check worker availability
+      4. Resolve blockers or escalate. Reassign if needed.
+
+    velocity_tracking: |
+      **Velocity tracking:**
+      - Sprint velocity = sum of `points` on items that reached `done`
+      - Track sprint-over-sprint trend for planning accuracy
+      - `log_metrics()` at sprint end with velocity data
+      - Carry-over items signal over-commitment -- reduce next sprint scope
+
+    retro_guidance: |
+      **Sprint retrospective:**
+      1. Calculate: planned points vs completed points
+      2. Review carry-over items and blocked items
+      3. Identify process improvements
+      4. Document action items as backlog tasks
+
+  sprint_member:
+    pull_guidance: |
+      **Sprint pull discipline:**
+      1. `list_tasks(status="planned")` to see sprint backlog
+      2. Pull highest priority: `claim(task="id")`
+      3. Complete within sprint. Flag early if at risk.
+      4. Sprint commitments take priority over unplanned work.
+
+    completion_guidance: |
+      **Definition of done:**
+      1. Acceptance criteria met
+      2. Tests pass
+      3. Code reviewed
+      4. Docs updated (if applicable)
+      5. `attach(type="result", ...)` with work summary
+      6. `log_metrics(cost_usd=..., points=...)` for velocity
+
+    standup_update: |
+      **Standup update:**
+      - Report via `thinking()`: what you completed, what you're picking up next
+      - Flag blockers immediately -- don't wait for standup
+      - `update(status="blocked", reason="...")` for impediments
+
+# ---------------------------------------------------------------------------
+# Sprint-specific settings
+# ---------------------------------------------------------------------------
+sprint:
+  settings:
+    # Advisory: typical sprint length in days
+    sprint_length_days: 14
+    # Advisory: team velocity for planning (points per sprint)
+    velocity_guidance: "Use previous sprint's completed points as baseline"
+    # Carry-over policy
+    carry_over_policy: "Blocked items return to backlog. Partially done items re-estimate."
+
+  ceremonies:
+    planning: "Start of sprint: select backlog items, commit to sprint scope"
+    standup: "Daily: status sync, blocker identification"
+    review: "End of sprint: demonstrate completed items"
+    retro: "End of sprint: process improvement, velocity analysis"
+
+# ---------------------------------------------------------------------------
+# Gates (sprint quality and ceremony checks)
+# ---------------------------------------------------------------------------
+gates:
+  status:active:
+    - type: "gate/sprint-commitment"
+      enforcement: warn
+      description: "Item should be in planned status (committed to sprint) before starting"
+    - type: "gate/acceptance-criteria"
+      enforcement: warn
+      description: "Item should have clear acceptance criteria before starting"
+
+  status:review:
+    - type: "gate/tests"
+      enforcement: warn
+      description: "Tests should pass before sprint review"
+    - type: "gate/commit"
+      enforcement: warn
+      description: "Changes should be committed before review"
+
+  status:done:
+    - type: "gate/review-approval"
+      enforcement: warn
+      description: "Sprint review should approve before marking done"
+    - type: "gate/definition-of-done"
+      enforcement: warn
+      description: "All definition-of-done criteria should be met"
+
+# ---------------------------------------------------------------------------
+# Task tree templates
+# ---------------------------------------------------------------------------
+templates:
+  sprint_item:
+    description: Standard sprint work item with implementation subtasks
+    tree:
+      title: "{{item_name}}"
+      children:
+        - title: "Implement: {{item_name}}"
+          tags: [implement]
+        - title: "Test: {{item_name}}"
+          tags: [test]
+        - title: "Review: {{item_name}}"
+          tags: [review]
+    sibling_type: follows
+
+  bug_fix:
+    description: Bug fix within sprint
+    tree:
+      title: "Fix: {{bug_description}}"
+      children:
+        - title: "Diagnose: {{bug_description}}"
+          tags: [diagnose]
+        - title: "Fix: {{bug_description}}"
+          tags: [implement]
+        - title: "Verify: {{bug_description}}"
+          tags: [test]
+    sibling_type: follows
+
+# ---------------------------------------------------------------------------
+# Attachment types
+# ---------------------------------------------------------------------------
+attachments:
+  sprint_management:
+    plan: Sprint plan with committed items and capacity (markdown, replaces)
+    note: Sprint observations, standup updates (appends)
+    result: Sprint item completion data with points (JSON, replaces)
+  code_artifacts:
+    commit: Git commit hash (appends)
+    diff: Code changes for review (appends)
+    changelist: Files modified (appends)
+  velocity:
+    meta: Sprint metrics -- velocity, carry-over, burndown (JSON, replaces)
+    output: Test or build output (appends)
+  quality:
+    error: Blockers, failures, impediments (appends)
+    review: Review verdict and findings (replaces)
+    context: Carry-over context for next sprint (replaces)

@@ -94,13 +94,35 @@ states:
     exits: [pending]
     timed: false
     prompts:
-      enter: "Phase failed. Document: attempted, blocker, retry or escalate."
+      enter: |
+        Relay phase failed. **Recovery procedure:**
+
+        1. **Preserve work:** `attach(type="error", content="...")` with what was attempted and what blocked
+        2. **Clean up resources:**
+           - `unmark_file()` all held files -- dangling marks block downstream specialists
+           - Release any held locks: `update(task="_lock:git-commit", status="pending")` if you hold the git lock
+        3. **Classify and route:**
+           - *Spec unclear*: set back to `pending`, attach question -- coordinator routes back to designer
+           - *Implementation defect found in review*: set `pending`, attach rejection details for implementer retry
+           - *Test failure*: attach repro steps, set `pending` -- coordinator decides: fix-forward or rollback
+           - *Needs human decision*: move to `consult` instead with the specific question
+        4. **Relay chain impact:** document whether downstream phases should wait or proceed with partial results
+        5. **Handoff note:** even on failure, attach a note for the next specialist or coordinator explaining
+           what was completed, what remains, and recommended next step
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: "**Paused for human review.** Attach note explaining decision needed."
+      enter: |
+        **Paused for human review.** Before pausing:
+        1. `unmark_file()` all held files -- downstream specialists should not be blocked
+        2. Release any locks: `update(task="_lock:git-commit", status="pending")` if held
+        3. `attach(type="note", content="...")` explaining:
+           - What specific decision or input is needed
+           - Impact on downstream relay phases
+           - What you have completed so far and what remains
+        4. A human (or coordinator) must transition this back to `working` or `pending`
 
   cancelled:
     exits: []
@@ -217,6 +239,29 @@ combos:
 
   working+diagnose:
     enter: "Diagnosing: reproduce, narrow root cause, attach findings. Fix goes to implementer."
+
+  failed+design:
+    enter: |
+      Design phase failed. Attach what was explored and why the design is blocked.
+      Coordinator should route back to explore phase or bring in a different designer.
+
+  failed+implement:
+    enter: |
+      Implementation failed. Before leaving:
+      - `unmark_file()` all held files and release git lock if held
+      - `attach(type="error")` with: files modified, tests that failed, build errors
+      - If partially committed: attach the commit hash so reviewer can assess partial work
+      - Note whether the design spec was sufficient or needs revision
+
+  failed+review:
+    enter: |
+      Review rejected the implementation. Attach specific issues found.
+      Coordinator routes back to implementer with the rejection details.
+
+  failed+test:
+    enter: |
+      Testing failed. Attach: which tests failed, repro commands, whether this is a test bug or code bug.
+      Coordinator decides: route back to implementer for fix, or to reviewer for re-assessment.
 
 # Handoff protocol reference
 handoff_protocol:

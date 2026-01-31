@@ -52,13 +52,30 @@ states:
     exits: [pending]
     timed: false
     prompts:
-      enter: "Blocked. Document: attempted, blocker. `link(type=\"blocks\")` if dep issue."
+      enter: |
+        Blocked. **Recovery procedure (swarm-fast):**
+
+        1. **Clean up immediately:**
+           - `unmark_file()` ALL held files -- in swarm, dangling marks stall parallel agents
+           - Release git lock if held: `update(task="_lock:git-commit", status="pending")`
+        2. **Attach error:** `attach(type="error", content="<what failed and why>")`
+        3. **Route for retry:**
+           - *Transient*: `update(status="pending")` -- another agent will pick it up
+           - *Dependency*: `link(type="blocks", from="blocking-task")`, set `pending` -- it will become ready when unblocked
+           - *Needs decomposition*: create smaller subtasks, cancel the too-large original
+           - *Needs human*: `update(status="consult")` with clear question attached
+        4. **Move on:** `list_tasks(ready=true)` and claim the next task -- do not dwell on failures in swarm
 
   consult:
     exits: [working, pending, cancelled]
     timed: false
     prompts:
-      enter: "**Paused for human review.** Attach note explaining decision needed."
+      enter: |
+        **Paused for human review.** Before pausing:
+        1. `unmark_file()` ALL held files immediately -- in swarm, dangling marks stall parallel agents
+        2. Release any locks: `update(task="_lock:git-commit", status="pending")` if held
+        3. `attach(type="note", content="...")` explaining what decision is needed
+        4. Move on to another task -- do not wait idle for the answer
 
   cancelled:
     exits: []
@@ -154,6 +171,11 @@ combos:
 
   working+security:
     enter: "Quick security scan: input validation, no secrets, safe deps. Attach findings."
+
+  failed+implement:
+    enter: |
+      Implementation failed. `unmark_file()` ALL files immediately, release git lock if held.
+      Attach error with files modified and failure details. Set `pending` so another agent picks it up.
 
 # Swarm roles (all agents are generalists)
 roles:
