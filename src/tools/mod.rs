@@ -71,15 +71,46 @@ impl ToolHandler {
     /// Get the workflow config for a worker.
     /// Looks up the worker's workflow name and returns the corresponding config,
     /// or falls back to the configured default workflow, or the base config.
+    /// If the worker has overlays, applies them on top of the base workflow
+    /// and caches the merged result for reuse.
     pub fn get_workflow_for_worker(&self, worker_id: &str) -> Arc<WorkflowsConfig> {
-        // Look up worker's workflow name from database
-        if let Ok(Some(worker)) = self.db.get_worker(worker_id)
-            && let Some(ref workflow_name) = worker.workflow
-        {
-            // Try to get from named_workflows cache
-            if let Some(workflow_config) = self.config.workflows.get_named_workflow(workflow_name) {
-                return Arc::clone(workflow_config);
+        if let Ok(Some(worker)) = self.db.get_worker(worker_id) {
+            // Resolve the base workflow
+            let base = if let Some(ref workflow_name) = worker.workflow {
+                self.config
+                    .workflows
+                    .get_named_workflow(workflow_name)
+                    .map(Arc::clone)
+            } else {
+                None
             }
+            .or_else(|| self.config.workflows.get_default_workflow().map(Arc::clone))
+            .unwrap_or_else(|| Arc::clone(&self.config.workflows));
+
+            // If the worker has overlays, build a merged config
+            if !worker.overlays.is_empty() {
+                // Check cache first (composite key: "workflow+overlay1+overlay2")
+                let cache_key = format!(
+                    "{}+{}",
+                    worker.workflow.as_deref().unwrap_or("default"),
+                    worker.overlays.join("+")
+                );
+                if let Some(cached) = self.config.workflows.get_named_workflow(&cache_key) {
+                    return Arc::clone(cached);
+                }
+
+                // Build merged workflow by applying overlays in order
+                let mut merged = (*base).clone();
+                for name in &worker.overlays {
+                    if let Some(overlay) = self.config.workflows.named_overlays.get(name) {
+                        merged.apply_overlay(overlay);
+                    }
+                }
+                merged.active_overlays = worker.overlays.clone();
+                return Arc::new(merged);
+            }
+
+            return base;
         }
         // Fall back to configured default workflow, or base config
         if let Some(default_workflow) = self.config.workflows.get_default_workflow() {
@@ -154,14 +185,39 @@ impl ToolHandler {
         match name {
             // Worker tools
             "connect" => {
-                // Resolve workflow from args (worker isn't registered yet during connect)
-                let workflow = arguments
+                // Resolve base workflow from args (worker isn't registered yet during connect)
+                let base_workflow = arguments
                     .get("workflow")
                     .and_then(|v| v.as_str())
                     .and_then(|name| self.config.workflows.get_named_workflow(name))
                     .map(Arc::clone)
                     .or_else(|| self.config.workflows.get_default_workflow().map(Arc::clone))
                     .unwrap_or_else(|| Arc::clone(&self.config.workflows));
+
+                // Apply overlays if specified
+                let overlay_names: Vec<String> = arguments
+                    .get("overlays")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let workflow = if overlay_names.is_empty() {
+                    base_workflow
+                } else {
+                    let mut merged = (*base_workflow).clone();
+                    for name in &overlay_names {
+                        if let Some(overlay) = self.config.workflows.named_overlays.get(name) {
+                            merged.apply_overlay(overlay);
+                        }
+                    }
+                    merged.active_overlays = overlay_names;
+                    Arc::new(merged)
+                };
+
                 json(agents::connect(
                     agents::ConnectOptions {
                         db: &self.db,
@@ -184,6 +240,8 @@ impl ToolHandler {
                 &self.config.states,
                 arguments,
             )),
+            "add_overlay" => json(agents::add_overlay(&self.db, &self.config, arguments)),
+            "remove_overlay" => json(agents::remove_overlay(&self.db, &self.config, arguments)),
 
             // Task tools
             "create" => json(tasks::create(&self.db, &self.config, arguments)),

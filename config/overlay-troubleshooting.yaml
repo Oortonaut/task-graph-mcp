@@ -1,0 +1,39 @@
+name: troubleshooting
+description: "Diagnostic workflow overlay: structured debugging, root cause analysis, reproduction steps"
+
+states:
+  working:
+    prompts:
+      enter: "Before making changes, document the current symptoms and expected behavior."
+      exit: "Log what you tried and what the outcome was using thinking()."
+
+  diagnosing:
+    timed: true
+    exits: [working, failed, pending]
+    prompts:
+      enter: >
+        Entering diagnostic mode. Follow structured debugging:
+        1. Reproduce the issue reliably
+        2. Isolate the component (binary search the problem space)
+        3. Check logs, error messages, and stack traces
+        4. Form a hypothesis and test it
+        Use thinking() to record each step.
+      exit: >
+        Before leaving diagnostic mode, attach your findings:
+        - Root cause (confirmed or suspected)
+        - Reproduction steps
+        - What was ruled out
+
+  completed:
+    prompts:
+      enter: "Include in your completion notes: root cause, fix applied, and how to verify."
+
+  failed:
+    prompts:
+      enter: "Document: what was tried, what didn't work, remaining hypotheses, and suggested next steps."
+
+gates:
+  status:completed:
+    - type: gate/diagnosis
+      enforcement: warn
+      description: "Attach a diagnosis summary before completing a troubleshooting task."

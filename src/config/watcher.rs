@@ -282,8 +282,8 @@ fn classify_path(path: &Path, paths: &WatchPaths) -> Option<ConfigChangeEvent> {
 
     // Check if it's a YAML file
     if matches!(extension, Some("yaml") | Some("yml")) {
-        // Check if it's a workflow file
-        if file_name.starts_with("workflow") {
+        // Check if it's a workflow or overlay file
+        if file_name.starts_with("workflow") || file_name.starts_with("overlay") {
             return Some(ConfigChangeEvent::WorkflowYaml(path.to_path_buf()));
         }
         // Check if it's config.yaml or prompts.yaml
@@ -346,6 +346,17 @@ mod tests {
             &paths,
         );
         assert!(matches!(result, Some(ConfigChangeEvent::SkillsChanged(_))));
+    }
+
+    #[test]
+    fn test_classify_overlay_yaml() {
+        let paths = WatchPaths {
+            config_dir: Some(PathBuf::from("config")),
+            skills_dir: None,
+        };
+
+        let result = classify_path(&PathBuf::from("config/overlay-git.yaml"), &paths);
+        assert!(matches!(result, Some(ConfigChangeEvent::WorkflowYaml(_))));
     }
 
     #[test]

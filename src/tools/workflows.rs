@@ -38,8 +38,27 @@ pub fn list_workflows(workflows: &WorkflowsConfig) -> Result<Value> {
         a_name.cmp(b_name)
     });
 
+    // Collect overlays
+    let mut overlay_entries: Vec<Value> = workflows
+        .named_overlays
+        .iter()
+        .map(|(key, config)| {
+            json!({
+                "name": key,
+                "description": config.description.as_deref().unwrap_or(""),
+            })
+        })
+        .collect();
+
+    overlay_entries.sort_by(|a, b| {
+        let a_name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let b_name = b.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        a_name.cmp(b_name)
+    });
+
     Ok(json!({
         "count": entries.len(),
         "workflows": entries,
+        "overlays": overlay_entries,
     }))
 }

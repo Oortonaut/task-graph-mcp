@@ -569,6 +569,30 @@ fn load_workflows_with_cache(loader: &ConfigLoader) -> WorkflowsConfig {
         );
     }
 
+    // Load overlay configs (raw deltas, not merged with defaults)
+    let overlay_names = loader.list_overlays();
+    for name in overlay_names {
+        match loader.load_overlay_by_name(&name) {
+            Ok(config) => {
+                info!(
+                    "Loaded overlay '{}' for composable workflow extension",
+                    name
+                );
+                workflows.named_overlays.insert(name, Arc::new(config));
+            }
+            Err(e) => {
+                warn!("Failed to load overlay '{}': {}", name, e);
+            }
+        }
+    }
+
+    if !workflows.named_overlays.is_empty() {
+        info!(
+            "Overlay cache: {} named overlays available",
+            workflows.named_overlays.len()
+        );
+    }
+
     workflows
 }
 

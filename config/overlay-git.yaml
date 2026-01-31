@@ -1,0 +1,18 @@
+name: git
+description: "Git-aware transitions: branch creation, commit gates, PR guidance"
+
+states:
+  working:
+    prompts:
+      enter: "Create a feature branch for this task: git checkout -b task/{id}"
+      exit: "Ensure all changes are staged and committed before transitioning."
+
+  completed:
+    prompts:
+      enter: "Push your branch. Open a PR if applicable."
+
+gates:
+  status:completed:
+    - type: gate/commit
+      enforcement: warn
+      description: "Changes should be committed to a branch before completing."

@@ -57,6 +57,11 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "workflow": {
                     "type": "string",
                     "description": "Named workflow to use (e.g., 'swarm' for workflow-swarm.yaml). If not specified, uses default workflows.yaml."
+                },
+                "overlays": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Overlay names to apply on top of the workflow, in order (e.g., ['git', 'user-request']). Use list_workflows to see available overlays."
                 }
             }),
             vec![],
@@ -123,6 +128,38 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 }
             }),
             vec![],
+            prompts,
+        ),
+        make_tool_with_prompts(
+            "add_overlay",
+            "Dynamically add an overlay to a connected worker's active overlay stack. The overlay is applied on top of existing overlays and persisted.",
+            json!({
+                "worker_id": {
+                    "type": "string",
+                    "description": "The worker's ID"
+                },
+                "overlay": {
+                    "type": "string",
+                    "description": "Name of the overlay to add (e.g., 'git', 'troubleshooting'). Use list_workflows to see available overlays."
+                }
+            }),
+            vec!["worker_id", "overlay"],
+            prompts,
+        ),
+        make_tool_with_prompts(
+            "remove_overlay",
+            "Dynamically remove an overlay from a connected worker's active overlay stack. The change is persisted immediately.",
+            json!({
+                "worker_id": {
+                    "type": "string",
+                    "description": "The worker's ID"
+                },
+                "overlay": {
+                    "type": "string",
+                    "description": "Name of the overlay to remove (must be currently active on this worker)"
+                }
+            }),
+            vec!["worker_id", "overlay"],
             prompts,
         ),
     ]
@@ -281,6 +318,11 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
         response["workflow_description"] = json!(desc);
     }
 
+    // Include overlay information if overlays were applied
+    if !worker.overlays.is_empty() {
+        response["overlays"] = json!(worker.overlays);
+    }
+
     Ok(response)
 }
 
@@ -429,4 +471,164 @@ pub fn cleanup_stale(db: &Database, states_config: &StatesConfig, args: Value) -
         "files_released": summary.files_released,
         "final_status": summary.final_status
     }))
+}
+
+pub fn add_overlay(db: &Database, config: &AppConfig, args: Value) -> Result<Value> {
+    let worker_id =
+        get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
+    let overlay_name =
+        get_string(&args, "overlay").ok_or_else(|| ToolError::missing_field("overlay"))?;
+
+    // Validate overlay exists in named_overlays
+    if !config.workflows.named_overlays.contains_key(&overlay_name) {
+        let available: Vec<&String> = config.workflows.named_overlays.keys().collect();
+        return Err(ToolError::invalid_value(
+            "overlay",
+            &format!(
+                "unknown overlay '{}'. Available overlays: {:?}",
+                overlay_name, available
+            ),
+        )
+        .into());
+    }
+
+    // Get current worker
+    let worker = db
+        .get_worker(&worker_id)?
+        .ok_or_else(|| ToolError::agent_not_found(&worker_id))?;
+
+    // Check not already active
+    if worker.overlays.contains(&overlay_name) {
+        return Err(ToolError::invalid_value(
+            "overlay",
+            &format!(
+                "overlay '{}' is already active on worker '{}'",
+                overlay_name, worker_id
+            ),
+        )
+        .into());
+    }
+
+    // Build new overlays list (append)
+    let mut new_overlays = worker.overlays.clone();
+    new_overlays.push(overlay_name);
+
+    // Persist
+    let updated_worker = db.update_worker_overlays(&worker_id, new_overlays)?;
+
+    // Build merged workflow to compute diff
+    let base = resolve_base_workflow(&updated_worker, config);
+    let mut merged = (*base).clone();
+    for name in &updated_worker.overlays {
+        if let Some(overlay) = config.workflows.named_overlays.get(name) {
+            merged.apply_overlay(overlay);
+        }
+    }
+    merged.active_overlays = updated_worker.overlays.clone();
+
+    let overlay_diff = merged.compute_overlay_diff(&base);
+
+    let mut response = json!({
+        "success": true,
+        "worker_id": updated_worker.id,
+        "overlays": updated_worker.overlays,
+        "overlay_diff": overlay_diff,
+    });
+
+    // Include role info if applicable
+    if let Some(role_name) = merged.match_role(&updated_worker.tags) {
+        response["role"] = json!(role_name);
+        let prompts = merged.get_role_prompts(&role_name);
+        if !prompts.is_empty() {
+            response["role_prompts"] = json!(prompts);
+        }
+    }
+
+    Ok(response)
+}
+
+pub fn remove_overlay(db: &Database, config: &AppConfig, args: Value) -> Result<Value> {
+    let worker_id =
+        get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
+    let overlay_name =
+        get_string(&args, "overlay").ok_or_else(|| ToolError::missing_field("overlay"))?;
+
+    // Get current worker
+    let worker = db
+        .get_worker(&worker_id)?
+        .ok_or_else(|| ToolError::agent_not_found(&worker_id))?;
+
+    // Check overlay is currently active
+    if !worker.overlays.contains(&overlay_name) {
+        return Err(ToolError::invalid_value(
+            "overlay",
+            &format!(
+                "overlay '{}' is not active on worker '{}'. Active overlays: {:?}",
+                overlay_name, worker_id, worker.overlays
+            ),
+        )
+        .into());
+    }
+
+    // Build new overlays list (remove)
+    let new_overlays: Vec<String> = worker
+        .overlays
+        .into_iter()
+        .filter(|o| o != &overlay_name)
+        .collect();
+
+    // Persist
+    let updated_worker = db.update_worker_overlays(&worker_id, new_overlays)?;
+
+    // Build merged workflow to compute diff
+    let base = resolve_base_workflow(&updated_worker, config);
+    let mut merged = (*base).clone();
+    for name in &updated_worker.overlays {
+        if let Some(overlay) = config.workflows.named_overlays.get(name) {
+            merged.apply_overlay(overlay);
+        }
+    }
+    merged.active_overlays = updated_worker.overlays.clone();
+
+    let overlay_diff = merged.compute_overlay_diff(&base);
+
+    let mut response = json!({
+        "success": true,
+        "worker_id": updated_worker.id,
+        "overlays": updated_worker.overlays,
+        "overlay_diff": overlay_diff,
+    });
+
+    // Include role info if applicable
+    if let Some(role_name) = merged.match_role(&updated_worker.tags) {
+        response["role"] = json!(role_name);
+        let prompts = merged.get_role_prompts(&role_name);
+        if !prompts.is_empty() {
+            response["role_prompts"] = json!(prompts);
+        }
+    }
+
+    Ok(response)
+}
+
+/// Resolve the base workflow for a worker (before overlays).
+fn resolve_base_workflow(
+    worker: &crate::types::Worker,
+    config: &AppConfig,
+) -> std::sync::Arc<WorkflowsConfig> {
+    if let Some(ref workflow_name) = worker.workflow {
+        config
+            .workflows
+            .get_named_workflow(workflow_name)
+            .map(std::sync::Arc::clone)
+    } else {
+        None
+    }
+    .or_else(|| {
+        config
+            .workflows
+            .get_default_workflow()
+            .map(std::sync::Arc::clone)
+    })
+    .unwrap_or_else(|| std::sync::Arc::clone(&config.workflows))
 }

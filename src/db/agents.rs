@@ -236,6 +236,29 @@ impl Database {
         })
     }
 
+    /// Update only the overlays for a worker.
+    pub fn update_worker_overlays(&self, worker_id: &str, overlays: Vec<String>) -> Result<Worker> {
+        let overlays_json = if overlays.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&overlays)?)
+        };
+
+        self.with_conn(|conn| {
+            let updated = conn.execute(
+                "UPDATE workers SET overlays = ?1 WHERE id = ?2",
+                params![overlays_json, worker_id],
+            )?;
+
+            if updated == 0 {
+                return Err(anyhow!("Worker not found"));
+            }
+
+            get_worker_internal(conn, worker_id)?
+                .ok_or_else(|| anyhow!("Worker not found after update"))
+        })
+    }
+
     /// Update worker's last seen state (status and phase) for transition prompt tracking.
     /// Returns the previous state (old_status, old_phase) for prompt calculation.
     pub fn update_worker_state(

@@ -767,7 +767,9 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
     } = opts;
 
     let attachments_config = &config.attachments;
-    let states_config = &config.states;
+    // Derive states/phases from the per-worker workflow so overlay-added states are recognized
+    let states_config_owned: StatesConfig = workflows.into();
+    let states_config = &states_config_owned;
     let phases_config = &config.phases;
     let deps_config = &config.deps;
     let auto_advance = &config.auto_advance;
