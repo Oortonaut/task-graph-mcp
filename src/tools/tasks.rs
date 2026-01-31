@@ -188,6 +188,10 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of tasks to return"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Number of tasks to skip for pagination (default: 0)"
                 }
             }),
             vec![],
@@ -615,6 +619,8 @@ pub fn list_tasks(
     let claimed = get_bool(&args, "claimed").unwrap_or(false);
     let recursive = get_bool(&args, "recursive").unwrap_or(false);
     let limit = get_i32(&args, "limit");
+    let offset = get_i32(&args, "offset").unwrap_or(0).max(0);
+    let fetch_limit = limit.map(|l| l + 1);
     let phase = get_string(&args, "phase");
 
     // Extract tag filtering parameters
@@ -700,8 +706,8 @@ pub fn list_tasks(
                     tags_any,
                     tags_all,
                     qualified_agent_tags,
-                    limit,
-                    0, // offset
+                    fetch_limit,
+                    offset,
                     sort_by.as_deref(),
                     sort_order.as_deref(),
                 )?
@@ -715,8 +721,8 @@ pub fn list_tasks(
                     phase: phase.as_deref(),
                     owner: owner.as_deref(),
                     parent_id,
-                    limit,
-                    offset: 0,
+                    limit: fetch_limit,
+                    offset,
                     sort_by: sort_by.as_deref(),
                     sort_order: sort_order.as_deref(),
                 })?
@@ -728,7 +734,18 @@ pub fn list_tasks(
         tasks.retain(|t| t.phase.as_deref() == Some(p.as_str()));
     }
 
-    // Apply limit (some paths may already have limit applied, but this ensures consistency)
+    // Apply offset for paths that don't go through paginated DB queries
+    // (ready, blocked, claimed, recursive paths fetch all matching tasks)
+    if offset > 0 && (ready || blocked || claimed || recursive) {
+        if (offset as usize) < tasks.len() {
+            tasks = tasks.split_off(offset as usize);
+        } else {
+            tasks.clear();
+        }
+    }
+
+    // Detect has_more using N+1 pattern, then truncate to actual limit
+    let has_more = limit.map_or(false, |l| tasks.len() > l as usize);
     if let Some(l) = limit {
         tasks.truncate(l as usize);
     }
@@ -743,10 +760,17 @@ pub fn list_tasks(
         .collect();
 
     match format {
-        OutputFormat::Markdown => Ok(markdown_to_json(format_tasks_markdown(
-            &tasks_with_blockers,
-            states_config,
-        ))),
+        OutputFormat::Markdown => {
+            let mut md = format_tasks_markdown(&tasks_with_blockers, states_config);
+            if has_more {
+                let next_offset = offset + limit.unwrap_or(0);
+                md.push_str(&format!(
+                    "\n\n*More results available. Use offset={} to see next page.*",
+                    next_offset
+                ));
+            }
+            Ok(markdown_to_json(md))
+        }
         OutputFormat::Json => Ok(json!({
             "tasks": tasks_with_blockers.iter().map(|(task, blockers)| {
                 let mut task_json = serde_json::to_value(task).unwrap();
@@ -754,7 +778,10 @@ pub fn list_tasks(
                     obj.insert("blocked_by".to_string(), json!(blockers));
                 }
                 task_json
-            }).collect::<Vec<_>>()
+            }).collect::<Vec<_>>(),
+            "has_more": has_more,
+            "offset": offset,
+            "limit": limit,
         })),
     }
 }
