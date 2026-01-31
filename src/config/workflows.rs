@@ -188,6 +188,15 @@ pub struct WorkflowsConfig {
     /// If set, workers without a workflow use this instead of the base config.
     #[serde(skip)]
     pub default_workflow_key: Option<String>,
+
+    /// Cache of named overlay configs (e.g., "git" -> overlay-git.yaml).
+    /// Overlays are loaded as raw deltas (NOT merged with defaults).
+    #[serde(skip)]
+    pub named_overlays: HashMap<String, Arc<WorkflowsConfig>>,
+
+    /// Active overlay names applied to this config (for tracking).
+    #[serde(skip)]
+    pub active_overlays: Vec<String>,
 }
 
 impl Default for WorkflowsConfig {
@@ -205,6 +214,8 @@ impl Default for WorkflowsConfig {
             role_prompts: HashMap::new(),
             named_workflows: HashMap::new(),
             default_workflow_key: None,
+            named_overlays: HashMap::new(),
+            active_overlays: Vec::new(),
         }
     }
 }
@@ -260,7 +271,7 @@ impl WorkflowsConfig {
         self.roles.get(role_name)
     }
 
-    /// Collect all unique role tags across this workflow and all named workflows.
+    /// Collect all unique role tags across this workflow, all named workflows, and all overlays.
     /// Returns a deduplicated list of tag names used in role definitions.
     pub fn all_role_tags(&self) -> Vec<String> {
         let mut tags = std::collections::HashSet::new();
@@ -278,8 +289,198 @@ impl WorkflowsConfig {
                 }
             }
         }
+        // Collect from all named overlays
+        for overlay in self.named_overlays.values() {
+            for role in overlay.roles.values() {
+                for tag in &role.tags {
+                    tags.insert(tag.clone());
+                }
+            }
+        }
         tags.into_iter().collect()
     }
+
+    /// Apply an overlay on top of this workflow using additive merge semantics.
+    ///
+    /// Unlike deep-merge (which replaces), overlay merge:
+    /// - **states**: union keys; existing states get exits unioned (deduplicated),
+    ///   `timed |= overlay.timed`, prompts appended with separator
+    /// - **phases**: union keys; existing phases get prompts appended
+    /// - **combos**: union keys; existing combos get enter/exit appended
+    /// - **gates**: union keys; existing keys extend their Vec (never replace)
+    /// - **roles**: union keys; existing roles NOT overridden (first wins)
+    /// - **role_prompts**: outer keys unioned; inner keys appended or added
+    /// - **settings.initial_state**: overlay wins if it differs from default ("pending")
+    /// - **settings.blocking_states**: union (deduplicated)
+    pub fn apply_overlay(&mut self, overlay: &WorkflowsConfig) {
+        const PROMPT_SEPARATOR: &str = "\n\n---\n\n";
+
+        // --- states ---
+        for (name, overlay_state) in &overlay.states {
+            if let Some(existing) = self.states.get_mut(name) {
+                // Union exits (deduplicated)
+                for exit in &overlay_state.exits {
+                    if !existing.exits.contains(exit) {
+                        existing.exits.push(exit.clone());
+                    }
+                }
+                // timed |= overlay.timed
+                existing.timed |= overlay_state.timed;
+                // Append prompts
+                append_prompt(
+                    &mut existing.prompts.enter,
+                    &overlay_state.prompts.enter,
+                    PROMPT_SEPARATOR,
+                );
+                append_prompt(
+                    &mut existing.prompts.exit,
+                    &overlay_state.prompts.exit,
+                    PROMPT_SEPARATOR,
+                );
+            } else {
+                self.states.insert(name.clone(), overlay_state.clone());
+            }
+        }
+
+        // --- phases ---
+        for (name, overlay_phase) in &overlay.phases {
+            if let Some(existing) = self.phases.get_mut(name) {
+                append_prompt(
+                    &mut existing.prompts.enter,
+                    &overlay_phase.prompts.enter,
+                    PROMPT_SEPARATOR,
+                );
+                append_prompt(
+                    &mut existing.prompts.exit,
+                    &overlay_phase.prompts.exit,
+                    PROMPT_SEPARATOR,
+                );
+            } else {
+                self.phases.insert(name.clone(), overlay_phase.clone());
+            }
+        }
+
+        // --- combos ---
+        for (name, overlay_combo) in &overlay.combos {
+            if let Some(existing) = self.combos.get_mut(name) {
+                append_optional_prompt(&mut existing.enter, &overlay_combo.enter, PROMPT_SEPARATOR);
+                append_optional_prompt(&mut existing.exit, &overlay_combo.exit, PROMPT_SEPARATOR);
+            } else {
+                self.combos.insert(name.clone(), overlay_combo.clone());
+            }
+        }
+
+        // --- gates ---
+        for (key, overlay_gates) in &overlay.gates {
+            self.gates
+                .entry(key.clone())
+                .or_default()
+                .extend(overlay_gates.iter().cloned());
+        }
+
+        // --- roles (first wins: existing roles NOT overridden) ---
+        for (name, overlay_role) in &overlay.roles {
+            self.roles
+                .entry(name.clone())
+                .or_insert_with(|| overlay_role.clone());
+        }
+
+        // --- role_prompts ---
+        for (role_name, overlay_prompts) in &overlay.role_prompts {
+            let existing = self.role_prompts.entry(role_name.clone()).or_default();
+            for (key, overlay_value) in overlay_prompts {
+                existing
+                    .entry(key.clone())
+                    .and_modify(|v| {
+                        v.push_str(PROMPT_SEPARATOR);
+                        v.push_str(overlay_value);
+                    })
+                    .or_insert_with(|| overlay_value.clone());
+            }
+        }
+
+        // --- settings ---
+        if overlay.settings.initial_state != default_initial_state() {
+            self.settings.initial_state = overlay.settings.initial_state.clone();
+        }
+        // Union blocking_states (deduplicated)
+        for state in &overlay.settings.blocking_states {
+            if !self.settings.blocking_states.contains(state) {
+                self.settings.blocking_states.push(state.clone());
+            }
+        }
+    }
+
+    /// Compute a diff showing what an overlay changed relative to a base workflow.
+    /// Returns a JSON object with added/modified states, exits, gates, and prompts.
+    pub fn compute_overlay_diff(&self, base: &WorkflowsConfig) -> serde_json::Value {
+        let mut states_added: Vec<String> = Vec::new();
+        let mut exits_added: HashMap<String, Vec<String>> = HashMap::new();
+        let mut gates_added: Vec<String> = Vec::new();
+        let mut prompts_modified: Vec<String> = Vec::new();
+
+        for (name, state) in &self.states {
+            if !base.states.contains_key(name) {
+                states_added.push(name.clone());
+            } else {
+                let base_state = &base.states[name];
+                // Check for new exits
+                let new_exits: Vec<String> = state
+                    .exits
+                    .iter()
+                    .filter(|e| !base_state.exits.contains(e))
+                    .cloned()
+                    .collect();
+                if !new_exits.is_empty() {
+                    exits_added.insert(name.clone(), new_exits);
+                }
+                // Check for modified prompts
+                if state.prompts.enter != base_state.prompts.enter {
+                    prompts_modified.push(format!("enter~{}", name));
+                }
+                if state.prompts.exit != base_state.prompts.exit {
+                    prompts_modified.push(format!("exit~{}", name));
+                }
+            }
+        }
+
+        for key in self.gates.keys() {
+            if !base.gates.contains_key(key) {
+                gates_added.push(key.clone());
+            } else if self.gates[key].len() > base.gates[key].len() {
+                gates_added.push(format!(
+                    "{}(+{})",
+                    key,
+                    self.gates[key].len() - base.gates[key].len()
+                ));
+            }
+        }
+
+        serde_json::json!({
+            "states_added": states_added,
+            "exits_added": exits_added,
+            "gates_added": gates_added,
+            "prompts_modified": prompts_modified,
+        })
+    }
+}
+
+/// Append an overlay prompt to an existing Option<String> prompt.
+fn append_prompt(target: &mut Option<String>, source: &Option<String>, separator: &str) {
+    if let Some(src) = source {
+        match target {
+            Some(existing) => {
+                existing.push_str(separator);
+                existing.push_str(src);
+            }
+            None => *target = Some(src.clone()),
+        }
+    }
+}
+
+/// Append an overlay prompt to an existing Option<String> (combo-style).
+fn append_optional_prompt(target: &mut Option<String>, source: &Option<String>, separator: &str) {
+    append_prompt(target, source, separator);
 }
 
 /// Default state workflow definitions.
@@ -814,5 +1015,218 @@ mod tests {
         let tags = workflows.all_role_tags();
         assert_eq!(tags.len(), 1);
         assert!(tags.contains(&"shared-tag".to_string()));
+    }
+
+    #[test]
+    fn test_apply_overlay_adds_new_state() {
+        let mut base = WorkflowsConfig::default();
+        let mut overlay = WorkflowsConfig {
+            states: HashMap::new(),
+            phases: HashMap::new(),
+            combos: HashMap::new(),
+            gates: HashMap::new(),
+            roles: HashMap::new(),
+            role_prompts: HashMap::new(),
+            ..Default::default()
+        };
+        overlay.states.insert(
+            "reviewing".to_string(),
+            StateWorkflow {
+                exits: vec!["completed".to_string()],
+                timed: true,
+                prompts: TransitionPrompts {
+                    enter: Some("Review the changes.".to_string()),
+                    exit: None,
+                },
+            },
+        );
+
+        base.apply_overlay(&overlay);
+        assert!(base.states.contains_key("reviewing"));
+        assert!(base.states["reviewing"].timed);
+        assert_eq!(
+            base.states["reviewing"].prompts.enter.as_deref(),
+            Some("Review the changes.")
+        );
+    }
+
+    #[test]
+    fn test_apply_overlay_appends_prompts() {
+        let mut base = WorkflowsConfig::default();
+        let original_enter = base.states["working"].prompts.enter.clone();
+
+        let mut overlay = WorkflowsConfig {
+            states: HashMap::new(),
+            phases: HashMap::new(),
+            combos: HashMap::new(),
+            gates: HashMap::new(),
+            roles: HashMap::new(),
+            role_prompts: HashMap::new(),
+            ..Default::default()
+        };
+        overlay.states.insert(
+            "working".to_string(),
+            StateWorkflow {
+                exits: vec![],
+                timed: false,
+                prompts: TransitionPrompts {
+                    enter: Some("Create a feature branch.".to_string()),
+                    exit: None,
+                },
+            },
+        );
+
+        base.apply_overlay(&overlay);
+        let enter = base.states["working"].prompts.enter.as_ref().unwrap();
+        assert!(enter.contains(&original_enter.unwrap()));
+        assert!(enter.contains("Create a feature branch."));
+        assert!(enter.contains("---"));
+    }
+
+    #[test]
+    fn test_apply_overlay_unions_exits() {
+        let mut base = WorkflowsConfig::default();
+        let original_exits = base.states["working"].exits.clone();
+
+        let mut overlay = WorkflowsConfig {
+            states: HashMap::new(),
+            phases: HashMap::new(),
+            combos: HashMap::new(),
+            gates: HashMap::new(),
+            roles: HashMap::new(),
+            role_prompts: HashMap::new(),
+            ..Default::default()
+        };
+        overlay.states.insert(
+            "working".to_string(),
+            StateWorkflow {
+                exits: vec!["reviewing".to_string(), "completed".to_string()],
+                timed: false,
+                prompts: TransitionPrompts::default(),
+            },
+        );
+
+        base.apply_overlay(&overlay);
+        // Should have original exits plus "reviewing" (but not duplicate "completed")
+        assert!(
+            base.states["working"]
+                .exits
+                .contains(&"reviewing".to_string())
+        );
+        for exit in &original_exits {
+            assert!(base.states["working"].exits.contains(exit));
+        }
+    }
+
+    #[test]
+    fn test_apply_overlay_extends_gates() {
+        let mut base = WorkflowsConfig::default();
+        let mut overlay = WorkflowsConfig {
+            states: HashMap::new(),
+            phases: HashMap::new(),
+            combos: HashMap::new(),
+            gates: HashMap::new(),
+            roles: HashMap::new(),
+            role_prompts: HashMap::new(),
+            ..Default::default()
+        };
+        overlay.gates.insert(
+            "status:completed".to_string(),
+            vec![GateDefinition {
+                gate_type: "gate/commit".to_string(),
+                enforcement: super::super::types::GateEnforcement::Warn,
+                description: "Changes should be committed.".to_string(),
+            }],
+        );
+
+        base.apply_overlay(&overlay);
+        assert_eq!(base.gates["status:completed"].len(), 1);
+        assert_eq!(base.gates["status:completed"][0].gate_type, "gate/commit");
+    }
+
+    #[test]
+    fn test_apply_overlay_roles_first_wins() {
+        let mut base = WorkflowsConfig::default();
+        base.roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                description: Some("Base worker".to_string()),
+                tags: vec!["worker".to_string()],
+                ..Default::default()
+            },
+        );
+
+        let mut overlay = WorkflowsConfig {
+            states: HashMap::new(),
+            phases: HashMap::new(),
+            combos: HashMap::new(),
+            gates: HashMap::new(),
+            roles: HashMap::new(),
+            role_prompts: HashMap::new(),
+            ..Default::default()
+        };
+        overlay.roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                description: Some("Overlay worker".to_string()),
+                tags: vec!["overlay-worker".to_string()],
+                ..Default::default()
+            },
+        );
+
+        base.apply_overlay(&overlay);
+        // First wins — base description should remain
+        assert_eq!(
+            base.roles["worker"].description.as_deref(),
+            Some("Base worker")
+        );
+    }
+
+    #[test]
+    fn test_compute_overlay_diff() {
+        let base = WorkflowsConfig::default();
+        let mut merged = base.clone();
+
+        let mut overlay = WorkflowsConfig {
+            states: HashMap::new(),
+            phases: HashMap::new(),
+            combos: HashMap::new(),
+            gates: HashMap::new(),
+            roles: HashMap::new(),
+            role_prompts: HashMap::new(),
+            ..Default::default()
+        };
+        overlay.states.insert(
+            "reviewing".to_string(),
+            StateWorkflow {
+                exits: vec!["completed".to_string()],
+                timed: true,
+                prompts: TransitionPrompts::default(),
+            },
+        );
+        overlay.states.insert(
+            "working".to_string(),
+            StateWorkflow {
+                exits: vec![],
+                timed: false,
+                prompts: TransitionPrompts {
+                    enter: Some("Git overlay prompt.".to_string()),
+                    exit: None,
+                },
+            },
+        );
+
+        merged.apply_overlay(&overlay);
+        let diff = merged.compute_overlay_diff(&base);
+
+        let states_added = diff["states_added"].as_array().unwrap();
+        assert!(states_added.iter().any(|v| v.as_str() == Some("reviewing")));
+
+        let prompts_modified = diff["prompts_modified"].as_array().unwrap();
+        assert!(
+            prompts_modified
+                .iter()
+                .any(|v| v.as_str() == Some("enter~working"))
+        );
     }
 }

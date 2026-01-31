@@ -5,6 +5,7 @@ pub mod attachments;
 pub mod claiming;
 pub mod context;
 pub mod deps;
+pub mod feedback;
 pub mod files;
 pub mod gates;
 pub mod query;
@@ -130,6 +131,11 @@ impl ToolHandler {
 
         // Workflow discovery tools (no auth needed, callable before connect)
         tools.extend(workflows::get_tools());
+
+        // Feedback tools (conditionally enabled)
+        if self.config.feedback.enabled {
+            tools.extend(feedback::get_tools());
+        }
 
         tools
     }
@@ -297,6 +303,27 @@ impl ToolHandler {
 
             // Workflow discovery tools (no connection required)
             "list_workflows" => json(workflows::list_workflows(&self.config.workflows)),
+
+            // Feedback tools (gated by config)
+            "give_feedback" | "list_feedback" if !self.config.feedback.enabled => {
+                Err(ToolError::unknown_tool(name).into())
+            }
+            "give_feedback" => {
+                let db_dir = self
+                    .server_paths
+                    .db_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."));
+                json(feedback::give_feedback(db_dir, arguments))
+            }
+            "list_feedback" => {
+                let db_dir = self
+                    .server_paths
+                    .db_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."));
+                json(feedback::list_feedback(db_dir))
+            }
 
             _ => Err(ToolError::unknown_tool(name).into()),
         }

@@ -58,6 +58,9 @@ pub struct Worker {
     /// Named workflow this worker is using (e.g., "swarm" for workflow-swarm.yaml)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflow: Option<String>,
+    /// Overlay names applied on top of the workflow (e.g., ["git", "user-request"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<String>,
 }
 
 /// Worker info with additional runtime details for list_workers.
@@ -82,6 +85,9 @@ pub struct WorkerInfo {
     /// Named workflow this worker is using (e.g., "swarm" for workflow-swarm.yaml)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflow: Option<String>,
+    /// Overlay names applied on top of the workflow (e.g., ["git", "user-request"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<String>,
 }
 
 /// Task priority as an integer (higher = more important).

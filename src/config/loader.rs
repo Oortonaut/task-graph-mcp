@@ -514,6 +514,115 @@ impl ConfigLoader {
         }
         None
     }
+
+    /// List available overlay files (overlay-*.yaml).
+    ///
+    /// Returns overlay names (e.g., "git", "user-request") found in user, project, and install directories.
+    pub fn list_overlays(&self) -> Vec<String> {
+        let mut overlays = Vec::new();
+
+        // Check user directory
+        if let Some(ref user_dir) = self.paths.user_dir
+            && let Ok(entries) = std::fs::read_dir(user_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = Self::extract_overlay_name(&entry.path())
+                    && !overlays.contains(&name)
+                {
+                    overlays.push(name);
+                }
+            }
+        }
+
+        // Check project directory
+        if let Some(project_dir) = self.paths.effective_project_dir()
+            && let Ok(entries) = std::fs::read_dir(project_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = Self::extract_overlay_name(&entry.path())
+                    && !overlays.contains(&name)
+                {
+                    overlays.push(name);
+                }
+            }
+        }
+
+        // Check install directory (built-in overlays)
+        if let Some(ref install_dir) = self.paths.install_dir
+            && let Ok(entries) = std::fs::read_dir(install_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = Self::extract_overlay_name(&entry.path())
+                    && !overlays.contains(&name)
+                {
+                    overlays.push(name);
+                }
+            }
+        }
+
+        overlays.sort();
+        overlays
+    }
+
+    /// Load an overlay by name (overlay-{name}.yaml).
+    ///
+    /// Unlike `load_workflow_by_name`, overlays are loaded as raw deltas WITHOUT
+    /// merging with defaults. This prevents double-appending prompts when
+    /// the overlay is later applied via `apply_overlay()`.
+    pub fn load_overlay_by_name(&self, name: &str) -> Result<super::workflows::WorkflowsConfig> {
+        let filename = format!("overlay-{}.yaml", name);
+
+        // Check user directory first (highest priority)
+        if let Some(ref user_dir) = self.paths.user_dir {
+            let overlay_file = user_dir.join(&filename);
+            if overlay_file.exists() {
+                return self.load_overlay_from_path(&overlay_file);
+            }
+        }
+
+        // Check project directory second
+        if let Some(project_dir) = self.paths.effective_project_dir() {
+            let overlay_file = project_dir.join(&filename);
+            if overlay_file.exists() {
+                return self.load_overlay_from_path(&overlay_file);
+            }
+        }
+
+        // Fall back to install directory (built-in defaults)
+        if let Some(ref install_dir) = self.paths.install_dir {
+            let overlay_file = install_dir.join(&filename);
+            if overlay_file.exists() {
+                return self.load_overlay_from_path(&overlay_file);
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "Overlay '{}' not found. Searched for '{}' in user, project, and install directories.",
+            name,
+            filename
+        ))
+    }
+
+    /// Load an overlay from a specific path WITHOUT merging with defaults.
+    /// This is the critical difference from `load_workflow_from_path`.
+    fn load_overlay_from_path(&self, path: &Path) -> Result<super::workflows::WorkflowsConfig> {
+        let content = std::fs::read_to_string(path)?;
+        let mut overlay: super::workflows::WorkflowsConfig = serde_yaml::from_str(&content)?;
+        overlay.source_file = Some(path.to_path_buf());
+        Ok(overlay)
+    }
+
+    /// Extract overlay name from a path like "overlay-git.yaml" -> "git".
+    fn extract_overlay_name(path: &Path) -> Option<String> {
+        let filename = path.file_name()?.to_str()?;
+        if filename.starts_with("overlay-") && filename.ends_with(".yaml") {
+            let name = filename.strip_prefix("overlay-")?.strip_suffix(".yaml")?;
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]

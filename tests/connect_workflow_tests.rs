@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use task_graph_mcp::config::workflows::WorkflowsConfig;
 use task_graph_mcp::config::{
-    AppConfig, AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, IdsConfig, PhasesConfig,
-    ServerPaths, StatesConfig, TagsConfig,
+    AppConfig, AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, FeedbackConfig, IdsConfig,
+    PhasesConfig, ServerPaths, StatesConfig, TagsConfig,
 };
 use task_graph_mcp::db::Database;
 use task_graph_mcp::tools::agents::{self, ConnectOptions};
@@ -31,6 +31,7 @@ fn default_app_config() -> AppConfig {
         Arc::new(TagsConfig::default()),
         Arc::new(IdsConfig::default()),
         workflows,
+        Arc::new(FeedbackConfig::default()),
     )
 }
 

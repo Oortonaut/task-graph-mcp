@@ -189,6 +189,14 @@ pub struct AutoAdvanceConfig {
     pub target_state: Option<String>,
 }
 
+/// Agent feedback configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FeedbackConfig {
+    /// Enable agent feedback tools (default: false).
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 /// Behavior for unknown attachment keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -553,6 +561,9 @@ pub struct Config {
 
     #[serde(default)]
     pub ids: IdsConfig,
+
+    #[serde(default)]
+    pub feedback: FeedbackConfig,
 }
 
 /// Paths configured for the server, returned by connect.
@@ -1357,6 +1368,7 @@ pub struct AppConfig {
     pub tags: Arc<TagsConfig>,
     pub ids: Arc<IdsConfig>,
     pub workflows: Arc<WorkflowsConfig>,
+    pub feedback: Arc<FeedbackConfig>,
 }
 
 impl AppConfig {
@@ -1371,6 +1383,7 @@ impl AppConfig {
         tags: Arc<TagsConfig>,
         ids: Arc<IdsConfig>,
         workflows: Arc<WorkflowsConfig>,
+        feedback: Arc<FeedbackConfig>,
     ) -> Self {
         Self {
             states,
@@ -1381,6 +1394,7 @@ impl AppConfig {
             tags,
             ids,
             workflows,
+            feedback,
         }
     }
 }

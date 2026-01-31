@@ -25,10 +25,18 @@ fn generate_agent_id(ids_config: &IdsConfig) -> String {
     case.convert(&base)
 }
 
+/// Parse overlays JSON from DB (nullable TEXT column) into Vec<String>.
+fn parse_overlays(overlays_json: &Option<String>) -> Vec<String> {
+    overlays_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default()
+}
+
 /// Internal helper to get a worker using an existing connection (avoids deadlock).
 fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Worker>> {
     let mut stmt = conn.prepare(
-        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow
+        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
          FROM workers WHERE id = ?1",
     )?;
 
@@ -41,6 +49,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
         let last_status: Option<String> = row.get(5)?;
         let last_phase: Option<String> = row.get(6)?;
         let workflow: Option<String> = row.get(7)?;
+        let overlays_json: Option<String> = row.get(8)?;
 
         Ok((
             id,
@@ -51,6 +60,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_status,
             last_phase,
             workflow,
+            overlays_json,
         ))
     });
 
@@ -64,8 +74,10 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_status,
             last_phase,
             workflow,
+            overlays_json,
         )) => {
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+            let overlays = parse_overlays(&overlays_json);
             Ok(Some(Worker {
                 id,
                 tags,
@@ -75,6 +87,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
                 last_status,
                 last_phase,
                 workflow,
+                overlays,
             }))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -90,6 +103,7 @@ impl Database {
     /// If `force` is true and the worker already exists, it will be re-registered
     /// (useful for stuck worker recovery).
     /// If `workflow` is provided, the worker will use that named workflow (e.g., "swarm" for workflow-swarm.yaml).
+    /// If `overlays` is provided, those overlays will be applied on top of the workflow.
     pub fn register_worker(
         &self,
         worker_id: Option<String>,
@@ -97,6 +111,7 @@ impl Database {
         force: bool,
         ids_config: &IdsConfig,
         workflow: Option<String>,
+        overlays: Vec<String>,
     ) -> Result<Worker> {
         // Validate user-provided ID upfront (before acquiring connection)
         let provided_id = match worker_id {
@@ -118,6 +133,11 @@ impl Database {
         let now = now_ms();
         let max_claims = i32::MAX; // Effectively unlimited until overclaiming becomes a problem
         let tags_json = serde_json::to_string(&tags)?;
+        let overlays_json = if overlays.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&overlays)?)
+        };
 
         self.with_conn(|conn| {
             // Generate ID (with 4+ words from a large wordlist, collisions are extremely unlikely)
@@ -141,19 +161,19 @@ impl Database {
 
             if exists {
                 if force {
-                    // Force reconnection: update existing worker and reset poll position, including workflow
+                    // Force reconnection: update existing worker and reset poll position, including workflow and overlays
                     conn.execute(
-                        "UPDATE workers SET tags = ?1, max_claims = ?2, last_heartbeat = ?3, last_claim_sequence = ?4, workflow = ?5 WHERE id = ?6",
-                        params![tags_json, max_claims, now, initial_sequence, &workflow, &id],
+                        "UPDATE workers SET tags = ?1, max_claims = ?2, last_heartbeat = ?3, last_claim_sequence = ?4, workflow = ?5, overlays = ?6 WHERE id = ?7",
+                        params![tags_json, max_claims, now, initial_sequence, &workflow, &overlays_json, &id],
                     )?;
                 } else {
                     return Err(anyhow!("Worker ID '{}' already registered. Use force=true to reconnect.", id));
                 }
             } else {
                 conn.execute(
-                    "INSERT INTO workers (id, tags, max_claims, registered_at, last_heartbeat, last_claim_sequence, workflow)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![&id, tags_json, max_claims, now, now, initial_sequence, &workflow],
+                    "INSERT INTO workers (id, tags, max_claims, registered_at, last_heartbeat, last_claim_sequence, workflow, overlays)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![&id, tags_json, max_claims, now, now, initial_sequence, &workflow, &overlays_json],
                 )?;
             }
 
@@ -166,67 +186,14 @@ impl Database {
                 last_status: None,
                 last_phase: None,
                 workflow,
+                overlays,
             })
         })
     }
 
     /// Get a worker by ID.
     pub fn get_worker(&self, worker_id: &str) -> Result<Option<Worker>> {
-        self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow
-                 FROM workers WHERE id = ?1",
-            )?;
-
-            let result = stmt.query_row(params![worker_id], |row| {
-                let id: String = row.get(0)?;
-                let tags_json: String = row.get(1)?;
-                let max_claims: i32 = row.get(2)?;
-                let registered_at: i64 = row.get(3)?;
-                let last_heartbeat: i64 = row.get(4)?;
-                let last_status: Option<String> = row.get(5)?;
-                let last_phase: Option<String> = row.get(6)?;
-                let workflow: Option<String> = row.get(7)?;
-
-                Ok((
-                    id,
-                    tags_json,
-                    max_claims,
-                    registered_at,
-                    last_heartbeat,
-                    last_status,
-                    last_phase,
-                    workflow,
-                ))
-            });
-
-            match result {
-                Ok((
-                    id,
-                    tags_json,
-                    max_claims,
-                    registered_at,
-                    last_heartbeat,
-                    last_status,
-                    last_phase,
-                    workflow,
-                )) => {
-                    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                    Ok(Some(Worker {
-                        id,
-                        tags,
-                        max_claims,
-                        registered_at,
-                        last_heartbeat,
-                        last_status,
-                        last_phase,
-                        workflow,
-                    }))
-                }
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(e.into()),
-            }
-        })
+        self.with_conn(|conn| get_worker_internal(conn, worker_id))
     }
 
     /// Check if a worker exists. Returns error if not found.
@@ -264,6 +231,7 @@ impl Database {
                 last_status: worker.last_status,
                 last_phase: worker.last_phase,
                 workflow: worker.workflow,
+                overlays: worker.overlays,
             })
         })
     }
@@ -363,7 +331,7 @@ impl Database {
     pub fn list_workers(&self) -> Result<Vec<Worker>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow
+                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
                  FROM workers ORDER BY registered_at DESC",
             )?;
 
@@ -377,6 +345,7 @@ impl Database {
                     let last_status: Option<String> = row.get(5)?;
                     let last_phase: Option<String> = row.get(6)?;
                     let workflow: Option<String> = row.get(7)?;
+                    let overlays_json: Option<String> = row.get(8)?;
 
                     Ok((
                         id,
@@ -387,6 +356,7 @@ impl Database {
                         last_status,
                         last_phase,
                         workflow,
+                        overlays_json,
                     ))
                 })?
                 .filter_map(|r| r.ok())
@@ -400,9 +370,11 @@ impl Database {
                         last_status,
                         last_phase,
                         workflow,
+                        overlays_json,
                     )| {
                         let tags: Vec<String> =
                             serde_json::from_str(&tags_json).unwrap_or_default();
+                        let overlays = parse_overlays(&overlays_json);
                         Worker {
                             id,
                             tags,
@@ -412,6 +384,7 @@ impl Database {
                             last_status,
                             last_phase,
                             workflow,
+                            overlays,
                         }
                     },
                 )
@@ -428,7 +401,7 @@ impl Database {
                 "SELECT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
                         (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working') as claim_count,
                         (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1) as current_thought,
-                        w.last_status, w.last_phase, w.workflow
+                        w.last_status, w.last_phase, w.workflow, w.overlays
                  FROM workers w ORDER BY w.registered_at DESC",
             )?;
 
@@ -443,12 +416,14 @@ impl Database {
                 let last_status: Option<String> = row.get(7)?;
                 let last_phase: Option<String> = row.get(8)?;
                 let workflow: Option<String> = row.get(9)?;
+                let overlays_json: Option<String> = row.get(10)?;
 
-                Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow))
+                Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow)| {
+            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json)| {
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+                let overlays = parse_overlays(&overlays_json);
                 crate::types::WorkerInfo {
                     id,
                     tags,
@@ -460,6 +435,7 @@ impl Database {
                     last_status,
                     last_phase,
                     workflow,
+                    overlays,
                 }
             })
             .collect();
@@ -487,7 +463,7 @@ impl Database {
                 "SELECT DISTINCT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
                         (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working') as claim_count,
                         (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1) as current_thought,
-                        w.last_status, w.last_phase, w.workflow
+                        w.last_status, w.last_phase, w.workflow, w.overlays
                  FROM workers w WHERE 1=1",
             );
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -535,12 +511,14 @@ impl Database {
                     let last_status: Option<String> = row.get(7)?;
                     let last_phase: Option<String> = row.get(8)?;
                     let workflow: Option<String> = row.get(9)?;
+                    let overlays_json: Option<String> = row.get(10)?;
 
-                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow))
+                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json))
                 })?
                 .filter_map(|r| r.ok())
-                .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow)| {
+                .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json)| {
                     let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+                    let overlays = parse_overlays(&overlays_json);
                     crate::types::WorkerInfo {
                         id,
                         tags,
@@ -552,6 +530,7 @@ impl Database {
                         last_status,
                         last_phase,
                         workflow,
+                        overlays,
                     }
                 })
                 .collect();
@@ -633,7 +612,7 @@ impl Database {
 
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow
+                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
                  FROM workers WHERE last_heartbeat < ?1",
             )?;
 
@@ -647,6 +626,7 @@ impl Database {
                     let last_status: Option<String> = row.get(5)?;
                     let last_phase: Option<String> = row.get(6)?;
                     let workflow: Option<String> = row.get(7)?;
+                    let overlays_json: Option<String> = row.get(8)?;
 
                     Ok((
                         id,
@@ -657,6 +637,7 @@ impl Database {
                         last_status,
                         last_phase,
                         workflow,
+                        overlays_json,
                     ))
                 })?
                 .filter_map(|r| r.ok())
@@ -670,9 +651,11 @@ impl Database {
                         last_status,
                         last_phase,
                         workflow,
+                        overlays_json,
                     )| {
                         let tags: Vec<String> =
                             serde_json::from_str(&tags_json).unwrap_or_default();
+                        let overlays = parse_overlays(&overlays_json);
                         Worker {
                             id,
                             tags,
@@ -682,6 +665,7 @@ impl Database {
                             last_status,
                             last_phase,
                             workflow,
+                            overlays,
                         }
                     },
                 )

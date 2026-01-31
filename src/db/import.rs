@@ -1859,6 +1859,7 @@ mod tests {
             false,
             &IdsConfig::default(),
             None,
+            vec![],
         )
         .unwrap();
 

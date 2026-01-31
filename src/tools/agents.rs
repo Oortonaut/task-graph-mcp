@@ -197,7 +197,8 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
         }
     }
 
-    let worker = db.register_worker(worker_id, tags, force, ids_config, workflow)?;
+    let overlays = get_string_array(&args, "overlays").unwrap_or_default();
+    let worker = db.register_worker(worker_id, tags, force, ids_config, workflow, overlays)?;
 
     // Build config summary for the response
     let timed_states: Vec<&str> = states_config

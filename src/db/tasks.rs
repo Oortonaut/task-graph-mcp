@@ -208,7 +208,7 @@ fn get_task_internal(conn: &Connection, task_id: &str) -> Result<Option<Task>> {
 /// Internal helper to get a worker using an existing connection (avoids deadlock).
 fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Worker>> {
     let mut stmt = conn.prepare(
-        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow
+        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
          FROM workers WHERE id = ?1",
     )?;
 
@@ -221,6 +221,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
         let last_status: Option<String> = row.get(5)?;
         let last_phase: Option<String> = row.get(6)?;
         let workflow: Option<String> = row.get(7)?;
+        let overlays_json: Option<String> = row.get(8)?;
 
         Ok((
             id,
@@ -231,6 +232,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_status,
             last_phase,
             workflow,
+            overlays_json,
         ))
     });
 
@@ -244,8 +246,13 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_status,
             last_phase,
             workflow,
+            overlays_json,
         )) => {
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+            let overlays: Vec<String> = overlays_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_default();
             Ok(Some(Worker {
                 id,
                 tags,
@@ -255,6 +262,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
                 last_status,
                 last_phase,
                 workflow,
+                overlays,
             }))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

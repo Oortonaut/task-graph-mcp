@@ -378,7 +378,7 @@ fn mutations_for_tool(tool_name: &str) -> Vec<MutationKind> {
         // Read-only tools cause no mutations
         "get" | "list_tasks" | "list_agents" | "list_marks" | "mark_updates" | "attachments"
         | "get_schema" | "search" | "query" | "check_gates" | "task_history" | "get_metrics"
-        | "project_history" | "list_workflows" => vec![],
+        | "project_history" | "list_workflows" | "give_feedback" | "list_feedback" => vec![],
         // Skills tools are read-only
         name if name.starts_with("get_skill") || name.starts_with("list_skills") => vec![],
         // Unknown tools -- conservatively notify nothing
@@ -635,6 +635,7 @@ fn reload_config(server: &TaskGraphServer, reload_ctx: &ReloadContext) {
     let tags_config = Arc::new(tags_config);
     let ids_config = Arc::new(new_config.ids.clone());
 
+    let feedback_config = Arc::new(new_config.feedback.clone());
     let app_config = AppConfig::new(
         Arc::clone(&states_config),
         Arc::clone(&phases_config),
@@ -644,6 +645,7 @@ fn reload_config(server: &TaskGraphServer, reload_ctx: &ReloadContext) {
         Arc::clone(&tags_config),
         ids_config,
         Arc::clone(&workflows),
+        feedback_config,
     );
 
     // Build new ToolHandler
@@ -749,6 +751,7 @@ async fn run_server(
     tags_config.register_workflow_tags(&workflows.all_role_tags());
     let tags_config = Arc::new(tags_config);
     let ids_config = Arc::new(config.ids.clone());
+    let feedback_config = Arc::new(config.feedback.clone());
 
     let app_config = AppConfig::new(
         Arc::clone(&states_config),
@@ -759,6 +762,7 @@ async fn run_server(
         tags_config,
         ids_config,
         Arc::clone(&workflows),
+        feedback_config,
     );
 
     // Create path mapper from config

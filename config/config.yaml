@@ -90,6 +90,11 @@ auto_advance:
   enabled: false
   target_state: null
 
+# Agent feedback configuration
+feedback:
+  # Enable give_feedback and list_feedback tools (default: false)
+  enabled: false
+
 # Attachment key definitions
 attachments:
   # Behavior for unknown keys: allow, warn, reject
