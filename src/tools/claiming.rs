@@ -172,11 +172,22 @@ pub fn claim(
         }
     }
 
-    // Add prompts if any
-    if !transition_prompt_list.is_empty()
-        && let Value::Object(ref mut map) = response
-    {
-        map.insert("prompts".to_string(), json!(transition_prompt_list));
+    if let Value::Object(ref mut map) = response {
+        // Add prompts if any
+        if !transition_prompt_list.is_empty() {
+            map.insert("prompts".to_string(), json!(transition_prompt_list));
+        }
+
+        // Include relevant advisory hints based on task tags, phase, and worker role
+        let advisory_hints = super::advisories::relevant_advisory_topics(
+            workflows,
+            &task.tags,
+            task.phase.as_deref(),
+            worker_role.as_deref(),
+        );
+        if !advisory_hints.is_empty() {
+            map.insert("advisory_hints".to_string(), json!(advisory_hints));
+        }
     }
 
     Ok(response)

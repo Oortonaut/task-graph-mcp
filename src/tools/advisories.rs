@@ -173,6 +173,40 @@ pub fn get_advisory(db: &Database, workflows: &WorkflowsConfig, args: Value) -> 
     }
 }
 
+/// Get advisory topic names relevant to a task+worker context.
+///
+/// Extracts `level:*` and `domain:*` from task tags, uses phase and role
+/// for matching. Returns sorted topic names that agents can fetch with
+/// `get_advisory(topic="...")`.
+pub fn relevant_advisory_topics(
+    workflows: &WorkflowsConfig,
+    task_tags: &[String],
+    phase: Option<&str>,
+    role: Option<&str>,
+) -> Vec<String> {
+    if workflows.advisories.is_empty() {
+        return Vec::new();
+    }
+
+    let task_level: Option<&str> = task_tags
+        .iter()
+        .find(|t| t.starts_with("level:"))
+        .map(|t| t.strip_prefix("level:").unwrap_or(t));
+    let task_domain: Option<&str> = task_tags
+        .iter()
+        .find(|t| t.starts_with("domain:"))
+        .map(|t| t.strip_prefix("domain:").unwrap_or(t));
+
+    let mut topics: Vec<String> = workflows
+        .advisories
+        .iter()
+        .filter(|(_, adv)| is_relevant(adv, task_level, task_domain, phase, role))
+        .map(|(name, _)| name.clone())
+        .collect();
+    topics.sort();
+    topics
+}
+
 /// Check if an advisory is relevant to the current context.
 /// An advisory is relevant if all non-empty filter lists match the context.
 fn is_relevant(
