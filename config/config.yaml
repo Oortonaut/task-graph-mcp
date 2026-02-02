@@ -33,7 +33,7 @@ server:
   stale_timeout_seconds: 900
   
   # Default output format: json or markdown
-  default_format: json
+  default_format: markdown
   
   # UI configuration
   ui:

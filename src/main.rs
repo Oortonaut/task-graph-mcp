@@ -885,8 +885,22 @@ fn start_config_file_watcher(server: &TaskGraphServer, reload_ctx: ReloadContext
         return;
     }
 
+    // Install dir: the config/ directory with built-in workflows and overlays
+    let install_dir = if std::path::Path::new("config").exists() {
+        Some(std::path::PathBuf::from("config"))
+    } else {
+        None
+    };
+
+    // User dir: ~/.task-graph (if it exists)
+    let user_dir = dirs::home_dir()
+        .map(|h| h.join(".task-graph"))
+        .filter(|p| p.exists());
+
     let watch_paths = WatchPaths {
         config_dir,
+        install_dir,
+        user_dir,
         skills_dir,
     };
 

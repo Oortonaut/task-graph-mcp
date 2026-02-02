@@ -71,8 +71,12 @@ impl Default for WatcherConfig {
 /// Paths to watch for configuration changes.
 #[derive(Debug, Clone)]
 pub struct WatchPaths {
-    /// Config directory (typically `config/` or `task-graph/`)
+    /// Project config directory (typically `task-graph/` or `.task-graph/`)
     pub config_dir: Option<PathBuf>,
+    /// Install/package config directory (typically `config/`)
+    pub install_dir: Option<PathBuf>,
+    /// User-level config directory (typically `~/.task-graph/`)
+    pub user_dir: Option<PathBuf>,
     /// Skills directory (typically `task-graph/skills/`)
     pub skills_dir: Option<PathBuf>,
 }
@@ -163,6 +167,37 @@ pub fn start_config_watcher(
             warn!(
                 "Config directory does not exist, skipping watch: {}",
                 config_dir.display()
+            );
+        }
+    }
+
+    if config.watch_config
+        && let Some(ref install_dir) = paths.install_dir
+    {
+        if install_dir.exists() {
+            info!(
+                "Watching install config directory: {}",
+                install_dir.display()
+            );
+            watcher.watch(install_dir, notify::RecursiveMode::NonRecursive)?;
+        } else {
+            warn!(
+                "Install config directory does not exist, skipping watch: {}",
+                install_dir.display()
+            );
+        }
+    }
+
+    if config.watch_config
+        && let Some(ref user_dir) = paths.user_dir
+    {
+        if user_dir.exists() {
+            info!("Watching user config directory: {}", user_dir.display());
+            watcher.watch(user_dir, notify::RecursiveMode::NonRecursive)?;
+        } else {
+            debug!(
+                "User config directory does not exist, skipping watch: {}",
+                user_dir.display()
             );
         }
     }
@@ -296,6 +331,18 @@ fn classify_path(path: &Path, paths: &WatchPaths) -> Option<ConfigChangeEvent> {
         {
             return Some(ConfigChangeEvent::ConfigYaml(path.to_path_buf()));
         }
+        // YAML files in install dir are also config
+        if let Some(ref install_dir) = paths.install_dir
+            && path.starts_with(install_dir)
+        {
+            return Some(ConfigChangeEvent::ConfigYaml(path.to_path_buf()));
+        }
+        // YAML files in user dir are also config
+        if let Some(ref user_dir) = paths.user_dir
+            && path.starts_with(user_dir)
+        {
+            return Some(ConfigChangeEvent::ConfigYaml(path.to_path_buf()));
+        }
     }
 
     // Check if it's in the skills directory
@@ -316,6 +363,8 @@ mod tests {
     fn test_classify_config_yaml() {
         let paths = WatchPaths {
             config_dir: Some(PathBuf::from("task-graph")),
+            install_dir: None,
+            user_dir: None,
             skills_dir: Some(PathBuf::from("task-graph/skills")),
         };
 
@@ -327,6 +376,8 @@ mod tests {
     fn test_classify_workflow_yaml() {
         let paths = WatchPaths {
             config_dir: Some(PathBuf::from("config")),
+            install_dir: None,
+            user_dir: None,
             skills_dir: None,
         };
 
@@ -338,6 +389,8 @@ mod tests {
     fn test_classify_skills_change() {
         let paths = WatchPaths {
             config_dir: None,
+            install_dir: None,
+            user_dir: None,
             skills_dir: Some(PathBuf::from("task-graph/skills")),
         };
 
@@ -352,6 +405,8 @@ mod tests {
     fn test_classify_overlay_yaml() {
         let paths = WatchPaths {
             config_dir: Some(PathBuf::from("config")),
+            install_dir: None,
+            user_dir: None,
             skills_dir: None,
         };
 
@@ -363,6 +418,8 @@ mod tests {
     fn test_classify_unknown_file() {
         let paths = WatchPaths {
             config_dir: Some(PathBuf::from("config")),
+            install_dir: None,
+            user_dir: None,
             skills_dir: None,
         };
 
