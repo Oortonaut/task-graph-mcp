@@ -588,15 +588,21 @@ pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<V
         OutputFormat::Json => {
             let mut task_json = serde_json::to_value(&task)?;
             if let Some(obj) = task_json.as_object_mut() {
-                obj.insert("blocked_by".to_string(), json!(blocked_by));
-                obj.insert(
-                    "attachments".to_string(),
-                    serde_json::to_value(&attachments)?,
-                );
-                obj.insert(
-                    "attachment_counts".to_string(),
-                    serde_json::to_value(&attachment_counts)?,
-                );
+                if !blocked_by.is_empty() {
+                    obj.insert("blocked_by".to_string(), json!(blocked_by));
+                }
+                if !attachments.is_empty() {
+                    obj.insert(
+                        "attachments".to_string(),
+                        serde_json::to_value(&attachments)?,
+                    );
+                }
+                if !attachment_counts.is_empty() {
+                    obj.insert(
+                        "attachment_counts".to_string(),
+                        serde_json::to_value(&attachment_counts)?,
+                    );
+                }
             }
             Ok(task_json)
         }
