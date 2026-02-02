@@ -1,5 +1,6 @@
 //! MCP tool implementations.
 
+pub mod advisories;
 pub mod agents;
 pub mod attachments;
 pub mod claiming;
@@ -162,6 +163,9 @@ impl ToolHandler {
 
         // Workflow discovery tools (no auth needed, callable before connect)
         tools.extend(workflows::get_tools());
+
+        // Advisory tools
+        tools.extend(advisories::get_tools());
 
         // Feedback tools (conditionally enabled)
         if self.config.feedback.enabled {
@@ -357,6 +361,17 @@ impl ToolHandler {
                     &self.config.workflows,
                     arguments,
                 ))
+            }
+
+            // Advisory tools
+            "get_advisory" => {
+                // Look up worker's workflow for advisory definitions
+                let worker_id = arguments
+                    .get("worker_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let workflow = self.get_workflow_for_worker(worker_id);
+                json(advisories::get_advisory(&self.db, &workflow, arguments))
             }
 
             // Workflow discovery tools (no connection required)

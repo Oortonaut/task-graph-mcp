@@ -1,0 +1,577 @@
+name: governance
+description: "Multi-scale task decomposition: hierarchy taxonomy, advisory system, tag-based gates, and decomposition templates for managing work from vision to atomic subtasks across engineering, legal, finance, HR, security, and ops domains."
+
+# =============================================================================
+# TAG-BASED GATES
+# =============================================================================
+# Gates keyed by tag:<tag_name> are evaluated when a task with that tag
+# transitions status. Agents must attach the required artifact or use force=true.
+
+gates:
+  # --- Hierarchy level gates ---
+  tag:level:vision:
+    - type: gate/business-approval
+      enforcement: reject
+      description: "Vision-level items require executive sign-off before completion. Attach approval notes."
+
+  tag:level:initiative:
+    - type: gate/business-approval
+      enforcement: reject
+      description: "Initiatives require business stakeholder approval before completion."
+    - type: gate/budget-review
+      enforcement: warn
+      description: "Initiatives should have budget impact reviewed. Attach budget notes or skip with reason."
+
+  tag:level:epic:
+    - type: gate/design-review
+      enforcement: warn
+      description: "Epics should have a design review before completion. Attach design doc or review notes."
+
+  tag:level:story:
+    - type: gate/acceptance-criteria
+      enforcement: warn
+      description: "Stories should have acceptance criteria verified. Attach test results or verification notes."
+
+  # --- Domain gates ---
+  tag:domain:legal:
+    - type: gate/legal-sign-off
+      enforcement: reject
+      description: "Legal domain work requires legal counsel sign-off before completion."
+
+  tag:domain:finance:
+    - type: gate/budget-approval
+      enforcement: reject
+      description: "Finance domain work requires budget approval before completion."
+
+  tag:domain:security:
+    - type: gate/security-review
+      enforcement: warn
+      description: "Security domain work should have a security review. Attach findings or skip with reason."
+
+# =============================================================================
+# ADVISORIES
+# =============================================================================
+# On-demand guidance agents request via get_advisory(topic="...").
+# Supports {{template_vars}} for context-sensitive content.
+
+advisories:
+  # ---------------------------------------------------------------------------
+  # Decomposition advisories
+  # ---------------------------------------------------------------------------
+  decompose-vision:
+    level: [vision]
+    role: [lead, coordinator]
+    content: |
+      # Decomposing a Vision into Initiatives
+
+      Vision: **{{task_title}}** ({{task_id}})
+      Current children: {{child_count}}
+
+      ## Process
+      1. Identify 3-7 quarter-length strategic bets that advance this vision
+      2. Each initiative should be independently valuable and measurable
+      3. Tag each initiative with `level:initiative` and the appropriate `domain:*` tag
+      4. Link with `create_tree` using `contains` dependency type
+
+      ## Initiative Structure
+      - **Clear outcome**: What does success look like in 1 quarter?
+      - **Measurable**: How will we know it's done?
+      - **Resourced**: Which teams/domains are involved?
+      - **Bounded**: What is explicitly out of scope?
+
+      ## Anti-patterns
+      - Don't create more than 7 initiatives (prioritize ruthlessly)
+      - Don't create initiatives that span multiple quarters (split them)
+      - Don't create initiatives without a clear owner/stakeholder
+
+  decompose-initiative:
+    level: [initiative]
+    role: [lead, coordinator]
+    content: |
+      # Decomposing an Initiative into Epics
+
+      Initiative: **{{task_title}}** ({{task_id}})
+      Current children: {{child_count}}
+
+      ## Process
+      1. Identify the major bodies of work (epics) needed to deliver this initiative
+      2. Each epic should be 2-6 weeks of work for a team
+      3. Tag each epic with `level:epic` and inherit the parent's `domain:*` tag
+      4. Consider cross-domain epics (e.g., an engineering initiative may need a legal epic)
+
+      ## Gate Requirements
+      This initiative has `gate/business-approval` (reject) — you must attach stakeholder
+      approval before completing: `attach(task="{{task_id}}", type="gate/business-approval", content="Approved by...")`
+
+      ## Cross-domain Injection
+      Ask: "Does this initiative need work from other domains?"
+      - Legal review? → Create an epic tagged `domain:legal`
+      - Budget approval? → Create an epic tagged `domain:finance`
+      - Hiring? → Create an epic tagged `domain:hr`
+      - Security audit? → Create an epic tagged `domain:security`
+      - Infrastructure? → Create an epic tagged `domain:ops`
+
+  decompose-epic:
+    level: [epic]
+    role: [lead, coordinator, worker]
+    content: |
+      # Decomposing an Epic into Stories
+
+      Epic: **{{task_title}}** ({{task_id}})
+      Current children: {{child_count}}
+
+      ## Vertical Slice Guidance
+      Each story should be a **vertical slice** — a thin end-to-end piece of functionality
+      that delivers user-visible value, not a horizontal layer.
+
+      **Good**: "User can reset password via email link"
+      **Bad**: "Build the email service" (horizontal layer)
+
+      ## Process
+      1. Identify 3-10 sprint-sized stories
+      2. Order by dependency and value (use `follows` links for sequence)
+      3. Tag each story with `level:story`
+      4. Each story should be completable in 1-2 sprints
+
+      ## Story Template
+      - **Title**: Action-oriented ("User can...", "System handles...", "Agent processes...")
+      - **Acceptance criteria**: 2-5 testable conditions
+      - **Dependencies**: What must be done first? Use `link(type="follows")`
+      - **Domain**: Inherit or specify `domain:*` tag
+
+  decompose-story:
+    level: [story]
+    role: [lead, worker]
+    content: |
+      # Decomposing a Story into Tasks
+
+      Story: **{{task_title}}** ({{task_id}})
+      Current children: {{child_count}}
+
+      ## Process
+      1. Break the story into 2-7 concrete tasks (1-3 days each)
+      2. Tag each task with `level:task`
+      3. Use `follows` links to express ordering within the story
+      4. Assign phases: explore → design → implement → test → review
+
+      ## Task Sizing
+      - If a task takes more than 3 days, decompose further into subtasks
+      - If a task takes less than 2 hours, it's probably a subtask — combine with related work
+      - A good task has a clear "definition of done"
+
+      ## Common Task Patterns
+      - **Spike/exploration**: Tagged `level:task`, phase=explore, time-boxed
+      - **Implementation**: Tagged `level:task`, phase=implement
+      - **Test writing**: Tagged `level:task`, phase=test
+      - **Documentation**: Tagged `level:task`, phase=doc
+
+  decompose-task:
+    level: [task]
+    role: [worker]
+    content: |
+      # When to Create Subtasks
+
+      Task: **{{task_title}}** ({{task_id}})
+      Current children: {{child_count}}
+
+      ## When to Decompose
+      - Task is taking longer than expected (> 3 days)
+      - Task has distinct parallelizable parts
+      - You want to track progress at finer granularity
+
+      ## When NOT to Decompose
+      - Task is straightforward (just do it)
+      - Overhead of tracking subtasks exceeds the value
+      - You're at {{child_count}} children already — consider if more granularity helps
+
+      ## Subtask Guidelines
+      - Tag with `level:subtask`
+      - Keep subtasks to hours of work, not days
+      - Use `level:step` only for automated micro-steps (minutes)
+
+  # ---------------------------------------------------------------------------
+  # Domain injection advisories
+  # ---------------------------------------------------------------------------
+  inject-legal:
+    domain: [legal]
+    level: [initiative, epic, story]
+    content: |
+      # Injecting Legal Review Work
+
+      ## When to Inject Legal
+      - New contracts or vendor agreements
+      - Compliance requirements (GDPR, SOC2, HIPAA)
+      - Intellectual property concerns
+      - Terms of service changes
+      - Data processing agreements
+      - Open source license compliance
+
+      ## Process
+      1. Create task tagged `domain:legal` at the appropriate level:
+         - **Initiative-level**: Major compliance programs, new market entry
+         - **Epic-level**: Contract negotiations, policy overhauls
+         - **Story-level**: Individual contract reviews, license checks
+      2. The `gate/legal-sign-off` (reject) gate requires legal counsel approval
+      3. Use `link(type="blocks")` to block dependent engineering work
+
+      ## Legal Process Phases
+      `triage` → `explore` (assessment) → `review` (counsel review) → `doc` (documentation)
+
+      ## Template: Legal Review Epic
+      ```
+      create_tree(tree={
+        title: "Legal review: <topic>",
+        tags: ["level:epic", "domain:legal"],
+        children: [
+          { title: "Legal assessment", tags: ["level:story", "domain:legal"] },
+          { title: "Counsel review", tags: ["level:story", "domain:legal"] },
+          { title: "Documentation & sign-off", tags: ["level:story", "domain:legal"] }
+        ]
+      })
+      ```
+
+  inject-finance:
+    domain: [finance]
+    level: [initiative, epic]
+    content: |
+      # Injecting Finance/Budget Work
+
+      ## When to Inject Finance
+      - Budget requests > threshold
+      - Capital expenditure approvals
+      - Vendor procurement
+      - Cost-benefit analysis needed
+      - Quarterly budget reconciliation
+
+      ## Process
+      1. Create task tagged `domain:finance` at initiative or epic level
+      2. The `gate/budget-approval` (reject) gate requires finance sign-off
+      3. Use `link(type="blocks")` to block spending-dependent work
+
+      ## Finance Process Phases
+      `triage` → `plan` (budget modeling) → `review` (approval cycle) → `doc` (record keeping)
+
+      ## Template: Budget Approval Cycle
+      ```
+      create_tree(tree={
+        title: "Budget approval: <item>",
+        tags: ["level:epic", "domain:finance"],
+        children: [
+          { title: "Cost estimation & modeling", tags: ["level:story", "domain:finance"] },
+          { title: "Finance review & approval", tags: ["level:story", "domain:finance"] },
+          { title: "Budget allocation & tracking", tags: ["level:story", "domain:finance"] }
+        ]
+      })
+      ```
+
+  inject-hr:
+    domain: [hr]
+    level: [initiative, epic, story]
+    content: |
+      # Injecting HR/Personnel Work
+
+      ## When to Inject HR
+      - Hiring for new roles
+      - Team reorganization
+      - Performance-related changes
+      - Onboarding/offboarding
+      - Policy changes affecting personnel
+
+      ## Process
+      1. Create task tagged `domain:hr` at the appropriate level
+      2. HR work typically enters at initiative (reorgs) or epic (hiring) level
+      3. Use `link(type="blocks")` to block work that depends on personnel changes
+
+      ## HR Process Phases
+      `triage` → `plan` (requirements) → `review` (approval) → completed
+
+      ## Template: Hiring Pipeline
+      ```
+      create_tree(tree={
+        title: "Hire: <role>",
+        tags: ["level:epic", "domain:hr"],
+        children: [
+          { title: "Define role & requirements", tags: ["level:story", "domain:hr"] },
+          { title: "Source & screen candidates", tags: ["level:story", "domain:hr"] },
+          { title: "Interview & selection", tags: ["level:story", "domain:hr"] },
+          { title: "Offer & onboarding", tags: ["level:story", "domain:hr"] }
+        ]
+      })
+      ```
+
+  inject-security:
+    domain: [security]
+    level: [epic, story, task]
+    content: |
+      # Injecting Security Review Work
+
+      ## When to Inject Security
+      - Authentication/authorization changes
+      - Data handling or storage changes
+      - External API integrations
+      - Infrastructure changes
+      - Dependency updates with known CVEs
+      - Pre-release security audits
+
+      ## Process
+      1. Create task tagged `domain:security` at epic, story, or task level
+      2. The `gate/security-review` (warn) gate encourages review before completion
+      3. Use `link(type="blocks")` to block deployment until review is done
+
+      ## Security Process Phases
+      `explore` (threat modeling) → `security` (audit) → `review` (findings) → `doc` (report)
+
+      ## Template: Security Review
+      ```
+      create_tree(tree={
+        title: "Security review: <scope>",
+        tags: ["level:epic", "domain:security"],
+        children: [
+          { title: "Threat model & attack surface", tags: ["level:story", "domain:security"] },
+          { title: "Security audit & testing", tags: ["level:story", "domain:security"] },
+          { title: "Findings review & remediation", tags: ["level:story", "domain:security"] },
+          { title: "Security sign-off", tags: ["level:story", "domain:security"] }
+        ]
+      })
+      ```
+
+  inject-ops:
+    domain: [ops]
+    level: [story, task, subtask]
+    content: |
+      # Injecting Ops/Infrastructure Work
+
+      ## When to Inject Ops
+      - New service deployment
+      - Infrastructure provisioning
+      - Monitoring/alerting setup
+      - Incident response
+      - Capacity planning
+      - CI/CD pipeline changes
+
+      ## Process
+      1. Create task tagged `domain:ops` at story, task, or subtask level
+      2. Ops work often enters at lower levels (task/subtask) as implementation details
+      3. Use `link(type="blocks")` for deployment dependencies
+
+      ## Ops Process Phases
+      `plan` → `implement` → `deploy` → `monitor`
+
+      ## Template: Incident Response
+      ```
+      create_tree(tree={
+        title: "Incident: <description>",
+        tags: ["level:story", "domain:ops"],
+        children: [
+          { title: "Triage & impact assessment", tags: ["level:task", "domain:ops"] },
+          { title: "Mitigation & fix", tags: ["level:task", "domain:ops"] },
+          { title: "Post-mortem & prevention", tags: ["level:task", "domain:ops"] }
+        ]
+      })
+      ```
+
+  # ---------------------------------------------------------------------------
+  # Process advisories
+  # ---------------------------------------------------------------------------
+  approval-checkpoint:
+    level: [vision, initiative, epic]
+    role: [lead, coordinator]
+    content: |
+      # Approval Checkpoints and Human Sign-off
+
+      Task: **{{task_title}}** ({{task_id}}, level: {{task_level}})
+
+      ## When to Use consult State
+      Use the `consult` state (if available in your workflow) or add a blocking task
+      for human approval at these checkpoints:
+      - **Vision**: Any scope change or strategic pivot
+      - **Initiative**: Before allocating budget or headcount
+      - **Epic**: Before starting implementation (design approval)
+
+      ## Pattern: Approval Gate
+      1. Create a child task: "Approval: <decision>"
+      2. Tag with the parent's `level:*` and `domain:*` tags
+      3. Link with `blocks` to all dependent work
+      4. Set status to `pending` — the human reviews and completes it
+      5. Attach approval notes: `attach(type="gate/business-approval", content="Approved by...")`
+
+      ## Anti-patterns
+      - Don't gate every task — only gate at level:epic and above
+      - Don't let approval tasks sit indefinitely — set time expectations
+      - Don't skip the gate with force=true unless there's genuine urgency
+
+  cross-domain-deps:
+    content: |
+      # Cross-Domain Blocking Dependencies
+
+      ## The Problem
+      Work in one domain often blocks work in another:
+      - Legal review blocks product launch
+      - Budget approval blocks hiring
+      - Security audit blocks deployment
+      - Hiring blocks team capacity
+
+      ## Pattern: Cross-Domain Link
+      ```
+      # Legal blocks engineering deployment
+      link(from="legal-review-42", to="deploy-service-99", type="blocks")
+      ```
+
+      ## Deadlock Detection
+      Watch for circular blocking:
+      - Legal blocks engineering blocks legal (need sequencing)
+      - Use `scan()` to find tasks in `pending` with all deps blocked
+      - Break cycles by identifying which domain can move first independently
+
+      ## Mitigation
+      1. Time-box domain reviews: "Legal has 5 business days to review"
+      2. Create parallel tracks: Start engineering work that doesn't depend on legal
+      3. Use `follows` (soft ordering) instead of `blocks` (hard blocking) where possible
+      4. Escalate stuck cross-domain deps to the initiative owner
+
+  rollup-reporting:
+    level: [vision, initiative, epic]
+    role: [lead, coordinator]
+    content: |
+      # Roll-up Reporting Across Hierarchy
+
+      ## SQL Patterns for Aggregation
+
+      ### Completion percentage for an initiative
+      ```sql
+      SELECT
+        parent.id as initiative_id,
+        parent.title,
+        COUNT(CASE WHEN child.status = 'completed' THEN 1 END) as completed,
+        COUNT(child.id) as total,
+        ROUND(100.0 * COUNT(CASE WHEN child.status = 'completed' THEN 1 END) / COUNT(child.id), 1) as pct
+      FROM tasks parent
+      JOIN task_deps td ON td.from_task = parent.id AND td.dep_type = 'contains'
+      JOIN tasks child ON child.id = td.to_task AND child.deleted_at IS NULL
+      WHERE parent.id = '{{task_id}}'
+      GROUP BY parent.id
+      ```
+
+      ### Time spent across all children
+      ```sql
+      SELECT
+        SUM(ta.duration_ms) as total_ms,
+        COUNT(DISTINCT ta.worker_id) as unique_agents,
+        COUNT(ta.id) as total_sessions
+      FROM task_deps td
+      JOIN time_entries ta ON ta.task_id = td.to_task
+      WHERE td.from_task = '{{task_id}}' AND td.dep_type = 'contains'
+      ```
+
+      ## Caution: Roll-up Illusions
+      - Parent completion % only counts direct children, not grandchildren
+      - A parent can show 80% complete while the remaining 20% is the hardest part
+      - Use `query()` with recursive CTEs for deep hierarchy aggregation
+
+  scope-creep:
+    content: |
+      # Detecting and Handling Scope Expansion
+
+      ## Detection Signals
+      - Child count growing beyond the initial plan ({{child_count}} children now)
+      - New children being added after work has started
+      - Tasks being relinked from other parents
+      - Estimated time far exceeding actuals
+
+      ## The Relink Pattern
+      When scope creep is detected:
+      1. Identify the out-of-scope work
+      2. `relink(task="out-of-scope-task", from="current-parent", to="new-parent")`
+      3. Move it to a more appropriate parent (new epic, backlog, etc.)
+      4. Document the decision: `attach(type="note", content="Moved to backlog: out of scope for this sprint")`
+
+      ## Prevention
+      - Define "done" criteria at the story level BEFORE starting
+      - Use `gate/acceptance-criteria` (warn) on stories to enforce this
+      - Time-box exploration phases
+      - Review child count at each standup — growth indicates scope creep
+
+  gotchas:
+    content: |
+      # Common Mistakes and Anti-Patterns at Scale
+
+      ## Over-Decomposition
+      **Problem**: Using all 7 levels for a 2-hour task.
+      **Fix**: Match decomposition depth to actual complexity. A quick bug fix needs
+      `level:task` or `level:subtask`, not a full vision → initiative → epic → story chain.
+
+      ## Phantom Hierarchy
+      **Problem**: Empty parent tasks that exist only for structure, with no content or
+      acceptance criteria of their own.
+      **Fix**: Every task at every level should have a clear "what does done look like?"
+      If a parent exists only to group children, that's fine — but document why.
+
+      ## Domain Tag Sprawl
+      **Problem**: Creating fine-grained domain tags like `domain:frontend-css`,
+      `domain:backend-auth`, `domain:devops-k8s`.
+      **Fix**: Stick to the 6 base domains (engineering, legal, finance, hr, security, ops).
+      Use regular tags for sub-categorization: `domain:engineering` + `frontend` + `css`.
+
+      ## Gate Fatigue
+      **Problem**: So many approval gates that agents force-bypass everything.
+      **Fix**: Use `reject` enforcement sparingly (only for legal/finance sign-off).
+      Use `warn` for most gates — they guide without hard-blocking.
+
+      ## Orphaned Branches
+      **Problem**: Subtrees disconnected from the main hierarchy after relinking.
+      **Fix**: After relink, verify the old parent still has children. Use
+      `scan()` periodically to find tasks with no parent links.
+
+      ## Level Drift
+      **Problem**: Tasks tagged `level:epic` that are actually story-sized, or
+      `level:task` items that are really epics.
+      **Fix**: Calibrate by time: vision (quarters), initiative (quarter),
+      epic (2-6 weeks), story (1-2 sprints), task (1-3 days), subtask (hours).
+
+      ## Cross-Domain Deadlocks
+      **Problem**: Legal blocks engineering blocks legal in a cycle.
+      **Fix**: Identify the cycle with `scan()`. Break it by sequencing:
+      decide which domain can provide a preliminary unblocking artifact first.
+
+      ## Roll-up Illusions
+      **Problem**: Parent metrics that don't reflect child reality. An initiative
+      shows "80% complete" but the remaining 20% is 80% of the effort.
+      **Fix**: Weight by points, not count. Use `query()` to sum points for
+      completed vs total children.
+
+# =============================================================================
+# DECOMPOSITION TEMPLATES (documentary reference)
+# =============================================================================
+# These templates are referenced by advisories. Agents use them as patterns
+# for create_tree calls. They are not executable — they're guidance.
+
+# Templates are documented inline in the advisory content above.
+# Summary of available patterns:
+#
+# initiative-to-epics:
+#   Referenced in: decompose-initiative
+#   Pattern: 3-7 epics per initiative, cross-domain injection point
+#
+# engineering-epic:
+#   Referenced in: decompose-epic
+#   Pattern: Vertical slice stories with explore/design/implement/test/review phases
+#
+# legal-review:
+#   Referenced in: inject-legal
+#   Pattern: Assessment → counsel review → documentation & sign-off
+#
+# budget-cycle:
+#   Referenced in: inject-finance
+#   Pattern: Cost estimation → finance review → budget allocation
+#
+# hiring-pipeline:
+#   Referenced in: inject-hr
+#   Pattern: Define role → source → interview → offer & onboard
+#
+# bug-triage-to-fix:
+#   Pattern: triage → diagnose → implement fix → test → review
+#   Use: create_tree with level:story, children at level:task
+#
+# incident-response:
+#   Referenced in: inject-ops
+#   Pattern: Triage → mitigation → post-mortem

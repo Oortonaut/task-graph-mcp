@@ -13,6 +13,37 @@ use super::types::{
     GateDefinition, PhasesConfig, StateDefinition, StatesConfig, UnknownKeyBehavior,
 };
 
+/// Definition of an advisory topic for on-demand guidance.
+///
+/// Advisories are pull-based guidance that agents request via `get_advisory`.
+/// Each advisory has content and optional filters for contextual matching.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AdvisoryDefinition {
+    /// Hierarchy levels this advisory applies to (e.g., "epic", "story").
+    /// Empty means all levels.
+    #[serde(default)]
+    pub level: Vec<String>,
+
+    /// Phases this advisory applies to (e.g., "implement", "review").
+    /// Empty means all phases.
+    #[serde(default)]
+    pub phase: Vec<String>,
+
+    /// Roles this advisory applies to (e.g., "lead", "worker").
+    /// Empty means all roles.
+    #[serde(default)]
+    pub role: Vec<String>,
+
+    /// Work domains this advisory applies to (e.g., "engineering", "legal").
+    /// Empty means all domains.
+    #[serde(default)]
+    pub domain: Vec<String>,
+
+    /// The advisory content (supports {{template_vars}}).
+    #[serde(default)]
+    pub content: String,
+}
+
 /// Settings for workflow behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowSettings {
@@ -179,6 +210,11 @@ pub struct WorkflowsConfig {
     #[serde(default)]
     pub role_prompts: HashMap<String, HashMap<String, String>>,
 
+    /// Advisory definitions for on-demand guidance.
+    /// Key is the advisory topic name (e.g., "decompose-epic", "inject-legal").
+    #[serde(default)]
+    pub advisories: HashMap<String, AdvisoryDefinition>,
+
     /// Cache of named workflow configs (e.g., "swarm" -> workflow-swarm.yaml).
     /// Populated at server startup, not serialized.
     #[serde(skip)]
@@ -212,6 +248,7 @@ impl Default for WorkflowsConfig {
             gates: HashMap::new(),
             roles: HashMap::new(),
             role_prompts: HashMap::new(),
+            advisories: HashMap::new(),
             named_workflows: HashMap::new(),
             default_workflow_key: None,
             named_overlays: HashMap::new(),
@@ -397,6 +434,43 @@ impl WorkflowsConfig {
                     })
                     .or_insert_with(|| overlay_value.clone());
             }
+        }
+
+        // --- advisories ---
+        for (topic, overlay_advisory) in &overlay.advisories {
+            self.advisories
+                .entry(topic.clone())
+                .and_modify(|existing| {
+                    // Append content
+                    if !overlay_advisory.content.is_empty() {
+                        if !existing.content.is_empty() {
+                            existing.content.push_str(PROMPT_SEPARATOR);
+                        }
+                        existing.content.push_str(&overlay_advisory.content);
+                    }
+                    // Union filters
+                    for v in &overlay_advisory.level {
+                        if !existing.level.contains(v) {
+                            existing.level.push(v.clone());
+                        }
+                    }
+                    for v in &overlay_advisory.phase {
+                        if !existing.phase.contains(v) {
+                            existing.phase.push(v.clone());
+                        }
+                    }
+                    for v in &overlay_advisory.role {
+                        if !existing.role.contains(v) {
+                            existing.role.push(v.clone());
+                        }
+                    }
+                    for v in &overlay_advisory.domain {
+                        if !existing.domain.contains(v) {
+                            existing.domain.push(v.clone());
+                        }
+                    }
+                })
+                .or_insert_with(|| overlay_advisory.clone());
         }
 
         // --- settings ---
@@ -815,6 +889,15 @@ impl WorkflowsConfig {
             .map(|v| v.iter().collect())
             .unwrap_or_default()
     }
+
+    /// Get exit gates for a tag.
+    /// Returns gates defined under "tag:<tag_name>" key.
+    pub fn get_tag_exit_gates(&self, tag: &str) -> Vec<&GateDefinition> {
+        self.gates
+            .get(&format!("tag:{}", tag))
+            .map(|v| v.iter().collect())
+            .unwrap_or_default()
+    }
 }
 
 /// Convert WorkflowsConfig to StatesConfig for backwards compatibility.
@@ -1228,5 +1311,91 @@ mod tests {
                 .iter()
                 .any(|v| v.as_str() == Some("enter~working"))
         );
+    }
+
+    #[test]
+    fn test_governance_overlay_deserializes() {
+        let yaml = include_str!("../../config/overlay-governance.yaml");
+        let config: WorkflowsConfig =
+            serde_yaml::from_str(yaml).expect("overlay-governance.yaml should deserialize");
+        assert_eq!(config.name.as_deref(), Some("governance"));
+        assert!(
+            !config.advisories.is_empty(),
+            "should have advisories defined"
+        );
+        assert!(!config.gates.is_empty(), "should have gates defined");
+    }
+
+    #[test]
+    fn test_governance_overlay_advisories() {
+        let yaml = include_str!("../../config/overlay-governance.yaml");
+        let config: WorkflowsConfig = serde_yaml::from_str(yaml).unwrap();
+
+        // Check key advisories exist
+        assert!(config.advisories.contains_key("decompose-vision"));
+        assert!(config.advisories.contains_key("decompose-epic"));
+        assert!(config.advisories.contains_key("inject-legal"));
+        assert!(config.advisories.contains_key("gotchas"));
+
+        // Check advisory filters
+        let decompose_epic = &config.advisories["decompose-epic"];
+        assert!(decompose_epic.level.contains(&"epic".to_string()));
+        assert!(!decompose_epic.content.is_empty());
+
+        let inject_legal = &config.advisories["inject-legal"];
+        assert!(inject_legal.domain.contains(&"legal".to_string()));
+    }
+
+    #[test]
+    fn test_governance_overlay_tag_gates() {
+        let yaml = include_str!("../../config/overlay-governance.yaml");
+        let config: WorkflowsConfig = serde_yaml::from_str(yaml).unwrap();
+
+        // Check tag-based gates
+        let initiative_gates = config.get_tag_exit_gates("level:initiative");
+        assert!(
+            !initiative_gates.is_empty(),
+            "should have gates for level:initiative"
+        );
+        assert!(
+            initiative_gates
+                .iter()
+                .any(|g| g.gate_type == "gate/business-approval"),
+            "should have business-approval gate"
+        );
+
+        let legal_gates = config.get_tag_exit_gates("domain:legal");
+        assert!(
+            legal_gates
+                .iter()
+                .any(|g| g.gate_type == "gate/legal-sign-off"),
+            "should have legal-sign-off gate"
+        );
+    }
+
+    #[test]
+    fn test_advisory_overlay_merge() {
+        let mut base = WorkflowsConfig::default();
+        let yaml = include_str!("../../config/overlay-governance.yaml");
+        let overlay: WorkflowsConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert!(base.advisories.is_empty());
+        base.apply_overlay(&overlay);
+        assert!(
+            !base.advisories.is_empty(),
+            "advisories should be merged from overlay"
+        );
+        assert!(
+            !base.gates.is_empty(),
+            "gates should be merged from overlay"
+        );
+        assert!(base.advisories.contains_key("decompose-epic"));
+    }
+
+    #[test]
+    fn test_get_tag_exit_gates_empty() {
+        let config = WorkflowsConfig::default();
+        let gates = config.get_tag_exit_gates("level:nonexistent");
+        assert!(gates.is_empty());
     }
 }

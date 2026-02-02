@@ -120,6 +120,16 @@ pub fn claim(
                 )
                 .with_task(&task.id, &task.title, task.priority, &task.tags);
 
+                // Add hierarchy level context from level:* tags
+                let task_level_str: Option<String> = task
+                    .tags
+                    .iter()
+                    .find(|t| t.starts_with("level:"))
+                    .map(|t| t.strip_prefix("level:").unwrap_or(t).to_string());
+                let child_count = db.get_children_ids(&task.id).ok().map(|ids| ids.len());
+                let task_level_ref = task_level_str.as_deref();
+                ctx = ctx.with_level(task_level_ref, child_count);
+
                 // Add agent context if worker info is available
                 if let Some(ref worker) = worker_info {
                     ctx = ctx.with_agent(&worker_id, worker_role.as_deref(), &worker.tags);

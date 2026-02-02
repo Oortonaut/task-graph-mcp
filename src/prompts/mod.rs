@@ -53,6 +53,10 @@ pub struct PromptContext<'a> {
     pub agent_role: Option<&'a str>,
     /// Agent's tags (if available)
     pub agent_tags: Option<&'a [String]>,
+    /// Task's hierarchy level extracted from level:* tags (if available)
+    pub task_level: Option<&'a str>,
+    /// Number of direct children (contains deps) of the task (if available)
+    pub child_count: Option<usize>,
 }
 
 impl<'a> PromptContext<'a> {
@@ -79,6 +83,8 @@ impl<'a> PromptContext<'a> {
             agent_id: None,
             agent_role: None,
             agent_tags: None,
+            task_level: None,
+            child_count: None,
         }
     }
 
@@ -94,6 +100,13 @@ impl<'a> PromptContext<'a> {
         self.task_title = Some(title);
         self.task_priority = Some(priority);
         self.task_tags = Some(tags);
+        self
+    }
+
+    /// Add hierarchy level and child count context.
+    pub fn with_level(mut self, level: Option<&'a str>, child_count: Option<usize>) -> Self {
+        self.task_level = level;
+        self.child_count = child_count;
         self
     }
 
@@ -210,6 +223,21 @@ pub fn expand_prompt(content: &str, ctx: &PromptContext) -> String {
             })
             .unwrap_or_else(|| "_(none)_".to_string());
         result = result.replace("{{task_tags}}", &val);
+    }
+
+    // === Hierarchy context ===
+
+    if result.contains("{{task_level}}") {
+        let val = ctx.task_level.unwrap_or("_unset_");
+        result = result.replace("{{task_level}}", val);
+    }
+
+    if result.contains("{{child_count}}") {
+        let val = ctx
+            .child_count
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "_unknown_".to_string());
+        result = result.replace("{{child_count}}", &val);
     }
 
     // === Agent context ===

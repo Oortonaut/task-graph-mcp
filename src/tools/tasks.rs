@@ -1210,6 +1210,108 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
         }
     }
 
+    // Check tag-based exit gates (evaluated on status transitions)
+    let mut skipped_tag_gates: Vec<String> = Vec::new();
+    if let Some(ref new_status) = status {
+        let current_task = db.get_task(&task_id)?.ok_or_else(|| {
+            ToolError::new(crate::error::ErrorCode::TaskNotFound, "Task not found")
+        })?;
+
+        if &current_task.status != new_status {
+            // Collect gates from all task tags
+            let mut tag_gates: Vec<crate::config::GateDefinition> = Vec::new();
+            for tag in &current_task.tags {
+                let gates = workflows.get_tag_exit_gates(tag);
+                tag_gates.extend(gates.into_iter().cloned());
+            }
+
+            if !tag_gates.is_empty() {
+                let gate_result = evaluate_gates(db, &task_id, &tag_gates)?;
+
+                match gate_result.status.as_str() {
+                    "fail" => {
+                        let gate_names: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Reject)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+                        return Err(ToolError::gates_not_satisfied(
+                            &current_task.status,
+                            &gate_names,
+                        )
+                        .into());
+                    }
+                    "warn" => {
+                        let warn_gates: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Warn)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+
+                        if !force {
+                            let how_to_fix: Vec<String> = warn_gates
+                                .iter()
+                                .map(|g| {
+                                    let gate_type = g.split(" (").next().unwrap_or(g);
+                                    format!(
+                                        "  - attach(task=\"{}\", type=\"{}\", content=\"...\")",
+                                        task_id, gate_type
+                                    )
+                                })
+                                .collect();
+                            return Err(ToolError::new(
+                                crate::error::ErrorCode::GatesNotSatisfied,
+                                format!(
+                                    "Cannot exit '{}' without force=true: unsatisfied tag gates: {}",
+                                    current_task.status,
+                                    warn_gates.join(", ")
+                                ),
+                            )
+                            .with_details(format!(
+                                "Satisfy these tag-based gates by attaching the required artifacts:\n{}\n\nOr pass force=true with a reason to skip warn-level gates.",
+                                how_to_fix.join("\n")
+                            ))
+                            .with_suggestion(
+                                "Attach the required gate artifacts and retry, or use update(..., force=true, reason=\"why skipping\") to proceed.".to_string(),
+                            )
+                            .into());
+                        }
+                        warn!(
+                            task_id = %task_id,
+                            agent = %worker_id,
+                            from_status = %current_task.status,
+                            to_status = %new_status,
+                            skipped_gates = ?warn_gates,
+                            "Status transition with skipped tag gates (force=true)"
+                        );
+                        skipped_tag_gates = warn_gates.clone();
+                        gate_warnings.push(format!(
+                            "Proceeding despite unsatisfied tag gates (force=true): {}",
+                            warn_gates.join(", ")
+                        ));
+                    }
+                    "pass" => {
+                        let allow_gates: Vec<String> = gate_result
+                            .unsatisfied_gates
+                            .iter()
+                            .filter(|g| g.enforcement == GateEnforcement::Allow)
+                            .map(|g| format!("{} ({})", g.gate_type, g.description))
+                            .collect();
+                        if !allow_gates.is_empty() {
+                            gate_warnings.push(format!(
+                                "Optional tag gates not satisfied: {}",
+                                allow_gates.join(", ")
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     // Build audit reason including any skipped gates
     let audit_reason = {
         let mut parts: Vec<String> = Vec::new();
@@ -1232,6 +1334,14 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
             parts.push(format!(
                 "Skipped phase exit gates (force=true): {}",
                 skipped_phase_gates.join(", ")
+            ));
+        }
+
+        // Include skipped tag gates for audit
+        if !skipped_tag_gates.is_empty() {
+            parts.push(format!(
+                "Skipped tag exit gates (force=true): {}",
+                skipped_tag_gates.join(", ")
             ));
         }
 
@@ -1285,6 +1395,17 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
                     phases_config,
                 )
                 .with_task(&task.id, &task.title, task.priority, &task.tags);
+
+                // Add hierarchy level context from level:* tags
+                let task_level_str: Option<String> = task
+                    .tags
+                    .iter()
+                    .find(|t| t.starts_with("level:"))
+                    .map(|t| t.strip_prefix("level:").unwrap_or(t).to_string());
+                let child_count = db.get_children_ids(&task.id).ok().map(|ids| ids.len());
+                // We need a reference that outlives ctx, so bind to a variable
+                let task_level_ref = task_level_str.as_deref();
+                ctx = ctx.with_level(task_level_ref, child_count);
 
                 // Add agent context if worker info is available
                 if let Some(ref worker) = worker_info_for_prompts {

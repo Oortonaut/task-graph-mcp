@@ -95,6 +95,55 @@ feedback:
   # Enable give_feedback and list_feedback tools (default: false)
   enabled: false
 
+# Tag definitions
+tags:
+  # Behavior for unknown tags: allow, warn, reject
+  unknown_tag: warn
+
+  definitions:
+    # Hierarchy level tags (used by governance overlay)
+    level:vision:
+      category: hierarchy
+      description: "Multi-quarter north-star objective"
+    level:initiative:
+      category: hierarchy
+      description: "Quarter-length strategic bet"
+    level:epic:
+      category: hierarchy
+      description: "Multi-sprint body of work (2-6 weeks)"
+    level:story:
+      category: hierarchy
+      description: "Sprint-sized deliverable"
+    level:task:
+      category: hierarchy
+      description: "1-3 day concrete work item"
+    level:subtask:
+      category: hierarchy
+      description: "Hours-scale atomic unit of work"
+    level:step:
+      category: hierarchy
+      description: "Minutes-scale micro-step (automation)"
+
+    # Work domain tags (used by governance overlay)
+    domain:engineering:
+      category: domain
+      description: "Software engineering work"
+    domain:legal:
+      category: domain
+      description: "Legal, compliance, and contract work"
+    domain:finance:
+      category: domain
+      description: "Budget, procurement, and financial work"
+    domain:hr:
+      category: domain
+      description: "Personnel, hiring, and organizational work"
+    domain:security:
+      category: domain
+      description: "Security review, audit, and compliance"
+    domain:ops:
+      category: domain
+      description: "Infrastructure, deployment, and operations"
+
 # Attachment key definitions
 attachments:
   # Behavior for unknown keys: allow, warn, reject
@@ -150,4 +199,33 @@ attachments:
       mime: "text/plain"
       mode: append
       # For attaching review notes or approval
+    # Governance overlay gate attachments
+    gate/business-approval:
+      mime: "text/plain"
+      mode: append
+      # For attaching stakeholder/executive approval
+    gate/budget-review:
+      mime: "text/plain"
+      mode: append
+      # For attaching budget impact review
+    gate/budget-approval:
+      mime: "text/plain"
+      mode: append
+      # For attaching finance sign-off
+    gate/design-review:
+      mime: "text/plain"
+      mode: append
+      # For attaching design review notes
+    gate/acceptance-criteria:
+      mime: "text/plain"
+      mode: append
+      # For attaching acceptance criteria verification
+    gate/legal-sign-off:
+      mime: "text/plain"
+      mode: append
+      # For attaching legal counsel approval
+    gate/security-review:
+      mime: "text/plain"
+      mode: append
+      # For attaching security review findings
 
