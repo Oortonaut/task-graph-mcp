@@ -1398,4 +1398,101 @@ mod tests {
         let gates = config.get_tag_exit_gates("level:nonexistent");
         assert!(gates.is_empty());
     }
+
+    #[test]
+    fn test_git_worktree_overlay_deserializes() {
+        let yaml = include_str!("../../config/overlay-git-worktree.yaml");
+        let config: WorkflowsConfig =
+            serde_yaml::from_str(yaml).expect("overlay-git-worktree.yaml should deserialize");
+        assert_eq!(config.name.as_deref(), Some("git-worktree"));
+        assert!(!config.states.is_empty(), "should have states defined");
+        assert!(!config.gates.is_empty(), "should have gates defined");
+        assert!(
+            !config.advisories.is_empty(),
+            "should have advisories defined"
+        );
+    }
+
+    #[test]
+    fn test_git_worktree_overlay_patching_state() {
+        let yaml = include_str!("../../config/overlay-git-worktree.yaml");
+        let config: WorkflowsConfig = serde_yaml::from_str(yaml).unwrap();
+
+        let patching = config
+            .states
+            .get("patching")
+            .expect("should have patching state");
+        assert!(patching.timed, "patching state should be timed");
+        assert!(
+            patching.exits.contains(&"working".to_string()),
+            "patching should exit to working"
+        );
+        assert!(
+            patching.exits.contains(&"completed".to_string()),
+            "patching should exit to completed"
+        );
+        assert!(
+            patching.exits.contains(&"failed".to_string()),
+            "patching should exit to failed"
+        );
+    }
+
+    #[test]
+    fn test_git_worktree_overlay_composes_with_git() {
+        let git_yaml = include_str!("../../config/overlay-git.yaml");
+        let worktree_yaml = include_str!("../../config/overlay-git-worktree.yaml");
+
+        let git_overlay: WorkflowsConfig = serde_yaml::from_str(git_yaml).unwrap();
+        let worktree_overlay: WorkflowsConfig = serde_yaml::from_str(worktree_yaml).unwrap();
+
+        let mut merged = WorkflowsConfig::default();
+        merged.apply_overlay(&git_overlay);
+        merged.apply_overlay(&worktree_overlay);
+
+        // Both overlays contribute states
+        assert!(
+            merged.states.contains_key("working"),
+            "should have working state from both overlays"
+        );
+        assert!(
+            merged.states.contains_key("patching"),
+            "should have patching state from worktree overlay"
+        );
+        assert!(
+            merged.states.contains_key("completed"),
+            "should have completed state from both overlays"
+        );
+
+        // Both overlays contribute gates
+        let completed_gates = merged
+            .gates
+            .get("status:completed")
+            .expect("should have status:completed gates");
+        assert!(
+            completed_gates.iter().any(|g| g.gate_type == "gate/commit"),
+            "should have gate/commit from git overlay"
+        );
+        assert!(
+            completed_gates.iter().any(|g| g.gate_type == "gate/patch"),
+            "should have gate/patch from worktree overlay"
+        );
+
+        // Worktree overlay contributes role prompts
+        assert!(
+            merged.role_prompts.contains_key("integrator"),
+            "should have integrator role prompts"
+        );
+
+        // Working state prompts are appended (both overlays contribute)
+        let working = &merged.states["working"];
+        let enter_prompt = working.prompts.enter.as_deref().unwrap_or("");
+        assert!(
+            enter_prompt.contains("worktree"),
+            "working enter prompt should include worktree guidance"
+        );
+        assert!(
+            enter_prompt.contains("branch"),
+            "working enter prompt should include branch guidance from git overlay"
+        );
+    }
 }

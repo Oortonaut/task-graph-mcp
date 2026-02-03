@@ -228,4 +228,12 @@ attachments:
       mime: "text/plain"
       mode: append
       # For attaching security review findings
+    gate/patch:
+      mime: "text/plain"
+      mode: append
+      # For attaching patch submission confirmation (gate satisfaction)
+    patch:
+      mime: "text/x-diff"
+      mode: append
+      # For attaching actual patch content (git format-patch or git diff output)
 

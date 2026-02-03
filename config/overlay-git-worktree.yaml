@@ -1,0 +1,335 @@
+name: git-worktree
+description: "Worktree-isolated patch-and-apply workflow: agents work in git worktrees, generate patches, and an integrator applies them sequentially to the integration branch."
+
+# =============================================================================
+# STATES
+# =============================================================================
+
+states:
+  working:
+    prompts:
+      enter: >
+        Set up an isolated git worktree for this task:
+          git worktree add ../worktree-{{task_id}} -b worktree/{{task_id}}
+        Work exclusively within the worktree directory. Do not modify the main working tree.
+      exit: >
+        Before leaving working state, generate a patch from your worktree:
+          cd ../worktree-{{task_id}}
+          git add -A && git commit -m "{{task_id}}: {{task_title}}"
+          git format-patch $INTEGRATION --stdout > {{task_id}}.patch
+        Attach the patch: attach(task="{{task_id}}", type="patch", content="<patch content>")
+        Then mark gate satisfaction: attach(task="{{task_id}}", type="gate/patch", content="Patch submitted for integration")
+
+  patching:
+    timed: true
+    exits: [working, completed, failed]
+    prompts:
+      enter: >
+        Patch submitted and awaiting integration. The integrator will apply your patch
+        to the integration branch. If conflicts arise, you may be moved back to working
+        state to rebase your worktree and regenerate the patch.
+      exit: >
+        Leaving patching state. If returning to working, rebase your worktree first:
+          cd ../worktree-{{task_id}}
+          git fetch origin && git rebase $INTEGRATION
+        Then regenerate and resubmit your patch.
+
+  completed:
+    prompts:
+      enter: >
+        Task complete. Clean up your worktree:
+          git worktree remove ../worktree-{{task_id}}
+          git branch -d worktree/{{task_id}}
+
+# =============================================================================
+# GATES
+# =============================================================================
+
+gates:
+  status:completed:
+    - type: gate/patch
+      enforcement: warn
+      description: "Patches should be submitted for integration before completing. Attach gate/patch or use force=true for non-code tasks."
+
+  tag:worktree-isolated:
+    - type: gate/patch
+      enforcement: warn
+      description: "Worktree-isolated tasks should submit a patch before completing. Attach gate/patch with submission details."
+
+# =============================================================================
+# ROLES
+# =============================================================================
+
+roles:
+  integrator:
+    description: "Agent responsible for sequential patch application to the integration branch"
+    tags: [integrator, integration-lead]
+    max_claims: 1
+
+# =============================================================================
+# ROLE PROMPTS
+# =============================================================================
+
+role_prompts:
+  integrator:
+    claim_guidance: >
+      As integrator, you are responsible for applying patches to the integration branch
+      in dependency order. Monitor tasks entering the patching state. For each:
+      1. Retrieve the patch attachment from the task
+      2. Apply it to the integration branch (see patch_workflow prompt)
+      3. If the patch applies cleanly, move the task to completed
+      4. If conflicts arise, move the task back to working with conflict details
+      Keep the integration branch buildable at all times.
+    patch_workflow: >
+      Patch application sequence:
+      1. Ensure integration branch is up to date:
+           git checkout $INTEGRATION && git pull
+      2. Apply the patch in check mode first:
+           git apply --check {{task_id}}.patch
+      3. If check passes, apply for real:
+           git am {{task_id}}.patch
+         Or for plain diffs:
+           git apply {{task_id}}.patch && git commit -m "Integrate: {{task_id}} — {{task_title}}"
+      4. If check fails (conflict), record the conflict details:
+           git apply --reject {{task_id}}.patch 2>&1
+         Move the task back to working state with conflict info attached as a note.
+      5. Run integration tests after each patch to catch regressions early.
+
+# =============================================================================
+# ADVISORIES
+# =============================================================================
+
+advisories:
+  worktree-setup:
+    phase: [explore, plan, implement]
+    role: [worker, lead]
+    content: |
+      # Git Worktree Setup
+
+      Task: **{{task_title}}** ({{task_id}})
+
+      ## Creating a Worktree
+      ```bash
+      # From the main repo directory
+      git worktree add ../worktree-{{task_id}} -b worktree/{{task_id}}
+      cd ../worktree-{{task_id}}
+      ```
+
+      ## Naming Conventions
+      - **Worktree directory**: `../worktree-{{task_id}}`
+      - **Branch name**: `worktree/{{task_id}}`
+      - **Patch file**: `{{task_id}}.patch`
+
+      ## Important Rules
+      - Each agent works in its own worktree — never share worktrees between agents
+      - Do not modify files in the main working tree while using a worktree
+      - Keep your worktree branch up to date with the integration branch
+      - Use `git worktree list` to see all active worktrees
+
+      ## Verifying Your Setup
+      ```bash
+      git worktree list          # Confirm worktree exists
+      pwd                         # Confirm you're in the worktree directory
+      git branch --show-current   # Confirm you're on worktree/{{task_id}}
+      ```
+
+  patch-generate:
+    phase: [implement, review, integrate]
+    role: [worker]
+    content: |
+      # Generating Patches from Your Worktree
+
+      Task: **{{task_title}}** ({{task_id}})
+
+      ## Using git format-patch (preferred)
+      ```bash
+      cd ../worktree-{{task_id}}
+      git add -A
+      git commit -m "{{task_id}}: {{task_title}}"
+      git format-patch $INTEGRATION --stdout > {{task_id}}.patch
+      ```
+      `format-patch` preserves commit metadata (author, message) and is preferred
+      for clean integration via `git am`.
+
+      ## Using git diff (alternative)
+      ```bash
+      cd ../worktree-{{task_id}}
+      git diff $INTEGRATION > {{task_id}}.patch
+      ```
+      Use `git diff` when you have uncommitted changes or need a simple diff without
+      commit metadata. The integrator will create the commit manually.
+
+      ## Patch Quality Checklist
+      - [ ] All changes are staged and committed
+      - [ ] Patch applies cleanly against current $INTEGRATION: `git apply --check {{task_id}}.patch`
+      - [ ] No unrelated changes included (check with `git diff --stat $INTEGRATION`)
+      - [ ] Commit message is descriptive
+
+      ## Submitting the Patch
+      ```
+      attach(task="{{task_id}}", type="patch", content="<patch content>")
+      attach(task="{{task_id}}", type="gate/patch", content="Patch submitted for integration")
+      ```
+      Then transition to patching state to await integration.
+
+  patch-apply:
+    role: [integrator, lead, coordinator]
+    content: |
+      # Applying Patches to the Integration Branch
+
+      ## Sequential Application Order
+      Apply patches in dependency order. Check task dependencies with `list_tasks(ready=true)`
+      to identify which patches are unblocked and ready for integration.
+
+      ## Step-by-Step Process
+      1. **Fetch the patch** from the task's attachments:
+         `attachments(task="<task_id>")`
+
+      2. **Save the patch** to a temporary file:
+         `<task_id>.patch`
+
+      3. **Dry-run check**:
+         ```bash
+         git checkout $INTEGRATION
+         git pull
+         git apply --check <task_id>.patch
+         ```
+
+      4. **Apply the patch**:
+         - For format-patch output: `git am <task_id>.patch`
+         - For plain diffs: `git apply <task_id>.patch && git commit -m "Integrate: <task_id>"`
+
+      5. **Run integration tests**:
+         Verify the build passes after each patch application.
+
+      6. **Update task status**:
+         - Clean apply → move task to completed
+         - Conflict → move task back to working with conflict details
+
+      ## Batch Integration
+      When multiple patches are queued, apply them one at a time in order.
+      Do NOT attempt to merge multiple patches simultaneously — sequential
+      application makes conflict attribution straightforward.
+
+  patch-conflict:
+    role: [integrator, lead, coordinator, worker]
+    content: |
+      # Resolving Patch Conflicts
+
+      ## For Integrators
+      When `git apply --check` fails:
+
+      1. **Identify the conflict scope**:
+         ```bash
+         git apply --reject <task_id>.patch 2>&1
+         ```
+         This creates `.rej` files showing failed hunks.
+
+      2. **Assess severity**:
+         - Minor (whitespace, import order): Resolve in-place and commit
+         - Moderate (overlapping edits): Move task back to working with details
+         - Major (structural conflict): Task needs full rebase
+
+      3. **Moving back to working**:
+         ```
+         update(task="<task_id>", state="working")
+         attach(task="<task_id>", type="note", content="Patch conflict: <details of conflicting files and hunks>")
+         ```
+
+      ## For Workers (Rebasing After Conflict)
+      When your task is moved back to working due to conflicts:
+
+      1. **Update your worktree**:
+         ```bash
+         cd ../worktree-<task_id>
+         git fetch origin
+         git rebase $INTEGRATION
+         ```
+
+      2. **Resolve conflicts** during rebase:
+         ```bash
+         # Edit conflicted files
+         git add <resolved_files>
+         git rebase --continue
+         ```
+
+      3. **Regenerate and resubmit** your patch (see patch-generate advisory).
+
+  worktree-rebase:
+    phase: [implement]
+    role: [worker]
+    content: |
+      # Rebasing Your Worktree
+
+      Task: **{{task_title}}** ({{task_id}})
+
+      ## When to Rebase
+      - Integration branch has advanced (other patches were applied)
+      - Your patch was rejected due to conflicts
+      - You want to minimize future conflicts proactively
+
+      ## Rebase Process
+      ```bash
+      cd ../worktree-{{task_id}}
+      git fetch origin
+      git rebase $INTEGRATION
+      ```
+
+      ## Handling Rebase Conflicts
+      ```bash
+      # For each conflicted file:
+      git status                    # See which files conflict
+      # Edit the conflicted files to resolve
+      git add <resolved_files>
+      git rebase --continue
+      ```
+
+      ## After Rebasing
+      Regenerate your patch against the updated integration branch:
+      ```bash
+      git format-patch $INTEGRATION --stdout > {{task_id}}.patch
+      ```
+      Then resubmit: `attach(task="{{task_id}}", type="patch", content="<updated patch>")`
+
+      ## Avoiding Conflicts
+      - Rebase frequently — don't let your worktree drift far from $INTEGRATION
+      - Keep changes focused and minimal to reduce overlap with other agents
+      - Coordinate with other agents working on the same files via task dependencies
+
+  worktree-cleanup:
+    phase: [review, deliver]
+    content: |
+      # Worktree Cleanup
+
+      ## Removing a Single Worktree
+      ```bash
+      # From the main repo directory (not from within the worktree)
+      git worktree remove ../worktree-<task_id>
+      git branch -d worktree/<task_id>
+      ```
+
+      ## Bulk Cleanup
+      ```bash
+      # List all worktrees
+      git worktree list
+
+      # Prune stale worktree references (for worktrees whose directories were deleted)
+      git worktree prune
+
+      # Remove all task worktrees (be careful — only after all patches are integrated)
+      for dir in ../worktree-*; do
+        git worktree remove "$dir" 2>/dev/null
+      done
+      ```
+
+      ## Cleanup Checklist
+      - [ ] All patches from this worktree have been integrated
+      - [ ] No uncommitted changes in the worktree (`git status` is clean)
+      - [ ] Worktree branch has been merged or is no longer needed
+      - [ ] Worktree directory has been removed
+      - [ ] Local branch has been deleted
+
+      ## Troubleshooting
+      - **"worktree is dirty"**: Commit or stash changes first, or use `--force`
+      - **"branch is not fully merged"**: Use `git branch -D` (capital D) if you're sure the patch was applied
+      - **Stale references**: Run `git worktree prune` to clean up
