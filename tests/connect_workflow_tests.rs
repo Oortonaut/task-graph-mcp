@@ -664,3 +664,233 @@ fn list_workers_includes_workflow() {
     assert_eq!(worker_a.unwrap().workflow, Some("swarm".to_string()));
     assert!(worker_b.unwrap().workflow.is_none());
 }
+
+// ========================================================================
+// Additional overlay edge-case tests
+// ========================================================================
+
+/// Verify that passing an empty overlays array [] is stored as NULL in the DB,
+/// not as a JSON "[]" string. This ensures empty overlays are treated the same
+/// as absent overlays.
+#[test]
+fn connect_with_empty_overlays_array_stored_as_null() {
+    let db = setup_db();
+    let server_paths = test_server_paths();
+    let app_config = default_app_config();
+
+    let result = agents::connect(
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
+        json!({
+            "worker_id": "empty-array-overlay-worker",
+            "overlays": []
+        }),
+    )
+    .expect("connect should succeed");
+
+    // Response should not include overlays when array is empty
+    assert!(result["overlays"].is_null());
+
+    // Database should store empty vec (parsed from NULL)
+    let worker = db
+        .get_worker("empty-array-overlay-worker")
+        .expect("get_worker should succeed")
+        .expect("worker should exist");
+
+    assert!(worker.overlays.is_empty());
+}
+
+/// Round-trip test: connect with overlays, then retrieve the worker from
+/// the DB and verify the overlays are correctly parsed back from JSON.
+#[test]
+fn connect_overlays_round_trip_through_db() {
+    let db = setup_db();
+    let server_paths = test_server_paths();
+    let app_config = default_app_config();
+
+    let overlays_input = vec!["git", "user-request", "troubleshooting"];
+
+    let result = agents::connect(
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
+        json!({
+            "worker_id": "round-trip-overlay-worker",
+            "overlays": overlays_input
+        }),
+    )
+    .expect("connect should succeed");
+
+    // Verify response
+    let response_overlays = result["overlays"]
+        .as_array()
+        .expect("overlays should be an array in response");
+    assert_eq!(response_overlays.len(), 3);
+    assert_eq!(response_overlays[0], "git");
+    assert_eq!(response_overlays[1], "user-request");
+    assert_eq!(response_overlays[2], "troubleshooting");
+
+    // Verify DB round-trip via get_worker (parses JSON from DB)
+    let worker = db
+        .get_worker("round-trip-overlay-worker")
+        .expect("get_worker should succeed")
+        .expect("worker should exist");
+
+    assert_eq!(worker.overlays.len(), 3);
+    assert_eq!(worker.overlays[0], "git");
+    assert_eq!(worker.overlays[1], "user-request");
+    assert_eq!(worker.overlays[2], "troubleshooting");
+}
+
+/// Test that connect with both overlays and workflow stores both independently.
+#[test]
+fn connect_with_overlays_and_workflow_combined() {
+    let db = setup_db();
+    let server_paths = test_server_paths();
+    let app_config = default_app_config();
+
+    let result = agents::connect(
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
+        json!({
+            "worker_id": "combo-worker",
+            "workflow": "swarm",
+            "overlays": ["git", "review"]
+        }),
+    )
+    .expect("connect should succeed");
+
+    // Verify both are in response
+    assert_eq!(result["workflow"], "swarm");
+    let overlays = result["overlays"]
+        .as_array()
+        .expect("overlays should be an array");
+    assert_eq!(overlays.len(), 2);
+    assert_eq!(overlays[0], "git");
+    assert_eq!(overlays[1], "review");
+
+    // Verify both stored in DB
+    let worker = db
+        .get_worker("combo-worker")
+        .expect("get_worker should succeed")
+        .expect("worker should exist");
+
+    assert_eq!(worker.workflow, Some("swarm".to_string()));
+    assert_eq!(
+        worker.overlays,
+        vec!["git".to_string(), "review".to_string()]
+    );
+}
+
+/// Test that force reconnection with overlays completely replaces
+/// the previous overlay set (not appending).
+#[test]
+fn connect_with_overlays_force_reconnection_replaces_overlays() {
+    let db = setup_db();
+    let server_paths = test_server_paths();
+    let app_config = default_app_config();
+
+    // First connect with 3 overlays
+    agents::connect(
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
+        json!({
+            "worker_id": "replace-overlay-worker",
+            "overlays": ["alpha", "beta", "gamma"]
+        }),
+    )
+    .expect("first connect should succeed");
+
+    // Verify initial state
+    let worker1 = db
+        .get_worker("replace-overlay-worker")
+        .expect("get_worker should succeed")
+        .expect("worker should exist");
+    assert_eq!(worker1.overlays.len(), 3);
+
+    // Force reconnect with just 1 overlay - should completely replace, not append
+    let result = agents::connect(
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
+        json!({
+            "worker_id": "replace-overlay-worker",
+            "overlays": ["delta"],
+            "force": true
+        }),
+    )
+    .expect("force reconnect should succeed");
+
+    let overlays = result["overlays"]
+        .as_array()
+        .expect("overlays should be an array");
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0], "delta");
+
+    // Verify DB reflects the replacement, not a merge
+    let worker2 = db
+        .get_worker("replace-overlay-worker")
+        .expect("get_worker should succeed")
+        .expect("worker should exist");
+
+    assert_eq!(worker2.overlays, vec!["delta".to_string()]);
+}
+
+/// Test that overlays order is preserved through the connect -> DB -> read cycle.
+#[test]
+fn connect_overlays_preserve_order() {
+    let db = setup_db();
+    let server_paths = test_server_paths();
+    let app_config = default_app_config();
+
+    // Overlay order matters for precedence - verify it's preserved
+    let result = agents::connect(
+        ConnectOptions {
+            db: &db,
+            server_paths: &server_paths,
+            config: &app_config,
+            workflows: &WorkflowsConfig::default(),
+        },
+        json!({
+            "worker_id": "order-overlay-worker",
+            "overlays": ["first", "second", "third"]
+        }),
+    )
+    .expect("connect should succeed");
+
+    // Verify order in response
+    let resp_overlays = result["overlays"]
+        .as_array()
+        .expect("overlays should be an array");
+    assert_eq!(resp_overlays[0], "first");
+    assert_eq!(resp_overlays[1], "second");
+    assert_eq!(resp_overlays[2], "third");
+
+    // Verify order from DB
+    let worker = db
+        .get_worker("order-overlay-worker")
+        .expect("get_worker should succeed")
+        .expect("worker should exist");
+
+    assert_eq!(worker.overlays[0], "first");
+    assert_eq!(worker.overlays[1], "second");
+    assert_eq!(worker.overlays[2], "third");
+}

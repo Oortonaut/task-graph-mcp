@@ -451,3 +451,102 @@ mod tool_definition_tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Feature gate – feedback tools gated by FeedbackConfig.enabled
+// ---------------------------------------------------------------------------
+
+mod feature_gate_tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use task_graph_mcp::config::workflows::WorkflowsConfig;
+    use task_graph_mcp::config::{
+        AppConfig, AttachmentsConfig, AutoAdvanceConfig, DependenciesConfig, FeedbackConfig,
+        IdsConfig, PhasesConfig, Prompts, ServerPaths, StatesConfig, TagsConfig,
+    };
+    use task_graph_mcp::db::Database;
+    use task_graph_mcp::format::OutputFormat;
+    use task_graph_mcp::paths::PathMapper;
+    use task_graph_mcp::tools::ToolHandler;
+
+    /// Build a ToolHandler with a given FeedbackConfig.
+    fn handler_with_feedback_config(fc: FeedbackConfig) -> ToolHandler {
+        let db = Arc::new(Database::open_in_memory().expect("Failed to create in-memory database"));
+        let server_paths = Arc::new(ServerPaths {
+            db_path: PathBuf::from(":memory:"),
+            media_dir: PathBuf::from("test-media"),
+            log_dir: PathBuf::from("test-logs"),
+            config_path: None,
+        });
+        let config = AppConfig::new(
+            Arc::new(StatesConfig::default()),
+            Arc::new(PhasesConfig::default()),
+            Arc::new(DependenciesConfig::default()),
+            Arc::new(AutoAdvanceConfig::default()),
+            Arc::new(AttachmentsConfig::default()),
+            Arc::new(TagsConfig::default()),
+            Arc::new(IdsConfig::default()),
+            Arc::new(WorkflowsConfig::default()),
+            Arc::new(fc),
+        );
+        ToolHandler::new(
+            db,
+            PathBuf::from("test-media"),
+            PathBuf::from("test-skills"),
+            server_paths,
+            Arc::new(Prompts::default()),
+            config,
+            OutputFormat::Json,
+            50,
+            Arc::new(PathMapper::default()),
+        )
+    }
+
+    #[test]
+    fn feedback_tools_excluded_when_disabled() {
+        let handler = handler_with_feedback_config(FeedbackConfig { enabled: false });
+        let tools = handler.get_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+
+        assert!(
+            !names.contains(&"give_feedback"),
+            "give_feedback should NOT be listed when feedback is disabled"
+        );
+        assert!(
+            !names.contains(&"list_feedback"),
+            "list_feedback should NOT be listed when feedback is disabled"
+        );
+    }
+
+    #[test]
+    fn feedback_tools_included_when_enabled() {
+        let handler = handler_with_feedback_config(FeedbackConfig { enabled: true });
+        let tools = handler.get_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+
+        assert!(
+            names.contains(&"give_feedback"),
+            "give_feedback should be listed when feedback is enabled"
+        );
+        assert!(
+            names.contains(&"list_feedback"),
+            "list_feedback should be listed when feedback is enabled"
+        );
+    }
+
+    #[test]
+    fn default_feedback_config_disables_tools() {
+        let handler = handler_with_feedback_config(FeedbackConfig::default());
+        let tools = handler.get_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+
+        assert!(
+            !names.contains(&"give_feedback"),
+            "give_feedback should NOT be listed with default FeedbackConfig (disabled)"
+        );
+        assert!(
+            !names.contains(&"list_feedback"),
+            "list_feedback should NOT be listed with default FeedbackConfig (disabled)"
+        );
+    }
+}

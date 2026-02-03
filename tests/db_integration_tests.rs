@@ -1970,6 +1970,416 @@ mod task_tests {
         );
     }
 
+    // =========================================================================
+    // Offset pagination tests for ready/blocked/claimed paths (in-memory split_off)
+    // =========================================================================
+
+    /// Test that offset works correctly with the ready=true path.
+    /// The ready path fetches all matching tasks then applies offset in-memory via split_off.
+    #[test]
+    fn list_tasks_tool_offset_with_ready_path() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        // Create 5 tasks - all are ready (pending, no deps, unclaimed)
+        let ids = create_n_tasks(&db, 5);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Request ready=true with offset=2, limit=2
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "ready": true,
+                "limit": 2,
+                "offset": 2,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 2);
+        // After offset=2, we should get the 3rd and 4th tasks (ascending order)
+        assert_eq!(tasks[0]["id"].as_str().unwrap(), ids[2]);
+        assert_eq!(tasks[1]["id"].as_str().unwrap(), ids[3]);
+        assert_eq!(result["has_more"], json!(true));
+        assert_eq!(result["offset"], json!(2));
+    }
+
+    /// Test that offset with ready=true returns empty when offset exceeds total.
+    #[test]
+    fn list_tasks_tool_offset_exceeding_ready_results_returns_empty() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 3);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Offset exceeds total ready tasks
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "ready": true,
+                "limit": 10,
+                "offset": 100,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert!(tasks.is_empty());
+        assert_eq!(result["has_more"], json!(false));
+    }
+
+    /// Test that has_more is correct when using offset with ready=true path.
+    /// With 5 ready tasks, offset=1, limit=2 => 4 remaining, return 2, has_more=true.
+    #[test]
+    fn list_tasks_tool_has_more_with_ready_offset() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let ids = create_n_tasks(&db, 5);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // offset=1, limit=2 with 5 ready tasks => 4 remaining, return 2, has_more=true
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "ready": true,
+                "limit": 2,
+                "offset": 1,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0]["id"].as_str().unwrap(), ids[1]);
+        assert_eq!(tasks[1]["id"].as_str().unwrap(), ids[2]);
+        assert_eq!(result["has_more"], json!(true));
+
+        // Now offset=3, limit=2 => 2 remaining, return 2, has_more=false
+        let result2 = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "ready": true,
+                "limit": 2,
+                "offset": 3,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks2 = result2["tasks"].as_array().unwrap();
+        assert_eq!(tasks2.len(), 2);
+        assert_eq!(tasks2[0]["id"].as_str().unwrap(), ids[3]);
+        assert_eq!(tasks2[1]["id"].as_str().unwrap(), ids[4]);
+        assert_eq!(result2["has_more"], json!(false));
+    }
+
+    /// Test that offset works correctly with the blocked=true path.
+    /// Create tasks with unsatisfied blocking dependencies so they appear as blocked.
+    #[test]
+    fn list_tasks_tool_offset_with_blocked_path() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let ids_config = default_ids_config();
+
+        // Create a blocker task that stays in "pending" (a blocking state)
+        let blocker = db
+            .create_task(
+                Some("blocker".to_string()),
+                "Blocker Task".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+
+        // Create 4 tasks that are blocked by the blocker
+        let mut blocked_ids = Vec::new();
+        for i in 0..4 {
+            let id = format!("blocked-{}", i);
+            db.create_task(
+                Some(id.clone()),
+                format!("Blocked Task {}", i),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+            // Add "blocks" dependency: blocker blocks blocked-N
+            db.add_dependency(&blocker.id, &id, "blocks", &deps_config)
+                .unwrap();
+            blocked_ids.push(id);
+        }
+
+        // Query blocked=true with offset=1, limit=2
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "blocked": true,
+                "limit": 2,
+                "offset": 1,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 2);
+        // After offset=1 from 4 blocked tasks, should get blocked-1 and blocked-2
+        assert_eq!(tasks[0]["id"].as_str().unwrap(), blocked_ids[1]);
+        assert_eq!(tasks[1]["id"].as_str().unwrap(), blocked_ids[2]);
+        assert_eq!(result["has_more"], json!(true));
+    }
+
+    /// Test that offset works correctly with the claimed=true path.
+    /// Claim tasks so they appear in the claimed path, then paginate with offset.
+    #[test]
+    fn list_tasks_tool_offset_with_claimed_path() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let ids_config = default_ids_config();
+
+        // Register an agent
+        let agent = db
+            .register_worker(
+                Some("claimer".to_string()),
+                vec![],
+                false,
+                &ids_config,
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        // Create and claim 4 tasks
+        let mut claimed_ids = Vec::new();
+        for i in 0..4 {
+            let id = format!("claim-task-{}", i);
+            db.create_task(
+                Some(id.clone()),
+                format!("Claimed Task {}", i),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+            db.claim_task(&id, &agent.id, &states_config).unwrap();
+            claimed_ids.push(id);
+        }
+
+        // Query claimed=true with offset=2, limit=10
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "claimed": true,
+                "limit": 10,
+                "offset": 2,
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        // 4 claimed tasks, offset=2 => 2 remaining
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(result["has_more"], json!(false));
+    }
+
+    /// Test that the JSON output includes correct next_offset information.
+    /// The JSON response should contain offset and limit fields that clients
+    /// can use to compute the next_offset = offset + limit.
+    #[test]
+    fn list_tasks_tool_json_next_offset_fields() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 8);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Page 1: offset=0, limit=3
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "limit": 3,
+                "offset": 0,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(result["offset"], json!(0));
+        assert_eq!(result["limit"], json!(3));
+        assert_eq!(result["has_more"], json!(true));
+        // Client computes next_offset = offset + limit = 0 + 3 = 3
+        let next_offset = result["offset"].as_i64().unwrap() + result["limit"].as_i64().unwrap();
+        assert_eq!(next_offset, 3);
+
+        // Page 2: offset=3, limit=3
+        let result2 = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "limit": 3,
+                "offset": 3,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(result2["offset"], json!(3));
+        assert_eq!(result2["limit"], json!(3));
+        assert_eq!(result2["has_more"], json!(true));
+        let next_offset2 = result2["offset"].as_i64().unwrap() + result2["limit"].as_i64().unwrap();
+        assert_eq!(next_offset2, 6);
+
+        // Page 3: offset=6, limit=3 (only 2 remaining)
+        let result3 = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "limit": 3,
+                "offset": 6,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "json"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(result3["offset"], json!(6));
+        assert_eq!(result3["limit"], json!(3));
+        assert_eq!(result3["has_more"], json!(false));
+        let tasks3 = result3["tasks"].as_array().unwrap();
+        assert_eq!(tasks3.len(), 2);
+    }
+
+    /// Test that the markdown next_offset hint uses the correct computed value
+    /// across multiple pages (not just the first page).
+    #[test]
+    fn list_tasks_tool_markdown_next_offset_on_second_page() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let _ids = create_n_tasks(&db, 10);
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+
+        // Page 2: offset=3, limit=3 with 10 tasks => has_more, next_offset=6
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Markdown,
+            json!({
+                "limit": 3,
+                "offset": 3,
+                "sort_by": "created_at",
+                "sort_order": "asc",
+                "format": "markdown"
+            }),
+        )
+        .unwrap();
+
+        let text = result["content"].as_str().unwrap_or("");
+        assert!(
+            text.contains("offset=6"),
+            "Second page should hint at next_offset=6 (3+3), got: {}",
+            text
+        );
+    }
+
     /// Test that the tool-level create function properly handles needed_tags and wanted_tags.
     /// This is a regression test for BUG-001 where these parameters were silently ignored.
     #[test]

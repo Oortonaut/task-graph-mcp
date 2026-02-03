@@ -188,7 +188,7 @@ See [SCHEMA.md](SCHEMA.md#states-configuration) for full documentation on state 
 
 ### Dependencies Configuration
 
-Dependency types define how tasks relate to each other. Default types: `blocks`, `follows`, `contains`, `duplicate`, `see-also`.
+Dependency types define how tasks relate to each other. Default types: `blocks`, `follows`, `contains`, `duplicate`, `see-also`, `relates-to`.
 
 ```yaml
 dependencies:
@@ -206,6 +206,9 @@ dependencies:
       display: horizontal
       blocks: none         # Informational only
     see-also:
+      display: horizontal
+      blocks: none
+    relates-to:
       display: horizontal
       blocks: none
 ```
@@ -288,7 +291,7 @@ Environment variables:
 | `connect(worker_id?, tags?, workflow?, force?, db_path?, media_dir?, log_dir?, config_path?, overlays?: str[])` | Register a worker. Optional `workflow` selects named workflow (solo, swarm, relay, hierarchical). Returns `worker_id` and active `paths`. |
 | `disconnect(worker_id: worker_str, final_status?: status_str = "pending")` | Unregister worker and release all claims/locks. |
 | `list_agents(tags?: str[], file?: filename, task?: task_str, depth?: int, stale_timeout?: int)` | List connected workers with filters. |
-| `cleanup_stale(worker_id: str, stale_timeout?: int)` | Evict stale workers and release their claims. |
+| `cleanup_stale(timeout?: int, final_status?: status_str)` | Evict stale workers and release their claims. |
 | `add_overlay(worker_id: str, overlay: str)` | Add a dynamic workflow overlay to a connected worker. |
 | `remove_overlay(worker_id: str, overlay: str)` | Remove a workflow overlay from a connected worker. |
 
@@ -299,7 +302,7 @@ Environment variables:
 | `create(description: str, id?: task_str, parent?: task_str, priority?: int = 5, points?: int, time_estimate_ms?: int, tags?: str[])` | Create a task. Priority 0-10 (higher = more important). |
 | `create_tree(tree, parent?, child_type?, sibling_type?)` | Create nested task tree. `child_type` (default: "contains") for parent→child deps, `sibling_type` for sibling deps. |
 | `get(task: task_str)` | Get task by ID with attachment metadata and counts. |
-| `list_tasks(status?: status_str[], ready?: bool, blocked?: bool, claimed?: bool, owner?: worker_str, parent?: task_str, worker_id?: worker_str, tags_any?: str[], tags_all?: str[], sort_by?: str, sort_order?: str, limit?: int, offset?: int, recursive?: bool)` | Query tasks with filters. Use `ready=true` for claimable tasks. |
+| `list_tasks(status?: status_str[], ready?: bool, blocked?: bool, claimed?: bool, owner?: worker_str, parent?: task_str, recursive?: bool, agent?: worker_str, tags_any?: str[], tags_all?: str[], sort_by?: str, sort_order?: str, limit?: int, offset?: int)` | Query tasks with filters. Use `ready=true` for claimable tasks. |
 | `update(worker_id: worker_str, task: task_str, status?: status_str, phase?: str, assignee?: worker_str, title?: str, description?: str, priority?: int, points?: int, tags?: str[], needed_tags?: str[], wanted_tags?: str[], time_estimate_ms?: int, reason?: str, force?: bool, attachments?: object[])` | Update task. Status/phase changes auto-manage ownership and trigger prompts. Include `attachments` to record commits/changelists. |
 | `delete(worker_id: worker_str, task: task_str, cascade?: bool, reason?: str, obliterate?: bool, force?: bool)` | Delete task. Soft delete by default; `obliterate=true` for permanent. |
 | `scan(task: task_str, before?: int, after?: int, above?: int, below?: int)` | Scan task graph in multiple directions. Depth: 0=none, N=levels, -1=all. |
@@ -318,7 +321,7 @@ Environment variables:
 
 | Tool | Description |
 |------|-------------|
-| `link(from: task_str\|task_str[], to: task_str\|task_str[], type?: dep_str = "blocks")` | Create dependencies. Types: blocks, follows, contains, duplicate, see-also. |
+| `link(from: task_str\|task_str[], to: task_str\|task_str[], type?: dep_str = "blocks")` | Create dependencies. Types: blocks, follows, contains, duplicate, see-also, relates-to. |
 | `unlink(from: task_str\|"*", to: task_str\|"*", type?: dep_str)` | Remove dependencies. Use `*` as wildcard. |
 | `relink(prev_from: task_str[], prev_to: task_str[], from: task_str[], to: task_str[], type?: dep_str = "contains")` | Atomically move dependencies (unlink then link). |
 
@@ -331,8 +334,8 @@ Environment variables:
 | `project_history(from?: datetime_str, to?: datetime_str, states?: status_str[], limit?: int = 100)` | Project-wide history with date range filters. |
 | `log_metrics(worker_id: worker_str, task: task_str, cost_usd?: float, values?: int[8])` | Log metrics (aggregated). |
 | `get_metrics(task: task_str\|task_str[])` | Get metrics for task(s). |
-| `give_feedback(agent: str, target_agent?: str, category: str, sentiment: str, message: str, tool_name?: str, task_id?: str)` | Record feedback between agents (conditional on config). |
-| `list_feedback()` | List all recorded agent feedback. |
+| `give_feedback(message: str, category?: str, sentiment?: str, agent_id?: str, tool_name?: str, task_id?: str)` | Record feedback about tools, workflows, or UX (conditional on config). |
+| `list_feedback()` | Read the feedback markdown file. |
 
 ### File Coordination
 
@@ -356,6 +359,7 @@ Environment variables:
 | Tool | Description |
 |------|-------------|
 | `check_gates(task: task_str)` | Check gate requirements before status/phase transition. Returns unsatisfied gates with pass/warn/fail status. |
+| `get_advisory(topic?: str, task?: task_str, worker_id?: worker_str)` | Get governance advisory guidance. Without topic: lists all topics. With topic: returns full advisory content with template expansion. |
 | `query(sql: str, params?: str[], limit?: int = 100, format?: str)` | Execute read-only SQL. SELECT only. Requires permission. |
 | `get_schema(table?: str, include_sql?: bool)` | Get database schema. Returns table names, columns, types, and foreign keys. |
 | `list_workflows()` | List available workflow configurations (solo, swarm, relay, hierarchical, etc.). |
