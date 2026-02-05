@@ -250,14 +250,14 @@ impl ToolHandler {
             // Task tools
             "create" => json(tasks::create(&self.db, &self.config, arguments)),
             "create_tree" => json(tasks::create_tree(&self.db, &self.config, arguments)),
-            "get" => json(tasks::get(&self.db, self.default_format, arguments)),
-            "list_tasks" => json(tasks::list_tasks(
+            "get" => tasks::get(&self.db, self.default_format, arguments),
+            "list_tasks" => tasks::list_tasks(
                 &self.db,
                 &self.config.states,
                 &self.config.deps,
                 self.default_format,
                 arguments,
-            )),
+            ),
             "update" => {
                 // Look up worker's workflow for prompts
                 let worker_id = arguments
@@ -276,23 +276,21 @@ impl ToolHandler {
             }
             "delete" => json(tasks::delete(&self.db, arguments)),
             "rename" => json(tasks::rename(&self.db, arguments)),
-            "scan" => json(tasks::scan(&self.db, self.default_format, arguments)),
+            "scan" => tasks::scan(&self.db, self.default_format, arguments),
 
             // Tracking tools
             "thinking" => json(tracking::thinking(&self.db, arguments)),
-            "task_history" => json(tracking::task_history(
+            "task_history" => tracking::task_history(
                 &self.db,
                 &self.config.states,
                 self.default_format,
                 arguments,
-            )),
+            ),
             "log_metrics" => json(tracking::log_metrics(&self.db, arguments)),
             "get_metrics" => json(tracking::get_metrics(&self.db, arguments)),
-            "project_history" => json(tracking::project_history(
-                &self.db,
-                self.default_format,
-                arguments,
-            )),
+            "project_history" => {
+                tracking::project_history(&self.db, self.default_format, arguments)
+            }
 
             // Dependency tools
             "link" => json(deps::link(&self.db, &self.config.deps, arguments)),
@@ -318,7 +316,7 @@ impl ToolHandler {
             // File coordination tools
             "mark_file" => json(files::mark_file(&self.db, arguments)),
             "unmark_file" => json(files::unmark_file(&self.db, arguments)),
-            "list_marks" => json(files::list_marks(&self.db, self.default_format, arguments)),
+            "list_marks" => files::list_marks(&self.db, self.default_format, arguments),
             "mark_updates" => {
                 json(files::mark_updates_async(std::sync::Arc::clone(&self.db), arguments).await)
             }
@@ -330,12 +328,9 @@ impl ToolHandler {
                 &self.config.attachments,
                 arguments,
             )),
-            "attachments" => json(attachments::attachments(
-                &self.db,
-                &self.media_dir,
-                self.default_format,
-                arguments,
-            )),
+            "attachments" => {
+                attachments::attachments(&self.db, &self.media_dir, self.default_format, arguments)
+            }
             "detach" => json(attachments::detach(&self.db, &self.media_dir, arguments)),
 
             // Skill tools

@@ -491,6 +491,41 @@ advisories:
       - Time-box exploration phases
       - Review child count at each standup — growth indicates scope creep
 
+  workflow-customization:
+    phase: [plan, design]
+    role: [lead, coordinator]
+    content: |
+      # Workflow Customization Guidance
+
+      Before adding states, phases, gates, or overlays to your workflow, consult
+      the full decision framework: `docs://WORKFLOW_CUSTOMIZATION`
+
+      ## Quick Decision: What Primitive Do I Need?
+
+      | You Want To... | Use |
+      |---------------|-----|
+      | Label a task category | **Tag** (free, no workflow change) |
+      | Track what kind of work is happening | **Phase** (lightweight, queryable) |
+      | Guide workers at the right moment | **Advisory** (on-demand, no friction) |
+      | Remind workers to do something before transitioning | **Gate (warn)** |
+      | Hard-block transitions without an artifact | **Gate (reject)** |
+      | Add behavior for specific workers | **Overlay** |
+      | Change the task lifecycle for everyone | **State** (most expensive) |
+
+      ## The Key Question
+
+      Can you solve this with a **tag + phase** instead of a **state**?
+
+      States affect every task and every worker. Phases and tags are opt-in per task.
+      If fewer than half your tasks would use the new state, it's almost certainly
+      a phase or tag instead.
+
+      ## Anti-patterns to Avoid
+      - **Linear pipeline**: 8+ sequential states (use fewer states + phases)
+      - **Gate fatigue**: Gates on every transition (workers learn to force-bypass)
+      - **State for categorization**: `implementing`/`testing` states (use phases)
+      - **Approval chain states**: `waiting-lead`/`waiting-qa` (one `review` state + tags)
+
   gotchas:
     content: |
       # Common Mistakes and Anti-Patterns at Scale

@@ -11,8 +11,8 @@ use crate::db::Database;
 use crate::db::tasks::{CreateTreeOptions, ListTasksQuery};
 use crate::error::ToolError;
 use crate::format::{
-    OutputFormat, format_scan_result_markdown, format_task_markdown, format_tasks_markdown,
-    markdown_to_json,
+    OutputFormat, ToolResult, format_scan_result_markdown, format_task_markdown,
+    format_tasks_markdown,
 };
 use crate::gates::evaluate_gates;
 use crate::prompts::PromptContext;
@@ -535,7 +535,7 @@ pub fn create_tree(db: &Database, config: &AppConfig, args: Value) -> Result<Val
     Ok(response)
 }
 
-pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
+pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<ToolResult> {
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::parse(&s))
@@ -583,7 +583,7 @@ pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<V
                 }
             }
 
-            Ok(markdown_to_json(md))
+            Ok(ToolResult::Raw(md))
         }
         OutputFormat::Json => {
             let mut task_json = serde_json::to_value(&task)?;
@@ -604,7 +604,7 @@ pub fn get(db: &Database, default_format: OutputFormat, args: Value) -> Result<V
                     );
                 }
             }
-            Ok(task_json)
+            Ok(ToolResult::Json(task_json))
         }
     }
 }
@@ -615,7 +615,7 @@ pub fn list_tasks(
     deps_config: &DependenciesConfig,
     default_format: OutputFormat,
     args: Value,
-) -> Result<Value> {
+) -> Result<ToolResult> {
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::parse(&s))
         .unwrap_or(default_format);
@@ -775,9 +775,9 @@ pub fn list_tasks(
                     next_offset
                 ));
             }
-            Ok(markdown_to_json(md))
+            Ok(ToolResult::Raw(md))
         }
-        OutputFormat::Json => Ok(json!({
+        OutputFormat::Json => Ok(ToolResult::Json(json!({
             "tasks": tasks_with_blockers.iter().map(|(task, blockers)| {
                 let mut task_json = serde_json::to_value(task).unwrap();
                 if let Some(obj) = task_json.as_object_mut() {
@@ -788,7 +788,7 @@ pub fn list_tasks(
             "has_more": has_more,
             "offset": offset,
             "limit": limit,
-        })),
+        }))),
     }
 }
 
@@ -1531,7 +1531,7 @@ pub fn rename(db: &Database, args: Value) -> Result<Value> {
     }))
 }
 
-pub fn scan(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
+pub fn scan(db: &Database, default_format: OutputFormat, args: Value) -> Result<ToolResult> {
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let format = get_string(&args, "format")
         .and_then(|s| OutputFormat::parse(&s))
@@ -1563,7 +1563,7 @@ pub fn scan(db: &Database, default_format: OutputFormat, args: Value) -> Result<
     };
 
     match format {
-        OutputFormat::Markdown => Ok(markdown_to_json(format_scan_result_markdown(&result))),
-        OutputFormat::Json => Ok(serde_json::to_value(&result)?),
+        OutputFormat::Markdown => Ok(ToolResult::Raw(format_scan_result_markdown(&result))),
+        OutputFormat::Json => Ok(ToolResult::Json(serde_json::to_value(&result)?)),
     }
 }

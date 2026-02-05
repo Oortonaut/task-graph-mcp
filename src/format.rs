@@ -282,14 +282,6 @@ pub fn format_attachments_markdown(attachments: &[crate::types::AttachmentMeta])
     md
 }
 
-/// Convert markdown to JSON value for uniform response handling.
-pub fn markdown_to_json(md: String) -> Value {
-    serde_json::json!({
-        "format": "markdown",
-        "content": md
-    })
-}
-
 /// Result type for tool handlers - allows returning either JSON or raw text.
 #[derive(Debug)]
 pub enum ToolResult {
@@ -315,6 +307,22 @@ impl ToolResult {
         match self {
             ToolResult::Json(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
             ToolResult::Raw(s) => s,
+        }
+    }
+
+    /// Unwrap as JSON value. Panics if this is a raw text result.
+    pub fn into_json(self) -> Value {
+        match self {
+            ToolResult::Json(v) => v,
+            ToolResult::Raw(s) => panic!("Expected JSON result, got raw text: {}", s),
+        }
+    }
+
+    /// Unwrap as raw string. Panics if this is a JSON result.
+    pub fn into_raw(self) -> String {
+        match self {
+            ToolResult::Raw(s) => s,
+            ToolResult::Json(_) => panic!("Expected raw text result, got JSON"),
         }
     }
 }

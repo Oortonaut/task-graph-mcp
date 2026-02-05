@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Advisory system**: `get_advisory` tool with level/phase/role/domain filters, tag-based gate evaluation (`tag:<name>` gate keys), and `{{task_level}}`/`{{child_count}}` template variables
+- **Governance overlay**: `overlay-governance.yaml` with 15 advisories, 7 tag gates, and multi-scale hierarchy/domain tag definitions
+- **Contextual advisory hints**: `claim()` and `update()` responses now surface relevant advisory topics matched by task tags, phase, and worker role
+- **Git worktree overlay**: `overlay-git-worktree.yaml` for multi-agent worktree-isolated workflows with patch-and-apply integrator pattern, patching state, and 6 lifecycle advisories
+- **Integration tests**: 16 new tests covering feedback feature-gates, `list_tasks` pagination, and connect overlay behavior
+- **Workflow customization guide**: `docs/WORKFLOW_CUSTOMIZATION.md` with decision framework for states, phases, gates, and overlays — including cost gradient, anti-patterns, and common scenarios
+- **Workflow customization advisory**: `workflow-customization` advisory in governance overlay, surfaced to leads/coordinators during `plan` and `design` phases
+
+### Changed
+
+- Config hot-reload watcher now monitors all config directories (`config/`, `~/.task-graph/`) matching the loader's search paths
+- Default output format changed to markdown
+- Empty `blocked_by`, `attachments`, and `attachment_counts` fields omitted from task `get` responses
+- Markdown tool responses (`list_tasks`, `get`, `scan`, `task_history`, `project_history`, `attachments`, `list_marks`) now return raw text instead of JSON-wrapped `{"format":"markdown","content":"..."}`
+
+### Fixed
+
+- Task ID truncation in `list_tasks` and `scan` markdown output (IDs were truncated to 8 characters, making them unusable for subsequent calls)
+- README tool signatures for `cleanup_stale`, `list_tasks`, `give_feedback`, `list_feedback`; added missing `get_advisory` tool and `relates-to` dependency type
+
 ## [0.3.0] - 2026-01-31
 
 ### Added

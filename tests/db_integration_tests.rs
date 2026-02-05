@@ -1742,7 +1742,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 3);
@@ -1776,7 +1777,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 2);
@@ -1810,7 +1812,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 3);
@@ -1847,7 +1850,8 @@ mod task_tests {
                     "format": "json"
                 }),
             )
-            .unwrap();
+            .unwrap()
+            .into_json();
 
             let tasks = result["tasks"].as_array().unwrap();
             for t in tasks {
@@ -1891,7 +1895,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 5);
@@ -1924,7 +1929,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 4);
@@ -1959,14 +1965,14 @@ mod task_tests {
                 "format": "markdown"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_raw();
 
-        // Markdown result is wrapped in json as {"format": "markdown", "content": "..."}
-        let text = result["content"].as_str().unwrap_or("");
+        // Markdown result is returned as raw text
         assert!(
-            text.contains("offset=2"),
+            result.contains("offset=2"),
             "Markdown output should hint at next offset, got: {}",
-            text
+            result
         );
     }
 
@@ -2003,7 +2009,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 2);
@@ -2041,7 +2048,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert!(tasks.is_empty());
@@ -2076,7 +2084,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 2);
@@ -2099,7 +2108,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks2 = result2["tasks"].as_array().unwrap();
         assert_eq!(tasks2.len(), 2);
@@ -2181,7 +2191,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 2);
@@ -2253,7 +2264,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         let tasks = result["tasks"].as_array().unwrap();
         // 4 claimed tasks, offset=2 => 2 remaining
@@ -2289,7 +2301,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         assert_eq!(result["offset"], json!(0));
         assert_eq!(result["limit"], json!(3));
@@ -2312,7 +2325,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         assert_eq!(result2["offset"], json!(3));
         assert_eq!(result2["limit"], json!(3));
@@ -2334,7 +2348,8 @@ mod task_tests {
                 "format": "json"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_json();
 
         assert_eq!(result3["offset"], json!(6));
         assert_eq!(result3["limit"], json!(3));
@@ -2370,13 +2385,13 @@ mod task_tests {
                 "format": "markdown"
             }),
         )
-        .unwrap();
+        .unwrap()
+        .into_raw();
 
-        let text = result["content"].as_str().unwrap_or("");
         assert!(
-            text.contains("offset=6"),
+            result.contains("offset=6"),
             "Second page should hint at next_offset=6 (3+3), got: {}",
-            text
+            result
         );
     }
 

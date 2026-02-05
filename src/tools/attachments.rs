@@ -4,7 +4,7 @@ use super::{get_bool, get_string, get_string_or_array, make_tool_with_prompts};
 use crate::config::{AttachmentsConfig, Prompts, UnknownKeyBehavior};
 use crate::db::Database;
 use crate::error::{ErrorCode, ToolError};
-use crate::format::{OutputFormat, format_attachments_markdown, markdown_to_json};
+use crate::format::{OutputFormat, ToolResult, format_attachments_markdown};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
@@ -413,7 +413,7 @@ pub fn attachments(
     _media_dir: &Path,
     default_format: OutputFormat,
     args: Value,
-) -> Result<Value> {
+) -> Result<ToolResult> {
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let type_pattern = get_string(&args, "type");
     let mime_pattern = get_string(&args, "mime");
@@ -426,7 +426,7 @@ pub fn attachments(
         db.get_attachments_filtered(&task_id, type_pattern.as_deref(), mime_pattern.as_deref())?;
 
     match format {
-        OutputFormat::Markdown => Ok(markdown_to_json(format_attachments_markdown(&attachments))),
+        OutputFormat::Markdown => Ok(ToolResult::Raw(format_attachments_markdown(&attachments))),
         OutputFormat::Json => {
             let results: Vec<Value> = attachments
                 .iter()
@@ -448,7 +448,7 @@ pub fn attachments(
                 })
                 .collect();
 
-            Ok(json!({ "attachments": results }))
+            Ok(ToolResult::Json(json!({ "attachments": results })))
         }
     }
 }

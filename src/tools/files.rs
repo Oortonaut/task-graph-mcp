@@ -16,7 +16,7 @@ use crate::config::Prompts;
 use crate::db::Database;
 use crate::db::locks::ExclusiveLockResult;
 use crate::error::ToolError;
-use crate::format::{OutputFormat, markdown_to_json};
+use crate::format::{OutputFormat, ToolResult};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
@@ -368,7 +368,7 @@ pub fn unmark_file(db: &Database, args: Value) -> Result<Value> {
     }
 }
 
-pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
+pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> Result<ToolResult> {
     let files = get_string_or_array(&args, "files");
     let worker_id = get_string(&args, "agent");
     let task_id = get_string(&args, "task");
@@ -429,7 +429,7 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
                     ));
                 }
             }
-            Ok(markdown_to_json(md))
+            Ok(ToolResult::Raw(md))
         }
         OutputFormat::Json => {
             let marks_json: Vec<Value> = marks
@@ -449,7 +449,7 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
                 })
                 .collect();
 
-            Ok(json!({ "marks": marks_json }))
+            Ok(ToolResult::Json(json!({ "marks": marks_json })))
         }
     }
 }

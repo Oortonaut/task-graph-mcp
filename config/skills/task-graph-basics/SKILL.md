@@ -180,7 +180,8 @@ pending --> working --> completed
 ```
 
 Workflows may add additional states (e.g., `assigned`, `consult`). See the
-loaded workflow for the full state machine.
+loaded workflow for the full state machine. Before adding custom states or
+phases, consult `docs://WORKFLOW_CUSTOMIZATION` for the decision framework.
 
 | Common State | Timed | Typical Exits |
 |--------------|-------|---------------|

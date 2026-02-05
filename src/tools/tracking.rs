@@ -6,7 +6,7 @@ use super::{
 use crate::config::{Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::format::{OutputFormat, markdown_to_json};
+use crate::format::{OutputFormat, ToolResult};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
@@ -171,7 +171,7 @@ pub fn task_history(
     states_config: &StatesConfig,
     default_format: OutputFormat,
     args: Value,
-) -> Result<Value> {
+) -> Result<ToolResult> {
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let state_filter = get_string_array(&args, "states");
     let format = get_string(&args, "format")
@@ -282,14 +282,14 @@ pub fn task_history(
                 }
             }
 
-            Ok(markdown_to_json(md))
+            Ok(ToolResult::Raw(md))
         }
-        OutputFormat::Json => Ok(json!({
+        OutputFormat::Json => Ok(ToolResult::Json(json!({
             "history": filtered_history,
             "current_duration_ms": current_duration,
             "time_per_status_ms": time_per_status,
             "time_per_agent_ms": time_per_agent
-        })),
+        }))),
     }
 }
 
@@ -343,7 +343,11 @@ fn parse_timestamp(s: &str) -> Option<i64> {
     None
 }
 
-pub fn project_history(db: &Database, default_format: OutputFormat, args: Value) -> Result<Value> {
+pub fn project_history(
+    db: &Database,
+    default_format: OutputFormat,
+    args: Value,
+) -> Result<ToolResult> {
     let from_timestamp = get_string(&args, "from").and_then(|s| parse_timestamp(&s));
     let to_timestamp = get_string(&args, "to").and_then(|s| parse_timestamp(&s));
     let state_filter = get_string_array(&args, "states");
@@ -457,9 +461,9 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
                 }
             }
 
-            Ok(markdown_to_json(md))
+            Ok(ToolResult::Raw(md))
         }
-        OutputFormat::Json => Ok(json!({
+        OutputFormat::Json => Ok(ToolResult::Json(json!({
             "time_range": {
                 "from_ms": from_timestamp,
                 "to_ms": to_timestamp
@@ -474,7 +478,7 @@ pub fn project_history(db: &Database, default_format: OutputFormat, args: Value)
             "time_by_status_ms": stats.time_by_status_ms,
             "transitions_by_agent": stats.transitions_by_agent,
             "time_by_agent_ms": stats.time_by_agent_ms
-        })),
+        }))),
     }
 }
 
