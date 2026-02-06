@@ -1,0 +1,121 @@
+name: reasoning
+description: "Reasoning capture: instructs agents to document thought processes, decisions, and alternatives as task attachments for auditability and knowledge transfer."
+
+states:
+  working:
+    prompts:
+      enter: >
+        Document your reasoning as you work. Use attach() to save:
+        - Initial understanding of the problem
+        - Key assumptions you're making
+        - Approach you're taking and why
+
+        Example: attach(task=task_id, type="reasoning", content="## Initial Analysis\n...")
+      exit: >
+        Before transitioning, capture your reasoning so far with attach():
+        - Decisions made and their rationale
+        - Alternatives you considered but rejected (and why)
+        - Any uncertainties or risks identified
+
+        When committing code changes, include reasoning in commit messages:
+        - First line: what changed (imperative mood)
+        - Body: WHY this approach was chosen, not just what
+        - Reference alternatives considered if non-obvious
+        - Link to task ID for full reasoning trail
+
+        Example commit message:
+        ```
+        Refactor auth to use JWT instead of sessions
+
+        Sessions required sticky load balancing which complicated
+        our k8s deployment. JWT allows stateless scaling.
+
+        Considered: Redis session store (added infrastructure),
+        encrypted cookies (size limits). JWT best fits our
+        horizontal scaling requirements.
+
+        Task: abc123
+        ```
+
+  completed:
+    prompts:
+      enter: >
+        Attach a final reasoning summary before completing:
+
+        attach(task=task_id, type="reasoning", name="completion-summary", content="""
+        ## Summary
+        [What was accomplished]
+
+        ## Key Decisions
+        [Major choices made and rationale]
+
+        ## Alternatives Rejected
+        [Options considered but not taken, with reasoning]
+
+        ## Learnings
+        [Insights that could help future work]
+        """)
+
+  failed:
+    prompts:
+      enter: >
+        Attach a failure analysis:
+
+        attach(task=task_id, type="reasoning", name="failure-analysis", content="""
+        ## What Was Attempted
+        [Approaches tried]
+
+        ## Why It Failed
+        [Root cause or blocking issue]
+
+        ## Reasoning Gap
+        [What assumption or information was missing]
+
+        ## Recommended Next Steps
+        [What should be tried differently]
+        """)
+
+gates:
+  status:completed:
+    - type: gate/reasoning
+      enforcement: warn
+      description: >
+        Attach reasoning documentation before completing. Good reasoning attachments include:
+        problem understanding, key decisions with rationale, alternatives considered,
+        and learnings. Use attach(task=id, type="reasoning", content="...").
+
+    - type: gate/reasoning-in-commits
+      enforcement: warn
+      description: >
+        Commit messages should explain WHY, not just WHAT. Include:
+        - Rationale for the approach taken
+        - Key alternatives considered (if non-obvious)
+        - Task ID reference for full reasoning trail
+        The commit history is a permanent reasoning record—make it useful.
+
+  status:failed:
+    - type: gate/failure-reasoning
+      enforcement: warn
+      description: >
+        Attach failure analysis explaining what was attempted, why it failed,
+        and what reasoning gap led to the failure.
+
+# Attachment conventions for this overlay:
+# - type: "reasoning" - for all reasoning documents
+# - name suggestions:
+#   - "initial-analysis" - first understanding of the problem
+#   - "decision-log" - ongoing decision record
+#   - "completion-summary" - final reasoning summary
+#   - "failure-analysis" - post-mortem on failed tasks
+#   - "alternatives" - detailed comparison of rejected approaches
+
+# Commit message conventions:
+# - First line: imperative summary of WHAT changed
+# - Blank line
+# - Body: WHY this approach (rationale, constraints, tradeoffs)
+# - Alternatives considered (especially if non-obvious choice)
+# - Task ID reference: "Task: <id>" for linking to full reasoning
+#
+# The two reasoning channels serve different purposes:
+# - Attachments: detailed, structured, searchable within task-graph
+# - Commits: permanent Git history, visible in blame/log, travels with code

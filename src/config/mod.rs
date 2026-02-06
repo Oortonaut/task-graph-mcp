@@ -18,6 +18,7 @@
 //! - `TASK_GRAPH_USER_DIR` - User config dir (default: `~/.task-graph`)
 //! - `TASK_GRAPH_PROJECT_DIR` - Project config dir (default: `./task-graph`)
 
+pub mod embedded;
 mod files;
 mod loader;
 mod merge;

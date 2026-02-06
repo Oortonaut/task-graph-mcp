@@ -391,8 +391,8 @@ impl ConfigLoader {
 
     /// Load a named workflow file (workflow-{name}.yaml).
     ///
-    /// Searches in order: user directory, project directory, install directory.
-    /// User overrides project, project overrides install defaults.
+    /// Searches in order: user directory, project directory, install directory, embedded.
+    /// User overrides project, project overrides install, install overrides embedded.
     /// Returns the merged workflow config (defaults + named workflow).
     pub fn load_workflow_by_name(&self, name: &str) -> Result<super::workflows::WorkflowsConfig> {
         let filename = format!("workflow-{}.yaml", name);
@@ -413,7 +413,7 @@ impl ConfigLoader {
             }
         }
 
-        // Fall back to install directory (built-in defaults)
+        // Check install directory (built-in defaults on disk)
         if let Some(ref install_dir) = self.paths.install_dir {
             let workflow_file = install_dir.join(&filename);
             if workflow_file.exists() {
@@ -421,8 +421,13 @@ impl ConfigLoader {
             }
         }
 
+        // Fall back to embedded workflows (always available)
+        if let Some(content) = super::embedded::workflows::get(name) {
+            return self.load_workflow_from_content(content, name);
+        }
+
         Err(anyhow::anyhow!(
-            "Workflow '{}' not found. Searched for '{}' in user, project, and install directories.",
+            "Workflow '{}' not found. Searched for '{}' in user, project, install directories, and embedded defaults.",
             name,
             filename
         ))
@@ -454,9 +459,43 @@ impl ConfigLoader {
         Ok(workflow)
     }
 
+    /// Load workflow from embedded content string, merging with defaults.
+    fn load_workflow_from_content(
+        &self,
+        content: &str,
+        name: &str,
+    ) -> Result<super::workflows::WorkflowsConfig> {
+        let yaml_value: Value = serde_yaml::from_str(content)?;
+
+        // Start with defaults and merge the named workflow on top
+        let mut configs: Vec<Value> = Vec::new();
+
+        // Tier 1: Defaults
+        if let Ok(default_json) = serde_json::to_value(super::workflows::WorkflowsConfig::default())
+        {
+            configs.push(default_json);
+        }
+
+        // Tier 2: The embedded workflow content
+        configs.push(yaml_value);
+
+        let merged = deep_merge_all(configs);
+        let mut workflow: super::workflows::WorkflowsConfig = serde_json::from_value(merged)?;
+
+        // Mark as embedded (no file path)
+        workflow.source_file = None;
+        // Store embedded source indicator
+        workflow.description = workflow
+            .description
+            .or_else(|| Some(format!("Built-in workflow: {}", name)));
+
+        Ok(workflow)
+    }
+
     /// List available named workflows.
     ///
-    /// Returns workflow names (e.g., "solo", "swarm") found in user, project, and install directories.
+    /// Returns workflow names (e.g., "solo", "swarm") found in user, project, install directories,
+    /// and embedded defaults. Embedded workflows are always available as fallbacks.
     pub fn list_workflows(&self) -> Vec<String> {
         let mut workflows = Vec::new();
 
@@ -486,7 +525,7 @@ impl ConfigLoader {
             }
         }
 
-        // Check install directory (built-in workflows)
+        // Check install directory (built-in workflows on disk)
         if let Some(ref install_dir) = self.paths.install_dir
             && let Ok(entries) = std::fs::read_dir(install_dir)
         {
@@ -496,6 +535,13 @@ impl ConfigLoader {
                 {
                     workflows.push(name);
                 }
+            }
+        }
+
+        // Include embedded workflows (always available as fallbacks)
+        for name in super::embedded::workflows::names() {
+            if !workflows.contains(&name.to_string()) {
+                workflows.push(name.to_string());
             }
         }
 
@@ -517,7 +563,8 @@ impl ConfigLoader {
 
     /// List available overlay files (overlay-*.yaml).
     ///
-    /// Returns overlay names (e.g., "git", "user-request") found in user, project, and install directories.
+    /// Returns overlay names (e.g., "git", "troubleshooting") found in user, project, install directories,
+    /// and embedded defaults. Embedded overlays are always available as fallbacks.
     pub fn list_overlays(&self) -> Vec<String> {
         let mut overlays = Vec::new();
 
@@ -547,7 +594,7 @@ impl ConfigLoader {
             }
         }
 
-        // Check install directory (built-in overlays)
+        // Check install directory (built-in overlays on disk)
         if let Some(ref install_dir) = self.paths.install_dir
             && let Ok(entries) = std::fs::read_dir(install_dir)
         {
@@ -560,6 +607,13 @@ impl ConfigLoader {
             }
         }
 
+        // Include embedded overlays (always available as fallbacks)
+        for name in super::embedded::overlays::names() {
+            if !overlays.contains(&name.to_string()) {
+                overlays.push(name.to_string());
+            }
+        }
+
         overlays.sort();
         overlays
     }
@@ -569,6 +623,8 @@ impl ConfigLoader {
     /// Unlike `load_workflow_by_name`, overlays are loaded as raw deltas WITHOUT
     /// merging with defaults. This prevents double-appending prompts when
     /// the overlay is later applied via `apply_overlay()`.
+    ///
+    /// Searches in order: user directory, project directory, install directory, embedded.
     pub fn load_overlay_by_name(&self, name: &str) -> Result<super::workflows::WorkflowsConfig> {
         let filename = format!("overlay-{}.yaml", name);
 
@@ -588,7 +644,7 @@ impl ConfigLoader {
             }
         }
 
-        // Fall back to install directory (built-in defaults)
+        // Check install directory (built-in defaults on disk)
         if let Some(ref install_dir) = self.paths.install_dir {
             let overlay_file = install_dir.join(&filename);
             if overlay_file.exists() {
@@ -596,8 +652,13 @@ impl ConfigLoader {
             }
         }
 
+        // Fall back to embedded overlays (always available)
+        if let Some(content) = super::embedded::overlays::get(name) {
+            return self.load_overlay_from_content(content);
+        }
+
         Err(anyhow::anyhow!(
-            "Overlay '{}' not found. Searched for '{}' in user, project, and install directories.",
+            "Overlay '{}' not found. Searched for '{}' in user, project, install directories, and embedded defaults.",
             name,
             filename
         ))
@@ -609,6 +670,16 @@ impl ConfigLoader {
         let content = std::fs::read_to_string(path)?;
         let mut overlay: super::workflows::WorkflowsConfig = serde_yaml::from_str(&content)?;
         overlay.source_file = Some(path.to_path_buf());
+        Ok(overlay)
+    }
+
+    /// Load an overlay from embedded content WITHOUT merging with defaults.
+    fn load_overlay_from_content(
+        &self,
+        content: &str,
+    ) -> Result<super::workflows::WorkflowsConfig> {
+        let overlay: super::workflows::WorkflowsConfig = serde_yaml::from_str(content)?;
+        // No source_file for embedded content
         Ok(overlay)
     }
 
