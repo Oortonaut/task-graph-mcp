@@ -74,6 +74,38 @@ Every worker MUST connect before using task-graph tools:
 
 ---
 
+## CLI Agent Delegation
+
+When running as a coordinator (MCP agent), you can spawn background CLI agents
+for parallel work. CLI agents use `task-graph-mcp agent` subcommands instead of
+MCP tool calls.
+
+### Spawning a CLI Agent
+```bash
+# Start a background worker
+task-graph-mcp agent connect my-worker-1 --tags build,test
+# or auto-generate ID:
+WORKER_ID=$(task-graph-mcp agent connect --format json | jq -r '.worker_id')
+```
+
+### CLI Agent Workflow
+```bash
+task-graph-mcp agent list-tasks --ready
+task-graph-mcp agent claim <worker-id> <task-id>
+task-graph-mcp agent update <worker-id> <task-id> --status completed
+task-graph-mcp agent prompts --status working    # Get state guidance
+task-graph-mcp agent prompts --advisory           # List advisory topics
+task-graph-mcp agent disconnect <worker-id>
+```
+
+### Coordinator Responsibilities
+- Create tasks and dependencies before spawning CLI agents
+- Pass the database path if not using defaults: `--database <path>`
+- Monitor progress: `task-graph-mcp agent list-tasks --status working`
+- CLI agents should call `thinking` periodically for heartbeat
+
+---
+
 ## Tool Reference
 
 ### Worker Management

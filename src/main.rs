@@ -378,7 +378,8 @@ fn mutations_for_tool(tool_name: &str) -> Vec<MutationKind> {
         // Read-only tools cause no mutations
         "get" | "list_tasks" | "list_agents" | "list_marks" | "mark_updates" | "attachments"
         | "get_schema" | "search" | "query" | "check_gates" | "task_history" | "get_metrics"
-        | "project_history" | "list_workflows" | "give_feedback" | "list_feedback" => vec![],
+        | "project_history" | "list_workflows" | "get_prompts" | "give_feedback"
+        | "list_feedback" => vec![],
         // Skills tools are read-only
         name if name.starts_with("get_skill") || name.starts_with("list_skills") => vec![],
         // Unknown tools -- conservatively notify nothing
@@ -497,20 +498,71 @@ async fn main() -> Result<()> {
             // Run migration command
             migrate::run_migrate(&args)?;
         }
-        Some(Command::Serve) | None => {
-            // Load prompts using the loader (before consuming it)
+        Some(Command::Agent(agent_args)) => {
+            // Run agent CLI command - it loads its own config internally
+            // The agent module handles its own exit codes internally
+            use task_graph_mcp::cli::agent;
+            agent::run_agent_command_and_exit(agent_args);
+        }
+        Some(Command::Serve) => {
+            // Explicit 'serve' subcommand - start MCP server
             let prompts = loader.load_prompts();
-            // Load workflows configuration (contains states, phases, and transition prompts)
-            // Also pre-loads named workflow configs (workflow-*.yaml) for per-worker selection
             let workflows = load_workflows_with_cache(&loader);
-            // Get the final config
             let config = loader.into_config();
-            // Default: run MCP server
             run_server(config, prompts, workflows, config_path_used).await?;
+        }
+        None => {
+            // No subcommand given - check for --stdio flag
+            if cli.stdio {
+                // Start MCP server on stdio
+                let prompts = loader.load_prompts();
+                let workflows = load_workflows_with_cache(&loader);
+                let config = loader.into_config();
+                run_server(config, prompts, workflows, config_path_used).await?;
+            } else {
+                // No subcommand and no --stdio flag: print helpful usage info
+                print_usage_info();
+            }
         }
     }
 
     Ok(())
+}
+
+/// Print usage information when the executable is run without arguments.
+fn print_usage_info() {
+    let version = env!("CARGO_PKG_VERSION");
+    eprintln!(
+        r#"task-graph-mcp v{version} - Task Graph MCP Server
+
+This is an MCP (Model Context Protocol) server for multi-agent task coordination.
+It provides tools for creating, managing, and tracking tasks across multiple agents.
+
+USAGE:
+    task-graph-mcp --stdio         Start the MCP server on stdio (for MCP clients)
+    task-graph-mcp serve           Same as --stdio (explicit subcommand)
+    task-graph-mcp agent <CMD>     CLI commands for background workers
+    task-graph-mcp export [FILE]   Export database to JSON
+    task-graph-mcp import <FILE>   Import from JSON export
+    task-graph-mcp --help          Show full help
+
+EXAMPLES:
+    # Configure in Claude Code or other MCP clients:
+    task-graph-mcp --stdio
+
+    # CLI access for scripts and background agents:
+    task-graph-mcp agent connect --tags build,test
+    task-graph-mcp agent list-tasks --ready
+    task-graph-mcp agent claim <task-id>
+    task-graph-mcp agent update <task-id> --status completed
+    task-graph-mcp agent disconnect
+
+    # Interactive mode for debugging:
+    task-graph-mcp agent interactive
+
+For more information, visit: https://github.com/crates/task-graph-mcp
+"#
+    );
 }
 
 /// Load workflows config and pre-load named workflow configs into cache.

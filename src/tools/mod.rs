@@ -9,6 +9,7 @@ pub mod deps;
 pub mod feedback;
 pub mod files;
 pub mod gates;
+pub mod prompts_tool;
 pub mod query;
 pub mod schema;
 pub mod search;
@@ -166,6 +167,9 @@ impl ToolHandler {
 
         // Advisory tools
         tools.extend(advisories::get_tools());
+
+        // Prompt query tools
+        tools.extend(prompts_tool::get_tools());
 
         // Feedback tools (conditionally enabled)
         if self.config.feedback.enabled {
@@ -367,6 +371,16 @@ impl ToolHandler {
                     .unwrap_or("");
                 let workflow = self.get_workflow_for_worker(worker_id);
                 json(advisories::get_advisory(&self.db, &workflow, arguments))
+            }
+
+            // Prompt query tools
+            "get_prompts" => {
+                let worker_id = arguments
+                    .get("worker_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let workflow = self.get_workflow_for_worker(worker_id);
+                json(prompts_tool::get_prompts(&self.db, &workflow, arguments))
             }
 
             // Workflow discovery tools (no connection required)

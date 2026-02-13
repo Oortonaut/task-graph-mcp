@@ -3,11 +3,13 @@
 //! This module defines the CLI structure using clap's derive macros.
 //! The main entry point is the `Cli` struct which contains subcommands.
 
+pub mod agent;
 pub mod diff;
 pub mod export;
 pub mod import;
 pub mod migrate;
 
+use agent::AgentArgs;
 use clap::{Parser, Subcommand, ValueEnum};
 use diff::DiffArgs;
 use export::ExportArgs;
@@ -63,6 +65,12 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub ui_port: Option<u16>,
 
+    /// Start MCP server on stdio (required when no subcommand is given).
+    /// This flag is required to explicitly start the MCP server, preventing
+    /// accidental invocation that would block waiting for MCP input.
+    #[arg(long)]
+    pub stdio: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -84,4 +92,7 @@ pub enum Command {
 
     /// Migrate from deprecated .task-graph/ to task-graph/ directory
     Migrate(MigrateArgs),
+
+    /// Agent commands for background workers without MCP access
+    Agent(AgentArgs),
 }
