@@ -552,14 +552,14 @@ fn format_update_output(value: Value, format: CliOutputFormat) -> String {
     format_prompts_section(&value, &mut out);
 
     // Advisory hints
-    if let Some(hints) = value.get("advisory_hints").and_then(|v| v.as_array()) {
-        if !hints.is_empty() {
-            let names: Vec<&str> = hints.iter().filter_map(|h| h.as_str()).collect();
-            out.push_str(&format!(
-                "\n**Advisories:** `get_advisory` topics: {}\n",
-                names.join(", ")
-            ));
-        }
+    if let Some(hints) = value.get("advisory_hints").and_then(|v| v.as_array())
+        && !hints.is_empty()
+    {
+        let names: Vec<&str> = hints.iter().filter_map(|h| h.as_str()).collect();
+        out.push_str(&format!(
+            "\n**Advisories:** `get_advisory` topics: {}\n",
+            names.join(", ")
+        ));
     }
 
     // Warnings
@@ -601,14 +601,14 @@ fn format_claim_output(value: Value, format: CliOutputFormat) -> String {
     format_prompts_section(&value, &mut out);
 
     // Advisory hints
-    if let Some(hints) = value.get("advisory_hints").and_then(|v| v.as_array()) {
-        if !hints.is_empty() {
-            let names: Vec<&str> = hints.iter().filter_map(|h| h.as_str()).collect();
-            out.push_str(&format!(
-                "\n**Advisories:** `get_advisory` topics: {}\n",
-                names.join(", ")
-            ));
-        }
+    if let Some(hints) = value.get("advisory_hints").and_then(|v| v.as_array())
+        && !hints.is_empty()
+    {
+        let names: Vec<&str> = hints.iter().filter_map(|h| h.as_str()).collect();
+        out.push_str(&format!(
+            "\n**Advisories:** `get_advisory` topics: {}\n",
+            names.join(", ")
+        ));
     }
 
     out
@@ -616,17 +616,17 @@ fn format_claim_output(value: Value, format: CliOutputFormat) -> String {
 
 /// Render transition prompts as blockquotes, shared by update and claim formatters.
 fn format_prompts_section(value: &Value, out: &mut String) {
-    if let Some(prompts) = value.get("prompts").and_then(|v| v.as_array()) {
-        if !prompts.is_empty() {
-            out.push_str("\n### Guidance\n");
-            for (i, prompt) in prompts.iter().enumerate() {
-                if let Some(text) = prompt.as_str() {
-                    for line in text.lines() {
-                        out.push_str(&format!("> {}\n", line));
-                    }
-                    if i + 1 < prompts.len() {
-                        out.push_str("\n---\n\n");
-                    }
+    if let Some(prompts) = value.get("prompts").and_then(|v| v.as_array())
+        && !prompts.is_empty()
+    {
+        out.push_str("\n### Guidance\n");
+        for (i, prompt) in prompts.iter().enumerate() {
+            if let Some(text) = prompt.as_str() {
+                for line in text.lines() {
+                    out.push_str(&format!("> {}\n", line));
+                }
+                if i + 1 < prompts.len() {
+                    out.push_str("\n---\n\n");
                 }
             }
         }
@@ -1317,7 +1317,7 @@ fn run_interactive(
                         print_interactive_help();
                         continue;
                     }
-                    if let Err(_) = execute_line_command(handler, args, cmd) {
+                    if execute_line_command(handler, args, cmd).is_err() {
                         // Continue in interactive mode even on error
                     }
                 }
@@ -1357,7 +1357,7 @@ fn run_batch(handler: &ToolHandler, args: &AgentArgs, cmd_args: &BatchArgs) -> E
                     continue;
                 }
                 eprintln!("[{}] > {}", line_num, cmd);
-                if let Err(_) = execute_line_command(handler, args, cmd) {
+                if execute_line_command(handler, args, cmd).is_err() {
                     had_errors = true;
                     if !cmd_args.keep_going {
                         return ExitCode::from(exit_codes::GENERAL_ERROR);

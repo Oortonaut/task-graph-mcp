@@ -216,14 +216,14 @@ fn is_relevant(
     phase: Option<&str>,
     role: Option<&str>,
 ) -> bool {
-    let level_match = advisory.level.is_empty()
-        || level.map_or(false, |l| advisory.level.iter().any(|al| al == l));
+    let level_match =
+        advisory.level.is_empty() || level.is_some_and(|l| advisory.level.iter().any(|al| al == l));
     let domain_match = advisory.domain.is_empty()
-        || domain.map_or(false, |d| advisory.domain.iter().any(|ad| ad == d));
-    let phase_match = advisory.phase.is_empty()
-        || phase.map_or(false, |p| advisory.phase.iter().any(|ap| ap == p));
+        || domain.is_some_and(|d| advisory.domain.iter().any(|ad| ad == d));
+    let phase_match =
+        advisory.phase.is_empty() || phase.is_some_and(|p| advisory.phase.iter().any(|ap| ap == p));
     let role_match =
-        advisory.role.is_empty() || role.map_or(false, |r| advisory.role.iter().any(|ar| ar == r));
+        advisory.role.is_empty() || role.is_some_and(|r| advisory.role.iter().any(|ar| ar == r));
 
     level_match && domain_match && phase_match && role_match
 }

@@ -246,15 +246,19 @@ phases: {}
     }
 
     #[test]
-    fn returns_error_when_no_directories_exist() {
+    fn loads_embedded_workflow_when_no_directories_exist() {
         let temp = TempDir::new().unwrap();
         // Create paths that don't exist
         let project_dir = temp.path().join("nonexistent-project");
         let user_dir = temp.path().join("nonexistent-user");
 
         let loader = create_loader_with_dirs(Some(project_dir), Some(user_dir));
+        // Embedded workflows (like "swarm") are always available
         let result = loader.load_workflow_by_name("swarm");
+        assert!(result.is_ok());
 
+        // But non-embedded workflows should still fail
+        let result = loader.load_workflow_by_name("nonexistent-custom");
         assert!(result.is_err());
     }
 
@@ -305,6 +309,15 @@ states:
 
 mod list_workflows_tests {
     use super::*;
+    use task_graph_mcp::config::embedded;
+
+    /// The embedded workflows that are always included in list_workflows results.
+    fn embedded_workflow_names() -> Vec<String> {
+        embedded::workflows::names()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
 
     #[test]
     fn lists_workflows_from_project_directory() {
@@ -312,7 +325,7 @@ mod list_workflows_tests {
         let project_dir = temp.path().join("task-graph");
         fs::create_dir_all(&project_dir).unwrap();
 
-        // Create multiple workflow files
+        // Create multiple workflow files (these overlap with embedded names)
         fs::write(
             project_dir.join("workflow-swarm.yaml"),
             minimal_workflow_yaml(),
@@ -335,10 +348,16 @@ mod list_workflows_tests {
         let loader = create_loader_with_dirs(Some(project_dir), None);
         let workflows = loader.list_workflows();
 
+        // Filesystem workflows are present
         assert!(workflows.contains(&"swarm".to_string()));
         assert!(workflows.contains(&"solo".to_string()));
         assert!(workflows.contains(&"relay".to_string()));
-        assert_eq!(workflows.len(), 3);
+        // All embedded workflows are also included (deduplicated)
+        let embedded = embedded_workflow_names();
+        assert_eq!(workflows.len(), embedded.len());
+        for name in &embedded {
+            assert!(workflows.contains(name));
+        }
     }
 
     #[test]
@@ -361,7 +380,7 @@ mod list_workflows_tests {
         )
         .unwrap();
 
-        // Workflows in user directory
+        // Workflows in user directory (non-embedded names)
         fs::write(
             user_dir.join("workflow-custom.yaml"),
             minimal_workflow_yaml(),
@@ -380,7 +399,9 @@ mod list_workflows_tests {
         assert!(workflows.contains(&"solo".to_string()));
         assert!(workflows.contains(&"custom".to_string()));
         assert!(workflows.contains(&"enterprise".to_string()));
-        assert_eq!(workflows.len(), 4);
+        // 7 embedded + 2 non-embedded filesystem workflows (custom, enterprise)
+        let embedded = embedded_workflow_names();
+        assert_eq!(workflows.len(), embedded.len() + 2);
     }
 
     #[test]
@@ -403,7 +424,7 @@ mod list_workflows_tests {
         )
         .unwrap();
 
-        // Additional unique workflow
+        // Additional unique workflow (non-embedded name)
         fs::write(
             user_dir.join("workflow-unique.yaml"),
             minimal_workflow_yaml(),
@@ -413,26 +434,32 @@ mod list_workflows_tests {
         let loader = create_loader_with_dirs(Some(project_dir), Some(user_dir));
         let workflows = loader.list_workflows();
 
-        // Should only have 2 unique names, not 3
-        assert_eq!(workflows.len(), 2);
+        // swarm is deduplicated across both dirs and embedded; unique is added
         assert!(workflows.contains(&"swarm".to_string()));
         assert!(workflows.contains(&"unique".to_string()));
+        let embedded = embedded_workflow_names();
+        assert_eq!(workflows.len(), embedded.len() + 1); // +1 for "unique"
     }
 
     #[test]
-    fn returns_empty_list_when_no_workflows_exist() {
+    fn embedded_workflows_always_present() {
         let temp = TempDir::new().unwrap();
         let project_dir = temp.path().join("task-graph");
         fs::create_dir_all(&project_dir).unwrap();
 
-        // Create some non-workflow files
+        // Create some non-workflow files only
         fs::write(project_dir.join("config.yaml"), "server: {}").unwrap();
         fs::write(project_dir.join("prompts.yaml"), "prompts: {}").unwrap();
 
         let loader = create_loader_with_dirs(Some(project_dir), None);
         let workflows = loader.list_workflows();
 
-        assert!(workflows.is_empty());
+        // Embedded workflows are always available even with no filesystem workflows
+        let embedded = embedded_workflow_names();
+        assert_eq!(workflows.len(), embedded.len());
+        for name in &embedded {
+            assert!(workflows.contains(name));
+        }
     }
 
     #[test]
@@ -461,7 +488,13 @@ mod list_workflows_tests {
         let loader = create_loader_with_dirs(Some(project_dir), None);
         let workflows = loader.list_workflows();
 
-        assert_eq!(workflows, vec!["alpha", "middle", "zebra"]);
+        assert!(workflows.contains(&"alpha".to_string()));
+        assert!(workflows.contains(&"middle".to_string()));
+        assert!(workflows.contains(&"zebra".to_string()));
+        // Verify sorting: list should be sorted
+        let mut sorted = workflows.clone();
+        sorted.sort();
+        assert_eq!(workflows, sorted);
     }
 
     #[test]
@@ -470,7 +503,7 @@ mod list_workflows_tests {
         let project_dir = temp.path().join("task-graph");
         fs::create_dir_all(&project_dir).unwrap();
 
-        // Valid workflow
+        // Valid workflow (non-embedded name)
         fs::write(
             project_dir.join("workflow-valid.yaml"),
             minimal_workflow_yaml(),
@@ -494,9 +527,10 @@ mod list_workflows_tests {
         let loader = create_loader_with_dirs(Some(project_dir), None);
         let workflows = loader.list_workflows();
 
-        // Should only contain the valid one
-        assert_eq!(workflows.len(), 1);
+        // Should contain "valid" plus the embedded workflows
         assert!(workflows.contains(&"valid".to_string()));
+        let embedded = embedded_workflow_names();
+        assert_eq!(workflows.len(), embedded.len() + 1); // +1 for "valid"
     }
 
     #[test]
@@ -508,8 +542,9 @@ mod list_workflows_tests {
         let loader = create_loader_with_dirs(Some(project_dir), Some(user_dir));
         let workflows = loader.list_workflows();
 
-        // Should return empty list without error
-        assert!(workflows.is_empty());
+        // Should still return embedded workflows without error
+        let embedded = embedded_workflow_names();
+        assert_eq!(workflows.len(), embedded.len());
     }
 }
 
@@ -680,7 +715,9 @@ mod install_directory_tests {
 
         assert!(workflows.contains(&"swarm".to_string()));
         assert!(workflows.contains(&"solo".to_string()));
-        assert_eq!(workflows.len(), 2);
+        // Install dir files (swarm, solo) overlap with embedded; total is all 7 embedded
+        let embedded_count = task_graph_mcp::config::embedded::workflows::names().len();
+        assert_eq!(workflows.len(), embedded_count);
     }
 
     #[test]
