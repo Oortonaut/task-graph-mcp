@@ -179,6 +179,8 @@ fn format_task_short(task: &Task, blocked_by: &[String]) -> String {
 
     let blocked = if blocked_by.is_empty() {
         String::new()
+    } else if blocked_by.len() == 1 {
+        format!(" [blocked by {}]", blocked_by[0])
     } else {
         format!(" [blocked by {}]", blocked_by.len())
     };

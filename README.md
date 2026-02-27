@@ -362,6 +362,7 @@ Environment variables:
 | `get_advisory(topic?: str, task?: task_str, worker_id?: worker_str)` | Get governance advisory guidance. Without topic: lists all topics. With topic: returns full advisory content with template expansion. |
 | `query(sql: str, params?: str[], limit?: int = 100, format?: str)` | Execute read-only SQL. SELECT only. Requires permission. |
 | `get_schema(table?: str, include_sql?: bool)` | Get database schema. Returns table names, columns, types, and foreign keys. |
+| `get_prompts(status?: str, phase?: str, task?: task_str, worker_id?: worker_str)` | Get workflow prompts. Without params: lists triggers. With status/phase: returns expanded prompts for that transition. |
 | `list_workflows()` | List available workflow configurations (solo, swarm, relay, hierarchical, etc.). |
 | `list_skills()` | List available bundled skills with descriptions. |
 | `get_skill(name: str)` | Get full content of a bundled skill. |
