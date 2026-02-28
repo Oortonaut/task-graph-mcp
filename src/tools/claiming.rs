@@ -63,7 +63,7 @@ pub fn claim(
 
     // Use unified update which handles claiming when transitioning to timed state
     // Claim transitions TO a blocking state, so unblocked/auto_advanced will be empty
-    let (task, _unblocked, _auto_advanced) = match db.update_task_unified(
+    let (task, _unblocked, _auto_advanced, _auto_completed) = match db.update_task_unified(
         &task_id,
         &worker_id,
         None,               // assignee (not assigning to another agent)

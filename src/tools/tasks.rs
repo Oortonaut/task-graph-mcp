@@ -1401,7 +1401,7 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
     };
 
     // Perform the task update
-    let (task, unblocked, auto_advanced) = db.update_task_unified(
+    let (task, unblocked, auto_advanced, auto_completed) = db.update_task_unified(
         &task_id,
         &worker_id,
         assignee.as_deref(),
@@ -1553,6 +1553,14 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
         // Include cascaded cancellations if any
         if !cascaded.is_empty() {
             map.insert("cascaded".to_string(), json!(cascaded));
+        }
+        // Include auto_completed if non-empty (parent tasks auto-completed via rollup)
+        if !auto_completed.is_empty() {
+            let completed_info: Vec<serde_json::Value> = auto_completed
+                .iter()
+                .map(|(id, title)| json!({"id": id, "title": title}))
+                .collect();
+            map.insert("auto_completed".to_string(), json!(completed_info));
         }
         // Include attachment results if any were added
         if !attachment_results.is_empty() {

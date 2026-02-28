@@ -2899,7 +2899,7 @@ mod task_claiming_tests {
             .unwrap();
 
         // Update to working (timed state) should claim the task
-        let (updated, _unblocked, auto_advanced) = db
+        let (updated, _unblocked, auto_advanced, _auto_completed) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -2987,7 +2987,7 @@ mod task_claiming_tests {
         .unwrap();
 
         // Update back to pending (non-timed) should release
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -3065,7 +3065,7 @@ mod task_claiming_tests {
         db.claim_task(&task.id, &agent1.id, &states_config).unwrap();
 
         // Agent2 force claims via update
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent2.id,
@@ -3264,7 +3264,7 @@ mod task_claiming_tests {
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
 
         // Complete via update
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -3396,7 +3396,7 @@ mod task_claiming_tests {
             .unwrap();
 
         // Claim via transition to first timed state
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -3423,7 +3423,7 @@ mod task_claiming_tests {
         assert_eq!(updated.worker_id, Some(agent.id.clone()));
 
         // Transition to second timed state - should preserve ownership
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -3519,7 +3519,7 @@ mod task_claiming_tests {
         assert_eq!(claimed.status, "working");
 
         // Update to the same state (working -> working)
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -3595,7 +3595,7 @@ mod task_claiming_tests {
 
         // Claim and then fail the task to get to 'failed' state
         db.claim_task(&task.id, &agent.id, &states_config).unwrap();
-        let (failed_task, _, _) = db
+        let (failed_task, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -3622,7 +3622,7 @@ mod task_claiming_tests {
         assert!(failed_task.worker_id.is_none()); // Released on transition to terminal-ish state
 
         // Now transition from failed (untimed) to pending (untimed)
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -3986,7 +3986,7 @@ mod task_claiming_tests {
             result.is_ok(),
             "Claim should succeed after blocking task is completed"
         );
-        let (task, _, _) = result.unwrap();
+        let (task, _, _, _) = result.unwrap();
         assert_eq!(task.status, "working");
         assert_eq!(task.worker_id.as_deref(), Some(agent.id.as_str()));
     }
@@ -4075,7 +4075,7 @@ mod task_claiming_tests {
             result.is_ok(),
             "Claim with force=true should succeed even when task has unsatisfied dependencies"
         );
-        let (task, _, _) = result.unwrap();
+        let (task, _, _, _) = result.unwrap();
         assert_eq!(task.status, "working");
     }
 }
@@ -5878,7 +5878,7 @@ mod state_transition_tests {
         assert_eq!(completed_task.status, "completed");
 
         // Now reopen it to pending
-        let (updated, _, _) = db
+        let (updated, _, _, _) = db
             .update_task_unified(
                 &task.id,
                 &agent.id,
@@ -5933,6 +5933,7 @@ mod auto_advance_tests {
         AutoAdvanceConfig {
             enabled: true,
             target_state: Some(target_state.to_string()),
+            auto_rollup: false,
         }
     }
 
@@ -5995,7 +5996,7 @@ mod auto_advance_tests {
 
         // Claim and complete task1
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
-        let (_, unblocked, auto_advanced) = db
+        let (_, unblocked, auto_advanced, _) = db
             .update_task_unified(
                 &task1.id,
                 &agent.id,
@@ -6109,7 +6110,7 @@ mod auto_advance_tests {
 
         // Claim and complete task1
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
-        let (_, unblocked, auto_advanced) = db
+        let (_, unblocked, auto_advanced, _) = db
             .update_task_unified(
                 &task1.id,
                 &agent.id,
@@ -6222,7 +6223,7 @@ mod auto_advance_tests {
 
         // Complete task1 - task2 should NOT advance yet (task3 still blocking)
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
-        let (_, _, auto_advanced_1) = db
+        let (_, _, auto_advanced_1, _) = db
             .update_task_unified(
                 &task1.id,
                 &agent.id,
@@ -6251,7 +6252,7 @@ mod auto_advance_tests {
 
         // Complete task3 - NOW task2 should advance
         db.claim_task(&task3.id, &agent.id, &states_config).unwrap();
-        let (_, _, auto_advanced_2) = db
+        let (_, _, auto_advanced_2, _) = db
             .update_task_unified(
                 &task3.id,
                 &agent.id,
@@ -6342,7 +6343,7 @@ mod auto_advance_tests {
 
         // Complete task1
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
-        let (_, _, auto_advanced) = db
+        let (_, _, auto_advanced, _) = db
             .update_task_unified(
                 &task1.id,
                 &agent.id,
@@ -6449,7 +6450,7 @@ mod auto_advance_tests {
 
         // Complete task1 - task2 should auto-advance (but not task3 since task2 just changed)
         db.claim_task(&task1.id, &agent.id, &states_config).unwrap();
-        let (_, _, auto_advanced) = db
+        let (_, _, auto_advanced, _) = db
             .update_task_unified(
                 &task1.id,
                 &agent.id,
@@ -6492,6 +6493,630 @@ mod auto_advance_tests {
         // So task3 should still be pending
         let task3_updated = db.get_task(&task3.id).unwrap().unwrap();
         assert_eq!(task3_updated.status, "pending"); // Still pending - cascade doesn't happen recursively
+    }
+}
+
+mod auto_rollup_tests {
+    use super::*;
+
+    /// Helper to create an auto-advance config with rollup enabled.
+    fn rollup_config() -> AutoAdvanceConfig {
+        AutoAdvanceConfig {
+            enabled: false,
+            target_state: None,
+            auto_rollup: true,
+        }
+    }
+
+    #[test]
+    fn parent_auto_completes_when_all_children_finish() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = rollup_config();
+
+        let agent = db
+            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .unwrap();
+
+        let parent = db
+            .create_task(
+                None,
+                "Parent Task".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        let child1 = db
+            .create_task(
+                None,
+                "Child 1".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child2 = db
+            .create_task(
+                None,
+                "Child 2".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Complete child1: claim then complete
+        db.claim_task(&child1.id, &agent.id, &states_config)
+            .unwrap();
+        let (_, _, _, auto_completed_1) = db
+            .update_task_unified(
+                &child1.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Parent should NOT auto-complete yet (child2 still pending)
+        assert!(auto_completed_1.is_empty());
+        let parent_check = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_check.status, "pending");
+
+        // Complete child2
+        db.claim_task(&child2.id, &agent.id, &states_config)
+            .unwrap();
+        let (_, _, _, auto_completed_2) = db
+            .update_task_unified(
+                &child2.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Parent should now be auto-completed
+        assert_eq!(auto_completed_2.len(), 1);
+        assert_eq!(auto_completed_2[0].0, parent.id);
+        assert_eq!(auto_completed_2[0].1, "Parent Task");
+
+        let parent_final = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_final.status, "completed");
+        assert!(parent_final.completed_at.is_some());
+    }
+
+    #[test]
+    fn rollup_disabled_by_default() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = AutoAdvanceConfig::default(); // rollup disabled
+
+        let agent = db
+            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .unwrap();
+
+        let parent = db
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child = db
+            .create_task(
+                None,
+                "Child".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Complete the only child
+        db.claim_task(&child.id, &agent.id, &states_config).unwrap();
+        let (_, _, _, auto_completed) = db
+            .update_task_unified(
+                &child.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Should NOT auto-complete since rollup is disabled
+        assert!(auto_completed.is_empty());
+        let parent_check = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_check.status, "pending");
+    }
+
+    #[test]
+    fn recursive_rollup_grandparent() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = rollup_config();
+
+        let agent = db
+            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .unwrap();
+
+        // Create grandparent -> parent -> child
+        let grandparent = db
+            .create_task(
+                None,
+                "Grandparent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let parent = db
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                Some(grandparent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child = db
+            .create_task(
+                None,
+                "Child".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Complete the child -- should cascade through parent to grandparent
+        db.claim_task(&child.id, &agent.id, &states_config).unwrap();
+        let (_, _, _, auto_completed) = db
+            .update_task_unified(
+                &child.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Both parent and grandparent should be auto-completed
+        assert_eq!(auto_completed.len(), 2);
+        assert_eq!(auto_completed[0].0, parent.id);
+        assert_eq!(auto_completed[1].0, grandparent.id);
+
+        let parent_final = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_final.status, "completed");
+
+        let gp_final = db.get_task(&grandparent.id).unwrap().unwrap();
+        assert_eq!(gp_final.status, "completed");
+    }
+
+    #[test]
+    fn cancelled_children_count_as_terminal() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = rollup_config();
+
+        let agent = db
+            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .unwrap();
+
+        let parent = db
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child1 = db
+            .create_task(
+                None,
+                "Child 1".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child2 = db
+            .create_task(
+                None,
+                "Child 2".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Complete child1
+        db.claim_task(&child1.id, &agent.id, &states_config)
+            .unwrap();
+        db.update_task_unified(
+            &child1.id,
+            &agent.id,
+            None,
+            None,
+            None,
+            Some("completed".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Cancel child2 (pending -> cancelled is valid)
+        let (_, _, _, auto_completed) = db
+            .update_task_unified(
+                &child2.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("cancelled".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Parent should auto-complete (both children are terminal: completed + cancelled)
+        assert_eq!(auto_completed.len(), 1);
+        let parent_final = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_final.status, "completed");
+    }
+
+    #[test]
+    fn parent_already_terminal_no_rollup() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = rollup_config();
+
+        let agent = db
+            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .unwrap();
+
+        let parent = db
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child = db
+            .create_task(
+                None,
+                "Child".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Manually complete the parent first
+        db.claim_task(&parent.id, &agent.id, &states_config)
+            .unwrap();
+        db.update_task_unified(
+            &parent.id,
+            &agent.id,
+            None,
+            None,
+            None,
+            Some("completed".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            true, // force to bypass child check
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Now complete the child
+        db.claim_task(&child.id, &agent.id, &states_config).unwrap();
+        let (_, _, _, auto_completed) = db
+            .update_task_unified(
+                &child.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Parent already terminal, should not be re-completed
+        assert!(auto_completed.is_empty());
+    }
+
+    #[test]
+    fn parent_in_working_state_completes_directly() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = rollup_config();
+
+        let agent = db
+            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .unwrap();
+
+        let parent = db
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child = db
+            .create_task(
+                None,
+                "Child".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Put parent into working state
+        db.claim_task(&parent.id, &agent.id, &states_config)
+            .unwrap();
+
+        let parent_check = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_check.status, "working");
+
+        // Complete the child
+        db.claim_task(&child.id, &agent.id, &states_config).unwrap();
+        let (_, _, _, auto_completed) = db
+            .update_task_unified(
+                &child.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Parent should transition directly from working -> completed
+        assert_eq!(auto_completed.len(), 1);
+        let parent_final = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_final.status, "completed");
     }
 }
 
