@@ -187,6 +187,11 @@ pub struct AutoAdvanceConfig {
     /// If None, tasks remain in their current state even when unblocked.
     #[serde(default)]
     pub target_state: Option<String>,
+
+    /// Enable auto-rollup: when all children of a parent reach terminal states,
+    /// the parent automatically transitions through working -> completed (default: false).
+    #[serde(default)]
+    pub auto_rollup: bool,
 }
 
 /// Agent feedback configuration.

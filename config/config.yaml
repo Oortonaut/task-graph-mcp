@@ -89,6 +89,9 @@ dependencies:
 auto_advance:
   enabled: false
   target_state: null
+  # Auto-rollup: when all children of a parent reach terminal states,
+  # the parent auto-transitions through working -> completed
+  auto_rollup: false
 
 # Agent feedback configuration
 feedback:

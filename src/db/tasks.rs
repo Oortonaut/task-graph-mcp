@@ -14,6 +14,11 @@ use anyhow::{Result, anyhow};
 use petname::{Generator, Petnames};
 use rusqlite::{Connection, Row, params};
 
+/// Result type for `update_task_unified`:
+/// (updated_task, unblocked_task_ids, auto_advanced_task_ids, auto_completed_parents)
+/// where auto_completed_parents is a list of (id, title) pairs for parents auto-completed via rollup.
+type UpdateResult = (Task, Vec<String>, Vec<String>, Vec<(String, String)>);
+
 /// Options for creating a task tree from nested input.
 #[derive(Debug)]
 pub struct CreateTreeOptions<'a> {
@@ -758,7 +763,7 @@ impl Database {
         states_config: &StatesConfig,
         deps_config: &DependenciesConfig,
         auto_advance: &AutoAdvanceConfig,
-    ) -> Result<(Task, Vec<String>, Vec<String>)> {
+    ) -> Result<UpdateResult> {
         let now = now_ms();
 
         self.with_conn_mut(|conn| {
@@ -1081,6 +1086,22 @@ impl Database {
                 (vec![], vec![])
             };
 
+            // Auto-rollup: if this task moved to a non-blocking state and auto_rollup is enabled,
+            // check if its parent (and recursively grandparents) should auto-complete.
+            // We check !is_blocking rather than is_terminal because "completed" and "failed"
+            // may have reopen exits but are still considered "done" for rollup purposes.
+            let new_is_non_blocking = !states_config.is_blocking_state(&new_status);
+            let auto_completed = if status_changed && new_is_non_blocking && auto_advance.auto_rollup {
+                propagate_auto_rollup(
+                    &tx,
+                    task_id,
+                    agent_id,
+                    states_config,
+                )?
+            } else {
+                vec![]
+            };
+
             tx.commit()?;
 
             Ok((Task {
@@ -1101,7 +1122,7 @@ impl Database {
                 worker_id: new_owner,
                 claimed_at: new_claimed_at,
                 ..task
-            }, unblocked, auto_advanced))
+            }, unblocked, auto_advanced, auto_completed))
         })
     }
 
@@ -1875,6 +1896,138 @@ impl Database {
             Ok(tasks)
         })
     }
+}
+
+/// Check if a task's parent should auto-complete because all children are terminal.
+/// Recursively checks grandparents too. Returns a list of (id, title) pairs for
+/// all parents that were auto-completed.
+fn propagate_auto_rollup(
+    conn: &Connection,
+    completed_task_id: &str,
+    agent_id: &str,
+    states_config: &StatesConfig,
+) -> Result<Vec<(String, String)>> {
+    let now = super::now_ms();
+    let mut auto_completed = Vec::new();
+
+    // Find the parent of the completed task (via 'contains' dependency)
+    let parent_id: Option<String> = conn
+        .query_row(
+            "SELECT from_task_id FROM dependencies WHERE to_task_id = ?1 AND dep_type = 'contains'",
+            params![completed_task_id],
+            |row| row.get(0),
+        )
+        .ok();
+
+    let parent_id = match parent_id {
+        Some(id) => id,
+        None => return Ok(auto_completed), // No parent, nothing to do
+    };
+
+    // Get the parent task
+    let parent = match get_task_internal(conn, &parent_id)? {
+        Some(t) => t,
+        None => return Ok(auto_completed),
+    };
+
+    // Skip if parent is already in a non-blocking (done) state
+    if !states_config.is_blocking_state(&parent.status) {
+        return Ok(auto_completed);
+    }
+
+    // Check if ALL children of the parent are in terminal states.
+    // blocking_states contains the non-terminal states, so children in those states
+    // are not yet done.
+    let non_terminal_children: i32 = conn.query_row(
+        "SELECT COUNT(*) FROM dependencies d
+         INNER JOIN tasks child ON d.to_task_id = child.id
+         WHERE d.from_task_id = ?1 AND d.dep_type = 'contains'
+         AND child.status IN (SELECT value FROM json_each(?2))",
+        params![
+            parent_id,
+            serde_json::to_string(&states_config.blocking_states)?
+        ],
+        |row| row.get(0),
+    )?;
+
+    if non_terminal_children > 0 {
+        return Ok(auto_completed); // Some children are still non-terminal
+    }
+
+    // All children are terminal -- auto-complete the parent.
+    // Find the first timed state (e.g., "working") for proper time tracking.
+    let first_timed = states_config
+        .definitions
+        .iter()
+        .find(|(_, def)| def.timed)
+        .map(|(name, _)| name.clone())
+        .unwrap_or_else(|| "working".to_string());
+
+    let parent_title = parent.title.clone();
+
+    // Determine the current effective state for transition validation
+    let mut current_state = parent.status.clone();
+
+    // If parent is in an initial/untimed state, transition through the timed state first
+    if !states_config.is_timed_state(&current_state) {
+        // Check the transition is valid: current -> timed
+        if states_config.is_valid_transition(&current_state, &first_timed) {
+            conn.execute(
+                "UPDATE tasks SET status = ?1, started_at = COALESCE(started_at, ?2), updated_at = ?2 WHERE id = ?3",
+                params![&first_timed, now, &parent_id],
+            )?;
+
+            record_state_transition(
+                conn,
+                &parent_id,
+                &first_timed,
+                Some(agent_id),
+                Some("auto-rollup: transitioning to timed state before completion"),
+                states_config,
+            )?;
+
+            current_state = first_timed;
+        } else {
+            // Cannot transition to timed state -- skip auto-rollup for this parent
+            return Ok(auto_completed);
+        }
+    }
+
+    // Now transition from the current (timed) state to completed
+    let completed_state = "completed";
+    if !states_config.is_valid_transition(&current_state, completed_state) {
+        // Cannot transition to completed -- skip
+        return Ok(auto_completed);
+    }
+
+    conn.execute(
+        "UPDATE tasks SET status = ?1, completed_at = ?2, updated_at = ?2, worker_id = NULL, claimed_at = NULL WHERE id = ?3",
+        params![completed_state, now, &parent_id],
+    )?;
+
+    // Release file locks for the parent
+    conn.execute(
+        "DELETE FROM file_locks WHERE task_id = ?1",
+        params![&parent_id],
+    )?;
+
+    record_state_transition(
+        conn,
+        &parent_id,
+        completed_state,
+        Some(agent_id),
+        Some("auto-rollup: all children reached terminal state"),
+        states_config,
+    )?;
+
+    auto_completed.push((parent_id.clone(), parent_title));
+
+    // Recurse: check if completing this parent triggers its own parent to auto-complete
+    let mut grandparent_completed =
+        propagate_auto_rollup(conn, &parent_id, agent_id, states_config)?;
+    auto_completed.append(&mut grandparent_completed);
+
+    Ok(auto_completed)
 }
 
 /// Helper function to create task tree recursively within a transaction.
