@@ -394,6 +394,36 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
             vec![],
             prompts,
         ),
+        make_tool_with_prompts(
+            "bulk_update",
+            "Update multiple tasks' status in one call. Each transition validates individually (state machine, ownership). Returns per-task success/failure.",
+            json!({
+                "worker_id": {
+                    "type": "string",
+                    "description": "Agent making the updates"
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Task IDs to update"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": state_enum,
+                    "description": "Target status for all tasks"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Reason for the update (stored in audit trail)"
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "Force ownership changes even if owned by another worker (default: false)"
+                }
+            }),
+            vec!["worker_id", "tasks", "status"],
+            prompts,
+        ),
     ]
 }
 
@@ -1515,6 +1545,70 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
     }
 
     Ok(response)
+}
+
+pub fn bulk_update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
+    let worker_id =
+        get_string(&args, "worker_id").ok_or_else(|| ToolError::missing_field("worker_id"))?;
+    let task_ids =
+        get_string_array(&args, "tasks").ok_or_else(|| ToolError::missing_field("tasks"))?;
+    let status = get_string(&args, "status").ok_or_else(|| ToolError::missing_field("status"))?;
+    let reason = get_string(&args, "reason");
+    let force = get_bool(&args, "force").unwrap_or(false);
+
+    let total = task_ids.len();
+    let mut succeeded: Vec<Value> = Vec::new();
+    let mut failed: Vec<Value> = Vec::new();
+
+    for task_id in &task_ids {
+        // Build per-task arguments reusing the existing update function
+        let per_task_args = json!({
+            "worker_id": worker_id,
+            "task": task_id,
+            "status": status,
+            "reason": reason,
+            "force": force
+        });
+
+        match update(
+            UpdateOptions {
+                db: opts.db,
+                config: opts.config,
+                workflows: opts.workflows,
+            },
+            per_task_args,
+        ) {
+            Ok(result) => {
+                let task_title = result
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let task_status = result
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                succeeded.push(json!({
+                    "id": task_id,
+                    "title": task_title,
+                    "status": task_status
+                }));
+            }
+            Err(e) => {
+                failed.push(json!({
+                    "id": task_id,
+                    "error": e.to_string()
+                }));
+            }
+        }
+    }
+
+    Ok(json!({
+        "succeeded": succeeded,
+        "failed": failed,
+        "total": total
+    }))
 }
 
 pub fn delete(db: &Database, args: Value) -> Result<Value> {
