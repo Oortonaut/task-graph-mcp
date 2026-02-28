@@ -262,6 +262,10 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "boolean",
                     "description": "Force ownership changes even if owned by another worker (default: false)"
                 },
+                "cascade": {
+                    "type": "boolean",
+                    "description": "When true and status is being set to cancelled, also cancel all non-terminal descendants (default: false)"
+                },
                 "attachments": {
                     "type": "array",
                     "description": "List of attachments to add to the task (e.g., commit hashes, changelists, notes)",
@@ -889,6 +893,7 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
     let time_estimate_ms = get_i64(&args, "time_estimate_ms");
     let reason = get_string(&args, "reason");
     let force = get_bool(&args, "force").unwrap_or(false);
+    let cascade = get_bool(&args, "cascade").unwrap_or(false);
 
     // Process attachments first (before the update)
     let mut attachment_results: Vec<Value> = Vec::new();
@@ -1417,6 +1422,62 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
         auto_advance,
     )?;
 
+    // Cascading cancellation: if cascade=true and task was cancelled, cancel all non-terminal descendants
+    let mut cascaded: Vec<Value> = Vec::new();
+    if cascade && states_config.is_terminal_state(&task.status) && task.status == "cancelled" {
+        // Get all descendants recursively (depth = -1 means unlimited)
+        if let Ok(descendants) = db.get_descendants(&task.id, -1) {
+            for descendant in descendants {
+                // Skip tasks already in a terminal state
+                if states_config.is_terminal_state(&descendant.status) {
+                    continue;
+                }
+                // Check if transition to cancelled is valid for this descendant
+                if !states_config.is_valid_transition(&descendant.status, "cancelled") {
+                    warn!(
+                        "Cannot cascade cancel to task '{}': no valid transition from '{}' to 'cancelled'",
+                        descendant.id, descendant.status
+                    );
+                    continue;
+                }
+                // Cancel the descendant using update_task_unified
+                match db.update_task_unified(
+                    &descendant.id,
+                    &worker_id,
+                    None, // no assignee
+                    None, // no title change
+                    None, // no description change
+                    Some("cancelled".to_string()),
+                    None, // no phase change
+                    None, // no priority change
+                    None, // no points change
+                    None, // no tags change
+                    None, // no needed_tags change
+                    None, // no wanted_tags change
+                    None, // no time_estimate_ms change
+                    Some(format!("Cascade cancelled from parent task '{}'", task_id)),
+                    true, // force=true to bypass ownership checks
+                    states_config,
+                    deps_config,
+                    auto_advance,
+                ) {
+                    Ok((cancelled_task, _, _)) => {
+                        cascaded.push(json!({
+                            "id": cancelled_task.id,
+                            "title": cancelled_task.title,
+                        }));
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to cascade cancel to task '{}': {}",
+                            descendant.id, e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     // Pre-fetch worker info for context-sensitive prompts (must outlive ctx)
     let worker_info_for_prompts = db.get_worker(&worker_id).ok().flatten();
     let worker_role_for_prompts = worker_info_for_prompts
@@ -1488,6 +1549,10 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
         // Include auto_advanced if non-empty (tasks that were actually transitioned)
         if !auto_advanced.is_empty() {
             map.insert("auto_advanced".to_string(), json!(auto_advanced));
+        }
+        // Include cascaded cancellations if any
+        if !cascaded.is_empty() {
+            map.insert("cascaded".to_string(), json!(cascaded));
         }
         // Include attachment results if any were added
         if !attachment_results.is_empty() {
