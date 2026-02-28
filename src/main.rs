@@ -123,7 +123,9 @@ impl TaskGraphServer {
 /// Default server instructions when no prompts.yaml is present.
 const DEFAULT_INSTRUCTIONS: &str = "\
 Task graph for multi-agent coordination. Start: connect() \u{2192} list_tasks(ready=true) \u{2192} claim() \u{2192} work \u{2192} update(state=\"completed\").
-Use get_skill(\"basics\") for full documentation.";
+Use get_skill(\"basics\") for full documentation. \
+Use resources (config://, docs://, query://) for live configuration and documentation \u{2014} \
+e.g. config://current for active settings, query://tasks/ready for claimable tasks, docs://skills/list for available skills.";
 
 impl ServerHandler for TaskGraphServer {
     fn get_info(&self) -> InitializeResult {
@@ -807,6 +809,27 @@ async fn run_server(
 
     // Open database
     let db = Database::open(&config.server.db_path)?;
+
+    // Cleanup stale workers from previous sessions that may have crashed
+    let disconnect_status = states_config.disconnect_state.clone();
+    match db.cleanup_stale_workers(300, &disconnect_status) {
+        Ok(summary) if summary.workers_evicted > 0 => {
+            info!(
+                "Startup cleanup: evicted {} stale worker(s): {} (released {} task(s), {} file(s))",
+                summary.workers_evicted,
+                summary.evicted_worker_ids.join(", "),
+                summary.tasks_released,
+                summary.files_released
+            );
+        }
+        Ok(_) => {
+            debug!("Startup cleanup: no stale workers found");
+        }
+        Err(e) => {
+            warn!("Startup cleanup failed: {}", e);
+        }
+    }
+
     let db = Arc::new(db);
 
     info!("Database initialized successfully");

@@ -4,6 +4,7 @@
 //! a temporary directory so they are fully isolated and leave no artefacts.
 
 use serde_json::json;
+use task_graph_mcp::config::FeedbackConfig;
 use task_graph_mcp::tools::feedback;
 use tempfile::TempDir;
 
@@ -25,6 +26,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "The search tool is great!"
             }),
@@ -62,6 +64,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "Workflow needs improvement",
                 "category": "workflow",
@@ -92,6 +95,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "Config is easy to understand",
                 "category": "config",
@@ -113,6 +117,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "It would be nice to have auto-complete",
                 "sentiment": "suggestion"
@@ -134,7 +139,7 @@ mod give_feedback_tests {
     fn missing_message_returns_error() {
         let dir = setup_dir();
 
-        let result = feedback::give_feedback(dir.path(), json!({}));
+        let result = feedback::give_feedback(dir.path(), &FeedbackConfig::default(), json!({}));
 
         assert!(result.is_err(), "missing message should fail");
         let err_msg = result.unwrap_err().to_string();
@@ -151,6 +156,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": ""
             }),
@@ -171,6 +177,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "   \t\n  "
             }),
@@ -185,6 +192,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "some feedback",
                 "category": "nonexistent"
@@ -206,6 +214,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "some feedback",
                 "sentiment": "angry"
@@ -229,6 +238,7 @@ mod give_feedback_tests {
         for cat in &categories {
             let result = feedback::give_feedback(
                 dir.path(),
+                &FeedbackConfig::default(),
                 json!({
                     "message": format!("testing {}", cat),
                     "category": cat
@@ -251,6 +261,7 @@ mod give_feedback_tests {
         for s in &sentiments {
             let result = feedback::give_feedback(
                 dir.path(),
+                &FeedbackConfig::default(),
                 json!({
                     "message": format!("testing {}", s),
                     "sentiment": s
@@ -294,6 +305,7 @@ mod list_feedback_tests {
         // Give some feedback first
         feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "This is my feedback"
             }),
@@ -327,6 +339,7 @@ mod append_tests {
         // First entry
         feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "First feedback entry",
                 "category": "tool",
@@ -338,6 +351,7 @@ mod append_tests {
         // Second entry
         feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "Second feedback entry",
                 "category": "ux",
@@ -349,6 +363,7 @@ mod append_tests {
         // Third entry with optional metadata
         feedback::give_feedback(
             dir.path(),
+            &FeedbackConfig::default(),
             json!({
                 "message": "Third entry with metadata",
                 "agent_id": "worker-1",
@@ -401,6 +416,7 @@ mod append_tests {
         for i in 0..5 {
             feedback::give_feedback(
                 dir.path(),
+                &FeedbackConfig::default(),
                 json!({
                     "message": format!("entry {}", i)
                 }),
@@ -504,7 +520,10 @@ mod feature_gate_tests {
 
     #[test]
     fn feedback_tools_excluded_when_disabled() {
-        let handler = handler_with_feedback_config(FeedbackConfig { enabled: false });
+        let handler = handler_with_feedback_config(FeedbackConfig {
+            enabled: false,
+            ..Default::default()
+        });
         let tools = handler.get_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
 
@@ -520,7 +539,10 @@ mod feature_gate_tests {
 
     #[test]
     fn feedback_tools_included_when_enabled() {
-        let handler = handler_with_feedback_config(FeedbackConfig { enabled: true });
+        let handler = handler_with_feedback_config(FeedbackConfig {
+            enabled: true,
+            ..Default::default()
+        });
         let tools = handler.get_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
 
@@ -535,18 +557,18 @@ mod feature_gate_tests {
     }
 
     #[test]
-    fn default_feedback_config_disables_tools() {
+    fn default_feedback_config_enables_tools() {
         let handler = handler_with_feedback_config(FeedbackConfig::default());
         let tools = handler.get_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
 
         assert!(
-            !names.contains(&"give_feedback"),
-            "give_feedback should NOT be listed with default FeedbackConfig (disabled)"
+            names.contains(&"give_feedback"),
+            "give_feedback should be listed with default FeedbackConfig (enabled)"
         );
         assert!(
-            !names.contains(&"list_feedback"),
-            "list_feedback should NOT be listed with default FeedbackConfig (disabled)"
+            names.contains(&"list_feedback"),
+            "list_feedback should be listed with default FeedbackConfig (enabled)"
         );
     }
 }

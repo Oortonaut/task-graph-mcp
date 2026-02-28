@@ -123,6 +123,23 @@ auto_advance:
   target_state: ready  # Requires this state in states config
 ```
 
+### Feedback
+
+Agent feedback collection. When enabled, agents can submit structured feedback via `give_feedback` and read it back via `list_feedback`. Feedback is stored as an append-only markdown file (`feedback.md`) next to the database.
+
+```yaml
+feedback:
+  # Enable give_feedback and list_feedback tools (default: true)
+  enabled: true
+  # Maximum feedback file size in bytes (default: 1048576 = 1MB, 0 = unlimited)
+  max_size_bytes: 1048576
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Whether feedback tools are available |
+| `max_size_bytes` | int | `1048576` | Maximum file size before writes are rejected. `0` = unlimited |
+
 ---
 
 ## States Configuration
@@ -173,6 +190,17 @@ states:
 |----------|------|-------------|
 | `exits` | string[] | Valid states to transition to |
 | `timed` | bool | Whether time in this state is tracked |
+
+> **Why timed states cannot be skipped:** The state machine enforces that tasks
+> must transition through a timed state (e.g., `working`) before reaching a
+> terminal state (e.g., `completed`). This is required for accounting integrity:
+> `time_actual_ms` is accumulated by measuring elapsed time while a task resides
+> in a timed state. Skipping directly from `pending` to `completed` would bypass
+> time tracking entirely, producing zero-duration records that corrupt rollup
+> metrics (parent task totals, sprint velocity, agent utilization). Even
+> coordinator/bookkeeping tasks (parent rollups, umbrella tasks) must transit
+> through `working` -- the transition can be immediate, but it must happen so the
+> state-transition audit trail remains consistent.
 
 ---
 
@@ -634,6 +662,10 @@ paths:
 auto_advance:
   enabled: false
   target_state: null
+
+feedback:
+  enabled: true
+  max_size_bytes: 1048576
 
 states:
   initial: pending

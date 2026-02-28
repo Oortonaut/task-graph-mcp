@@ -659,7 +659,9 @@ impl Database {
             {
                 let exits = states_config.get_exits(&task.status);
                 return Err(anyhow!(
-                    "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
+                    "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}. \
+Tasks must transition through a timed state (e.g. working) for time tracking; \
+skipping directly to a terminal state is not permitted.",
                     task.status,
                     new_status,
                     exits
@@ -810,7 +812,9 @@ impl Database {
                 && !states_config.is_valid_transition(&task.status, &new_status) {
                     let exits = states_config.get_exits(&task.status);
                     return Err(anyhow!(
-                        "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
+                        "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}. \
+Tasks must transition through a timed state (e.g. working) for time tracking; \
+skipping directly to a terminal state is not permitted.",
                         task.status,
                         new_status,
                         exits
@@ -1442,7 +1446,8 @@ impl Database {
             if !states_config.is_valid_transition(&task.status, claim_status) {
                 let exits = states_config.get_exits(&task.status);
                 return Err(anyhow!(
-                    "Cannot claim task in state '{}'. Allowed transitions: {:?}",
+                    "Cannot claim task in state '{}'. Allowed transitions: {:?}. \
+Tasks must transition through a timed state (e.g. working) for time tracking.",
                     task.status,
                     exits
                 ));
@@ -1691,7 +1696,9 @@ impl Database {
             if !states_config.is_valid_transition(&task.status, state) {
                 let exits = states_config.get_exits(&task.status);
                 return Err(anyhow!(
-                    "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}",
+                    "Invalid transition from '{}' to '{}'. Allowed transitions: {:?}. \
+Tasks must transition through a timed state (e.g. working) for time tracking; \
+skipping directly to a terminal state is not permitted.",
                     task.status,
                     state,
                     exits
@@ -1802,7 +1809,8 @@ impl Database {
             if !states_config.is_valid_transition(&task.status, complete_status) {
                 let exits = states_config.get_exits(&task.status);
                 return Err(anyhow!(
-                    "Cannot complete task in state '{}'. Allowed transitions: {:?}",
+                    "Cannot complete task in state '{}'. Allowed transitions: {:?}. \
+Tasks must transition through a timed state (e.g. working) for time tracking.",
                     task.status,
                     exits
                 ));
@@ -2022,6 +2030,26 @@ fn create_tree_recursive(
     }
 
     all_ids.push(task_id.clone());
+
+    // Create blocked_by dependencies: each referenced task "blocks" this task
+    for blocker_id in &input.blocked_by {
+        // Check if blocker exists in previously created tree nodes or in the database
+        let blocker_exists = all_ids.iter().any(|id| id == blocker_id) || {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+                params![blocker_id],
+                |row| row.get(0),
+            )?;
+            exists
+        };
+        if !blocker_exists {
+            return Err(anyhow::anyhow!(
+                "blocked_by task '{}' not found (not created earlier in tree and not in database)",
+                blocker_id
+            ));
+        }
+        Database::add_dependency_internal(conn, blocker_id, &task_id, "blocks")?;
+    }
 
     // Create children with dependencies based on child_type and sibling_type
     let mut prev_child_id: Option<String> = None;

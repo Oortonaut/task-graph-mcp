@@ -190,11 +190,31 @@ pub struct AutoAdvanceConfig {
 }
 
 /// Agent feedback configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedbackConfig {
-    /// Enable agent feedback tools (default: false).
-    #[serde(default)]
+    /// Enable agent feedback tools (default: true).
+    #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Maximum feedback file size in bytes (default: 1MB). 0 = unlimited.
+    #[serde(default = "default_feedback_max_size")]
+    pub max_size_bytes: u64,
+}
+
+impl Default for FeedbackConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_size_bytes: default_feedback_max_size(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_feedback_max_size() -> u64 {
+    1_048_576 // 1MB
 }
 
 /// Behavior for unknown attachment keys.

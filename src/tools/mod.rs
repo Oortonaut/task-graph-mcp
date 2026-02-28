@@ -281,6 +281,11 @@ impl ToolHandler {
             "delete" => json(tasks::delete(&self.db, arguments)),
             "rename" => json(tasks::rename(&self.db, arguments)),
             "scan" => tasks::scan(&self.db, self.default_format, arguments),
+            "status_summary" => json(tasks::status_summary(
+                &self.db,
+                &self.config.states,
+                arguments,
+            )),
 
             // Tracking tools
             "thinking" => json(tracking::thinking(&self.db, &self.config.states, arguments)),
@@ -396,7 +401,11 @@ impl ToolHandler {
                     .db_path
                     .parent()
                     .unwrap_or(std::path::Path::new("."));
-                json(feedback::give_feedback(db_dir, arguments))
+                json(feedback::give_feedback(
+                    db_dir,
+                    &self.config.feedback,
+                    arguments,
+                ))
             }
             "list_feedback" => {
                 let db_dir = self

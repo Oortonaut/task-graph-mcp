@@ -93,8 +93,9 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                         "points": { "type": "integer", "description": "Story points / complexity estimate" },
                         "time_estimate_ms": { "type": "integer", "description": "Estimated duration in milliseconds" },
                         "tags": { "type": "array", "items": { "type": "string" }, "description": "Categorization/discovery tags" },
-                        "needed_tags": { "type": "array", "items": { "type": "string" }, "description": "Tags agent must have ALL of to claim (AND)" },
-                        "wanted_tags": { "type": "array", "items": { "type": "string" }, "description": "Tags agent must have AT LEAST ONE of to claim (OR)" },
+                        "needed_tags": { "type": "array", "items": { "type": "string" }, "description": "Worker tags required (ALL must match) for claiming this task" },
+                        "wanted_tags": { "type": "array", "items": { "type": "string" }, "description": "Worker tags preferred (at least ONE must match) for claiming this task" },
+                        "blocked_by": { "type": "array", "items": { "type": "string" }, "description": "Task IDs that block this task. Creates 'blocks' deps. Can reference IDs from earlier nodes in this tree or existing tasks." },
                         "children": { "type": "array", "description": "Child nodes (same structure, recursive)" }
                     }
                 },
@@ -242,12 +243,12 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 "needed_tags": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Tags agent must have ALL of to claim (AND)"
+                    "description": "Worker tags required (ALL must match) for claiming this task"
                 },
                 "wanted_tags": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Tags agent must have AT LEAST ONE of to claim (OR)"
+                    "description": "Worker tags preferred (at least ONE must match) for claiming this task"
                 },
                 "time_estimate_ms": {
                     "type": "integer",
@@ -379,6 +380,18 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                 }
             }),
             vec!["task"],
+            prompts,
+        ),
+        make_tool_with_prompts(
+            "status_summary",
+            "Get task counts grouped by status. Returns a counts object and total. Optionally scope to a subtree.",
+            json!({
+                "parent": {
+                    "type": "string",
+                    "description": "Optional parent task ID to scope the summary to its subtree (all descendants). When omitted, counts all tasks."
+                }
+            }),
+            vec![],
             prompts,
         ),
     ]
@@ -1571,4 +1584,13 @@ pub fn scan(db: &Database, default_format: OutputFormat, args: Value) -> Result<
         OutputFormat::Markdown => Ok(ToolResult::Raw(format_scan_result_markdown(&result))),
         OutputFormat::Json => Ok(ToolResult::Json(serde_json::to_value(&result)?)),
     }
+}
+
+pub fn status_summary(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
+    let parent = get_string(&args, "parent");
+    let (counts, total) = db.get_status_summary(parent.as_deref(), states_config)?;
+    Ok(json!({
+        "counts": counts,
+        "total": total,
+    }))
 }

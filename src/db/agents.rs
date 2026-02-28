@@ -835,6 +835,16 @@ impl Database {
         })
     }
 
+    /// Force-expire a specific worker, releasing all its claimed tasks and file locks,
+    /// then unregistering it. Unlike cleanup_stale_workers, this does not check
+    /// heartbeat staleness -- it unconditionally expires the worker.
+    pub fn expire_worker(&self, worker_id: &str, final_status: &str) -> Result<DisconnectSummary> {
+        let files_from_locks = self.release_worker_locks(worker_id).unwrap_or(0);
+        let mut summary = self.unregister_worker(worker_id, final_status)?;
+        summary.files_released += files_from_locks;
+        Ok(summary)
+    }
+
     /// Get claim count for a worker (counts tasks in any timed state).
     pub fn get_claim_count(
         &self,

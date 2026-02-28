@@ -198,6 +198,53 @@ task-graph-mcp agent disconnect <worker-id>
 
 ---
 
+## MCP Resources
+
+The server exposes **resources** that agents can read for live configuration,
+documentation, and database queries. Use `list_resources` / `read_resource` (or
+the equivalent MCP resource protocol) to access them.
+
+### Query Resources (live database)
+
+| URI | Description |
+|-----|-------------|
+| `query://tasks/all` | Full task graph with dependencies |
+| `query://tasks/ready` | Tasks ready to claim (deps satisfied, unclaimed) |
+| `query://tasks/blocked` | Tasks blocked by dependencies |
+| `query://tasks/claimed` | All currently claimed tasks |
+| `query://tasks/agent/{agent_id}` | Tasks owned by a specific agent |
+| `query://tasks/tree/{task_id}` | Task with all descendants |
+| `query://files/marks` | All advisory file marks |
+| `query://agents/all` | Registered agents |
+| `query://stats/summary` | Aggregate statistics |
+
+### Config Resources (active configuration)
+
+| URI | Description |
+|-----|-------------|
+| `config://current` | All configuration in one response (states, phases, deps, tags) |
+| `config://states` | Task state definitions and transitions |
+| `config://phases` | Work phase definitions |
+| `config://dependencies` | Dependency type definitions |
+| `config://tags` | Tag definitions and categories |
+
+### Docs Resources (reference content)
+
+| URI | Description |
+|-----|-------------|
+| `docs://skills/list` | List all bundled skills |
+| `docs://skills/{name}` | Get a specific skill (e.g., `docs://skills/basics`) |
+| `docs://workflows/list` | List available workflow topologies |
+| `docs://workflows/{name}` | Workflow details (states, phases, settings) |
+| `docs://index` | List all documentation files |
+| `docs://search/{query}` | Full-text search across documentation |
+| `docs://{path}` | Read a specific doc file (e.g., `docs://GATES.md`) |
+
+**Tip:** Read `config://current` early in your session to understand the active
+state machine, available phases, and tag definitions without extra tool calls.
+
+---
+
 ## Task States
 
 States and transitions are defined by the active workflow config. The default
@@ -227,6 +274,24 @@ phases, consult `docs://WORKFLOW_CUSTOMIZATION` for the decision framework.
 - Set owner when entering
 - Track `time_actual_ms`
 - Clear owner when leaving
+
+> **Accounting rationale -- why you cannot skip timed states:**
+> The state machine requires tasks to pass through a timed state (e.g.,
+> `working`) before reaching `completed`. You cannot go directly from `pending`
+> to `completed`. This exists because `time_actual_ms` is accumulated by
+> measuring elapsed wall-clock time while a task sits in a timed state. Skipping
+> the timed state would produce zero-duration records, breaking parent rollup
+> totals, sprint velocity, and agent utilization metrics.
+>
+> **Pattern for coordinator/bookkeeping tasks:** Parent rollup tasks, umbrella
+> tasks, and other bookkeeping items where no real work happens still need to
+> transit through `working`. The transition can be immediate:
+> ```
+> update(task=task_id, state="working", worker_id=worker_id)
+> update(task=task_id, state="completed", worker_id=worker_id)
+> ```
+> This records a minimal (near-zero) duration while keeping the audit trail and
+> accounting system consistent.
 
 ---
 

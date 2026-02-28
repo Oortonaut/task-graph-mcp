@@ -32,7 +32,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Freeform tags for capabilities, roles, etc."
+                    "description": "Worker capability tags for task affinity matching. Tasks use needed_tags/wanted_tags to prefer or require workers with matching tags."
                 },
                 "force": {
                     "type": "boolean",
@@ -95,7 +95,7 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                 "tags": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Filter workers that have ALL of these tags"
+                    "description": "Filter workers that have ALL of these capability/affinity tags"
                 },
                 "file": {
                     "type": "string",
@@ -119,11 +119,15 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
         ),
         make_tool_with_prompts(
             "cleanup_stale",
-            "Evict stale workers that haven't sent a heartbeat within the timeout period. Releases their task claims and file locks.",
+            "Evict stale workers that haven't sent a heartbeat within the timeout period. Releases their task claims and file locks. If worker_id is provided, force-expire that specific worker regardless of staleness.",
             json!({
+                "worker_id": {
+                    "type": "string",
+                    "description": "If provided, force-expire this specific worker regardless of staleness. When omitted, expire all stale workers based on timeout."
+                },
                 "timeout": {
                     "type": "integer",
-                    "description": "Seconds without heartbeat before a worker is considered stale. Default: 300 (5 minutes)."
+                    "description": "Seconds without heartbeat before a worker is considered stale. Default: 300 (5 minutes). Ignored when worker_id is provided."
                 },
                 "final_status": {
                     "type": "string",
@@ -189,8 +193,11 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
     let workflow = get_string(&args, "workflow");
     let max_claims = get_i32(&args, "max_claims");
 
-    // Validate tags if provided
-    let tag_warnings = tags_config.validate_tags(&tags)?;
+    // Worker tags are accepted silently (no validation warnings).
+    // They participate in task affinity matching (needed_tags/wanted_tags)
+    // and workflow role matching, but unknown worker tags should not warn
+    // since workers may register capabilities not predefined in tag definitions.
+    // Task tag validation (on create/update) continues to warn as configured.
 
     // Check for path override requests (informational - paths are set at server startup)
     let mut path_notes: Vec<String> = Vec::new();
@@ -239,6 +246,19 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
         }
     }
 
+    // Run stale worker cleanup before registering (catches orphaned workers from crashed sessions)
+    let disconnect_status = states_config.disconnect_state.clone();
+    let _ = db.cleanup_stale_workers(300, &disconnect_status);
+
+    // If force-reconnecting, expire the old worker first to release its claimed tasks
+    if force {
+        if let Some(ref wid) = worker_id {
+            if db.get_worker(wid)?.is_some() {
+                let _ = db.expire_worker(wid, &disconnect_status);
+            }
+        }
+    }
+
     let overlays = get_string_array(&args, "overlays").unwrap_or_default();
     let worker = db.register_worker(
         worker_id, tags, force, ids_config, workflow, overlays, max_claims,
@@ -284,12 +304,13 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
         }
     });
 
+    // Hint about available MCP resources so agents discover them
+    response["hints"] = json!({
+        "resources": "MCP resources are available for live data. Use config://current for active configuration, query://tasks/ready for claimable tasks, docs://skills/list for skill documentation."
+    });
+
     if !path_notes.is_empty() {
         response["path_warnings"] = json!(path_notes);
-    }
-
-    if !tag_warnings.is_empty() {
-        response["tag_warnings"] = json!(tag_warnings);
     }
 
     // Deliver workflow-specific role information and prompts
@@ -454,9 +475,6 @@ pub fn list_agents(
 }
 
 pub fn cleanup_stale(db: &Database, states_config: &StatesConfig, args: Value) -> Result<Value> {
-    // Default timeout: 5 minutes
-    let timeout = get_i32(&args, "timeout").unwrap_or(300) as i64;
-
     // Get final_status from args or fall back to config
     let final_status =
         get_string(&args, "final_status").unwrap_or_else(|| states_config.disconnect_state.clone());
@@ -474,6 +492,21 @@ pub fn cleanup_stale(db: &Database, states_config: &StatesConfig, args: Value) -
         .into());
     }
 
+    // If worker_id is provided, force-expire that specific worker regardless of staleness
+    if let Some(worker_id) = get_string(&args, "worker_id") {
+        let summary = db.expire_worker(&worker_id, &final_status)?;
+
+        return Ok(json!({
+            "workers_evicted": 1,
+            "evicted_worker_ids": [worker_id],
+            "tasks_released": summary.tasks_released,
+            "files_released": summary.files_released,
+            "final_status": summary.final_status
+        }));
+    }
+
+    // Default: expire all stale workers based on timeout (default 5 minutes)
+    let timeout = get_i32(&args, "timeout").unwrap_or(300) as i64;
     let summary = db.cleanup_stale_workers(timeout, &final_status)?;
 
     Ok(json!({

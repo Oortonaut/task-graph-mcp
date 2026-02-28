@@ -334,7 +334,7 @@ Environment variables:
 | `project_history(from?: datetime_str, to?: datetime_str, states?: status_str[], limit?: int = 100)` | Project-wide history with date range filters. |
 | `log_metrics(worker_id: worker_str, task: task_str, cost_usd?: float, values?: int[8])` | Log metrics (aggregated). |
 | `get_metrics(task: task_str\|task_str[])` | Get metrics for task(s). |
-| `give_feedback(message: str, category?: str, sentiment?: str, agent_id?: str, tool_name?: str, task_id?: str)` | Record feedback about tools, workflows, or UX (conditional on config). |
+| `give_feedback(message: str, category?: str, sentiment?: str, agent_id?: str, tool_name?: str, task_id?: str)` | Record feedback about tools, workflows, or UX. Enabled by default; rejects writes past size limit (default: 1MB). |
 | `list_feedback()` | Read the feedback markdown file. |
 
 ### File Coordination

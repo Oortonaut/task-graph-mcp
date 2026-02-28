@@ -92,8 +92,10 @@ auto_advance:
 
 # Agent feedback configuration
 feedback:
-  # Enable give_feedback and list_feedback tools (default: false)
-  enabled: false
+  # Enable give_feedback and list_feedback tools (default: true)
+  enabled: true
+  # Maximum feedback file size in bytes (default: 1048576 = 1MB, 0 = unlimited)
+  max_size_bytes: 1048576
 
 # Tag definitions
 tags:

@@ -2,6 +2,7 @@
 //!
 //! Feedback is stored as a simple, human-readable, append-only markdown file.
 
+use crate::config::FeedbackConfig;
 use crate::error::ToolError;
 use crate::tools::{get_string, make_tool};
 use anyhow::Result;
@@ -26,7 +27,8 @@ pub fn get_tools() -> Vec<Tool> {
         make_tool(
             "give_feedback",
             "Submit feedback about tools, workflows, configuration, or UX. \
-             Appends to a human-readable markdown file. Never shared automatically.",
+             Appends to a human-readable markdown file. Never shared automatically. \
+             Rejects writes if the file exceeds the configured size limit (default: 1MB).",
             json!({
                 "message": {
                     "type": "string",
@@ -74,7 +76,7 @@ fn feedback_path(db_dir: &Path) -> std::path::PathBuf {
 }
 
 /// Handle the give_feedback tool call.
-pub fn give_feedback(db_dir: &Path, args: Value) -> Result<Value> {
+pub fn give_feedback(db_dir: &Path, config: &FeedbackConfig, args: Value) -> Result<Value> {
     let message =
         get_string(&args, "message").ok_or_else(|| ToolError::missing_field("message"))?;
 
@@ -113,6 +115,21 @@ pub fn give_feedback(db_dir: &Path, args: Value) -> Result<Value> {
     let task_id = get_string(&args, "task_id");
 
     let path = feedback_path(db_dir);
+
+    // Check size limit before writing (0 = unlimited)
+    if config.max_size_bytes > 0 {
+        let current_size = path.metadata().map(|m| m.len()).unwrap_or(0);
+        if current_size >= config.max_size_bytes {
+            return Err(ToolError::invalid_value(
+                "feedback",
+                &format!(
+                    "Feedback file has reached the size limit ({} bytes). No more feedback can be recorded.",
+                    config.max_size_bytes
+                ),
+            )
+            .into());
+        }
+    }
 
     // If file doesn't exist yet, write the header
     let needs_header = !path.exists();

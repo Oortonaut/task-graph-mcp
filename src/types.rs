@@ -220,6 +220,12 @@ pub struct TaskTreeInput {
     /// Categorization/discovery tags for the task.
     pub tags: Option<Vec<String>>,
 
+    /// Task IDs that block this task. Creates "blocks" dependencies from each
+    /// referenced task to this task. Can reference tasks created earlier in the
+    /// same tree (by their `id`) or existing tasks in the database.
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
+
     /// Child nodes in the tree.
     #[serde(default)]
     pub children: Vec<TaskTreeInput>,

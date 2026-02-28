@@ -350,4 +350,62 @@ impl Database {
             })
         })
     }
+
+    /// Get a lightweight status summary: task counts grouped by state.
+    /// When `parent` is provided, counts only descendants of that task.
+    pub fn get_status_summary(
+        &self,
+        parent: Option<&str>,
+        states_config: &StatesConfig,
+    ) -> Result<(HashMap<String, i64>, i64)> {
+        self.with_conn(|conn| {
+            let (sql, param): (&str, Option<String>) = match parent {
+                Some(pid) => (
+                    "WITH RECURSIVE descendants AS (
+                        SELECT id FROM tasks WHERE id = ?1
+                        UNION ALL
+                        SELECT dep.to_task_id FROM dependencies dep
+                        INNER JOIN descendants d ON dep.from_task_id = d.id
+                        WHERE dep.dep_type = 'contains'
+                    )
+                    SELECT status, COUNT(*) as cnt FROM tasks
+                    WHERE id IN (SELECT id FROM descendants) GROUP BY status",
+                    Some(pid.to_string()),
+                ),
+                None => (
+                    "SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status",
+                    None,
+                ),
+            };
+
+            let mut counts: HashMap<String, i64> = HashMap::new();
+
+            // Initialize all defined states to 0
+            for state in states_config.state_names() {
+                counts.insert(state.to_string(), 0);
+            }
+
+            let mut stmt = conn.prepare(sql)?;
+            let rows: Vec<(String, i64)> = if let Some(ref p) = param {
+                stmt.query_map(params![p], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            } else {
+                stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            };
+
+            for (status, count) in rows {
+                counts.insert(status, count);
+            }
+
+            let total: i64 = counts.values().sum();
+            Ok((counts, total))
+        })
+    }
 }
