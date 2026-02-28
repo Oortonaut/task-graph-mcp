@@ -278,6 +278,22 @@ impl ToolHandler {
                     arguments,
                 ))
             }
+            "bulk_update" => {
+                // Look up worker's workflow for prompts
+                let worker_id = arguments
+                    .get("worker_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let workflow = self.get_workflow_for_worker(worker_id);
+                json(tasks::bulk_update(
+                    tasks::UpdateOptions {
+                        db: &self.db,
+                        config: &self.config,
+                        workflows: &workflow,
+                    },
+                    arguments,
+                ))
+            }
             "delete" => json(tasks::delete(&self.db, arguments)),
             "rename" => json(tasks::rename(&self.db, arguments)),
             "scan" => tasks::scan(&self.db, self.default_format, arguments),
