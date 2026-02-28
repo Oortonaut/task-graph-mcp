@@ -35,10 +35,24 @@ pub(crate) fn record_state_transition(
         .ok();
 
     if let Some((open_id, prev_status, start_timestamp)) = open_transition {
-        // Close the previous transition
+        // Count how many other timed tasks this worker had open (for time normalization)
+        let concurrency: i32 = if let Some(wid) = worker_id {
+            conn.query_row(
+                "SELECT COUNT(*) FROM task_sequence
+                 WHERE worker_id = ?1 AND end_timestamp IS NULL AND status IS NOT NULL AND task_id != ?2",
+                params![wid, task_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+                + 1 // +1 for the current task
+        } else {
+            1
+        };
+
+        // Close the previous transition with concurrency factor
         conn.execute(
-            "UPDATE task_sequence SET end_timestamp = ?1 WHERE id = ?2",
-            params![now, open_id],
+            "UPDATE task_sequence SET end_timestamp = ?1, concurrency = ?2 WHERE id = ?3",
+            params![now, concurrency, open_id],
         )?;
 
         // If previous state was a timed state, accumulate elapsed time
@@ -54,11 +68,25 @@ pub(crate) fn record_state_transition(
         }
     }
 
+    // Count concurrent timed tasks for the new transition record
+    let new_concurrency: i32 = if let Some(wid) = worker_id {
+        conn.query_row(
+            "SELECT COUNT(*) FROM task_sequence
+             WHERE worker_id = ?1 AND end_timestamp IS NULL AND status IS NOT NULL AND task_id != ?2",
+            params![wid, task_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+            + 1 // +1 for the current task being inserted
+    } else {
+        1
+    };
+
     // Insert the new transition (snapshot pattern - only new status)
     conn.execute(
-        "INSERT INTO task_sequence (task_id, worker_id, status, reason, timestamp)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![task_id, worker_id, status, reason, now],
+        "INSERT INTO task_sequence (task_id, worker_id, status, reason, timestamp, concurrency)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![task_id, worker_id, status, reason, now, new_concurrency],
     )?;
 
     Ok(elapsed_added)
@@ -102,7 +130,7 @@ impl Database {
     pub fn get_task_sequence_history(&self, task_id: &str) -> Result<Vec<TaskSequenceEvent>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp
+                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp, concurrency
                  FROM task_sequence
                  WHERE task_id = ?1
                  ORDER BY id ASC",
@@ -119,6 +147,7 @@ impl Database {
                         reason: row.get(5)?,
                         timestamp: row.get(6)?,
                         end_timestamp: row.get(7)?,
+                        concurrency: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -131,7 +160,7 @@ impl Database {
     pub fn get_task_state_history(&self, task_id: &str) -> Result<Vec<TaskSequenceEvent>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp
+                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp, concurrency
                  FROM task_sequence
                  WHERE task_id = ?1 AND status IS NOT NULL
                  ORDER BY id ASC",
@@ -148,6 +177,7 @@ impl Database {
                         reason: row.get(5)?,
                         timestamp: row.get(6)?,
                         end_timestamp: row.get(7)?,
+                        concurrency: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -198,7 +228,7 @@ impl Database {
         self.with_conn(|conn| {
             // Build query dynamically based on filters
             let mut sql = String::from(
-                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp
+                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp, concurrency
                  FROM task_sequence WHERE status IS NOT NULL",
             );
             let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -251,6 +281,7 @@ impl Database {
                         reason: row.get(5)?,
                         timestamp: row.get(6)?,
                         end_timestamp: row.get(7)?,
+                        concurrency: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -268,7 +299,7 @@ impl Database {
     ) -> Result<Vec<TaskSequenceEvent>> {
         self.with_conn(|conn| {
             let mut sql = String::from(
-                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp
+                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp, concurrency
                  FROM task_sequence WHERE 1=1",
             );
             let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -305,6 +336,7 @@ impl Database {
                         reason: row.get(5)?,
                         timestamp: row.get(6)?,
                         end_timestamp: row.get(7)?,
+                        concurrency: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

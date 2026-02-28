@@ -104,6 +104,7 @@ fn register_worker(db: &Database, worker_id: &str) {
         &default_ids_config(),
         None,
         vec![],
+        Some(0),
     )
     .expect("Failed to register worker");
 }
@@ -117,6 +118,7 @@ fn register_worker_with_overlays(db: &Database, worker_id: &str, overlays: Vec<S
         &default_ids_config(),
         None,
         overlays,
+        Some(0),
     )
     .expect("Failed to register worker with overlays");
 }

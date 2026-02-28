@@ -1474,8 +1474,8 @@ fn import_task_wanted_tags(conn: &rusqlite::Connection, rows: &[Value]) -> Resul
 /// Import task_sequence table.
 fn import_task_sequence(conn: &rusqlite::Connection, rows: &[Value]) -> Result<usize> {
     let mut stmt = conn.prepare(
-        "INSERT INTO task_sequence (id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO task_sequence (id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp, concurrency)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?;
 
     let mut count = 0;
@@ -1493,6 +1493,7 @@ fn import_task_sequence(conn: &rusqlite::Connection, rows: &[Value]) -> Result<u
             get_opt_string(obj, "reason"),
             get_i64(obj, "timestamp")?,
             get_opt_i64(obj, "end_timestamp"),
+            get_opt_i64(obj, "concurrency"),
         ])?;
         count += 1;
     }
@@ -1860,6 +1861,7 @@ mod tests {
             &IdsConfig::default(),
             None,
             vec![],
+            Some(0),
         )
         .unwrap();
 

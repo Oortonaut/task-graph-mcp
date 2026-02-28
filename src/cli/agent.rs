@@ -1014,7 +1014,8 @@ fn run_thinking(
         tool_args["tasks"] = json!(cmd_args.tasks);
     }
 
-    let result = tracking::thinking(&handler.db, tool_args)?;
+    let states_config: StatesConfig = handler.config.workflows.as_ref().into();
+    let result = tracking::thinking(&handler.db, &states_config, tool_args)?;
     Ok(format_json_output(result, args.format))
 }
 

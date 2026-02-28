@@ -149,14 +149,18 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
     ]
 }
 
-pub fn thinking(db: &Database, args: Value) -> Result<Value> {
+pub fn thinking(
+    db: &Database,
+    states_config: &crate::config::StatesConfig,
+    args: Value,
+) -> Result<Value> {
     let agent_id = get_string(&args, "agent").ok_or_else(|| ToolError::missing_field("agent"))?;
     let thought =
         get_string(&args, "thought").ok_or_else(|| ToolError::missing_field("thought"))?;
     let task_ids = get_string_or_array(&args, "tasks");
 
     // Also refresh heartbeat since updating thought implies activity
-    let _ = db.heartbeat(&agent_id);
+    let _ = db.heartbeat(&agent_id, states_config);
 
     let updated = db.set_thought(&agent_id, Some(thought), task_ids)?;
 

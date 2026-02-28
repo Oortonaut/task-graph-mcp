@@ -62,6 +62,10 @@ pub fn get_tools(prompts: &Prompts) -> Vec<Tool> {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Overlay names to apply on top of the workflow, in order (e.g., ['git', 'user-request']). Use list_workflows to see available overlays."
+                },
+                "max_claims": {
+                    "type": "integer",
+                    "description": "Maximum concurrent task claims (default: 1). Use 0 for unlimited."
                 }
             }),
             vec![],
@@ -183,6 +187,7 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
     let tags = get_string_array(&args, "tags").unwrap_or_default();
     let force = get_bool(&args, "force").unwrap_or(false);
     let workflow = get_string(&args, "workflow");
+    let max_claims = get_i32(&args, "max_claims");
 
     // Validate tags if provided
     let tag_warnings = tags_config.validate_tags(&tags)?;
@@ -235,7 +240,9 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
     }
 
     let overlays = get_string_array(&args, "overlays").unwrap_or_default();
-    let worker = db.register_worker(worker_id, tags, force, ids_config, workflow, overlays)?;
+    let worker = db.register_worker(
+        worker_id, tags, force, ids_config, workflow, overlays, max_claims,
+    )?;
 
     // Build config summary for the response
     let timed_states: Vec<&str> = states_config
@@ -384,8 +391,13 @@ pub fn list_agents(
     };
 
     // Get workers with filters
-    let workers =
-        db.list_workers_filtered(tags.as_ref(), file.as_deref(), task.as_deref(), depth)?;
+    let workers = db.list_workers_filtered(
+        tags.as_ref(),
+        file.as_deref(),
+        task.as_deref(),
+        depth,
+        states_config,
+    )?;
 
     // Get current time for heartbeat age calculation
     let now = std::time::SystemTime::now()

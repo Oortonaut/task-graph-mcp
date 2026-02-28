@@ -283,7 +283,7 @@ impl ToolHandler {
             "scan" => tasks::scan(&self.db, self.default_format, arguments),
 
             // Tracking tools
-            "thinking" => json(tracking::thinking(&self.db, arguments)),
+            "thinking" => json(tracking::thinking(&self.db, &self.config.states, arguments)),
             "task_history" => tracking::task_history(
                 &self.db,
                 &self.config.states,

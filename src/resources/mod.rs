@@ -541,7 +541,7 @@ impl ResourceHandler {
             // Files
             "files/marks" => files::get_all_file_locks(&self.db),
             // Agents
-            "agents/all" => agents::get_all_workers(&self.db),
+            "agents/all" => agents::get_all_workers(&self.db, &self.config.states),
             // Stats
             "stats/summary" => stats::get_stats_summary(&self.db, &self.config.states),
             _ => Err(anyhow::anyhow!("Unknown query resource: {}", path)),

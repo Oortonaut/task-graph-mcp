@@ -55,6 +55,9 @@ pub struct Worker {
     /// Last phase the worker transitioned to (for prompts/dashboard)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_phase: Option<String>,
+    /// Last task ID the worker transitioned on (for per-task activity tracking)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_task_id: Option<String>,
     /// Named workflow this worker is using (e.g., "swarm" for workflow-swarm.yaml)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflow: Option<String>,
@@ -82,6 +85,9 @@ pub struct WorkerInfo {
     /// Last phase the worker transitioned to (for prompts/dashboard)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_phase: Option<String>,
+    /// Last task ID the worker transitioned on (for per-task activity tracking)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_task_id: Option<String>,
     /// Named workflow this worker is using (e.g., "swarm" for workflow-swarm.yaml)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflow: Option<String>,
@@ -276,6 +282,10 @@ pub struct TaskSequenceEvent {
     pub timestamp: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_timestamp: Option<i64>,
+    /// How many timed tasks the same worker had open simultaneously.
+    /// Used to normalize time_actual_ms for parallel work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<i32>,
 }
 
 /// Legacy alias for backward compatibility in exports.

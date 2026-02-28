@@ -208,7 +208,7 @@ fn get_task_internal(conn: &Connection, task_id: &str) -> Result<Option<Task>> {
 /// Internal helper to get a worker using an existing connection (avoids deadlock).
 fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Worker>> {
     let mut stmt = conn.prepare(
-        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
+        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, last_task_id, workflow, overlays
          FROM workers WHERE id = ?1",
     )?;
 
@@ -220,8 +220,9 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
         let last_heartbeat: i64 = row.get(4)?;
         let last_status: Option<String> = row.get(5)?;
         let last_phase: Option<String> = row.get(6)?;
-        let workflow: Option<String> = row.get(7)?;
-        let overlays_json: Option<String> = row.get(8)?;
+        let last_task_id: Option<String> = row.get(7)?;
+        let workflow: Option<String> = row.get(8)?;
+        let overlays_json: Option<String> = row.get(9)?;
 
         Ok((
             id,
@@ -231,6 +232,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_heartbeat,
             last_status,
             last_phase,
+            last_task_id,
             workflow,
             overlays_json,
         ))
@@ -245,6 +247,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_heartbeat,
             last_status,
             last_phase,
+            last_task_id,
             workflow,
             overlays_json,
         )) => {
@@ -261,6 +264,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
                 last_heartbeat,
                 last_status,
                 last_phase,
+                last_task_id,
                 workflow,
                 overlays,
             }))
@@ -920,6 +924,17 @@ impl Database {
                     }
                 }
 
+                // Check max_claims limit
+                if !force {
+                    let claim_count = super::agents::get_claim_count_internal(&tx, agent_id, states_config)?;
+                    if claim_count >= agent.max_claims {
+                        return Err(anyhow!(
+                            "Agent '{}' has reached max_claims limit ({}/{}). Release a task first or use force=true to override.",
+                            agent_id, claim_count, agent.max_claims
+                        ));
+                    }
+                }
+
                 // Set ownership
                 new_owner = Some(agent_id.to_string());
                 new_claimed_at = Some(now);
@@ -1455,6 +1470,15 @@ impl Database {
                 if !has_any {
                     return Err(anyhow!("Agent has none of the wanted tags"));
                 }
+            }
+
+            // Check max_claims limit
+            let claim_count = super::agents::get_claim_count_internal(conn, agent_id, states_config)?;
+            if claim_count >= agent.max_claims {
+                return Err(anyhow!(
+                    "Agent '{}' has reached max_claims limit ({}/{}). Release a task first or use force=true to override.",
+                    agent_id, claim_count, agent.max_claims
+                ));
             }
 
             conn.execute(

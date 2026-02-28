@@ -61,7 +61,15 @@ mod agent_tests {
         let db = setup_db();
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .expect("Failed to register agent");
 
         assert!(agent.tags.is_empty());
@@ -82,6 +90,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent");
 
@@ -101,6 +110,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent with custom ID");
 
@@ -121,6 +131,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         );
 
         assert!(result.is_err());
@@ -137,6 +148,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         );
 
         assert!(result.is_err());
@@ -154,6 +166,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         );
         assert!(result.is_ok());
 
@@ -165,6 +178,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         );
         assert!(result.is_err());
         assert!(
@@ -188,6 +202,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
         assert_eq!(agent1.tags, vec!["old-tag"]);
@@ -200,6 +215,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         );
         assert!(result.is_err());
 
@@ -212,6 +228,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
         assert_eq!(agent2.tags, vec!["new-tag"]);
@@ -228,6 +245,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
 
@@ -250,7 +268,15 @@ mod agent_tests {
     fn update_worker_modifies_properties() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let updated = db
@@ -265,14 +291,22 @@ mod agent_tests {
     fn heartbeat_updates_last_heartbeat_and_returns_claim_count() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let original_heartbeat = agent.last_heartbeat;
 
         // Small delay to ensure timestamp difference
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let claim_count = db.heartbeat(&agent.id).unwrap();
+        let claim_count = db.heartbeat(&agent.id, &default_states_config()).unwrap();
 
         assert_eq!(claim_count, 0);
         let updated = db.get_worker(&agent.id).unwrap().unwrap();
@@ -283,7 +317,7 @@ mod agent_tests {
     fn heartbeat_fails_for_unknown_agent() {
         let db = setup_db();
 
-        let result = db.heartbeat("unknown-agent");
+        let result = db.heartbeat("unknown-agent", &default_states_config());
 
         assert!(result.is_err());
     }
@@ -292,7 +326,15 @@ mod agent_tests {
     fn unregister_worker_removes_agent() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         db.unregister_worker(&agent.id, "pending").unwrap();
@@ -311,6 +353,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         )
         .unwrap();
         db.register_worker(
@@ -320,6 +363,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         )
         .unwrap();
 
@@ -334,13 +378,37 @@ mod agent_tests {
 
         // Register multiple workers without specifying IDs
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent3 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // All IDs should be unique
@@ -381,6 +449,7 @@ mod agent_tests {
                 &default_ids_config(),
                 Some("swarm".to_string()),
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent with workflow");
 
@@ -401,6 +470,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent without workflow");
 
@@ -421,6 +491,7 @@ mod agent_tests {
                 &default_ids_config(),
                 Some("coordinator".to_string()),
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent");
 
@@ -447,6 +518,7 @@ mod agent_tests {
                 &default_ids_config(),
                 Some("alpha".to_string()),
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent initially");
         assert_eq!(agent1.workflow, Some("alpha".to_string()));
@@ -460,6 +532,7 @@ mod agent_tests {
                 &default_ids_config(),
                 Some("beta".to_string()),
                 vec![],
+                Some(0),
             )
             .expect("Failed to force reconnect");
 
@@ -488,6 +561,7 @@ mod agent_tests {
                 &default_ids_config(),
                 Some("initial-workflow".to_string()),
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent");
         assert_eq!(agent1.workflow, Some("initial-workflow".to_string()));
@@ -501,6 +575,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .expect("Failed to force reconnect");
 
@@ -527,6 +602,7 @@ mod agent_tests {
             &default_ids_config(),
             Some("workflow-alpha".to_string()),
             vec![],
+            Some(0),
         )
         .expect("Failed to register first worker");
 
@@ -537,6 +613,7 @@ mod agent_tests {
             &default_ids_config(),
             Some("workflow-beta".to_string()),
             vec![],
+            Some(0),
         )
         .expect("Failed to register second worker");
 
@@ -547,6 +624,7 @@ mod agent_tests {
             &default_ids_config(),
             None, // No workflow
             vec![],
+            Some(0),
         )
         .expect("Failed to register third worker");
 
@@ -586,6 +664,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec!["git".to_string(), "troubleshooting".to_string()],
+                Some(0),
             )
             .expect("Failed to register agent with overlays");
 
@@ -607,6 +686,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .expect("Failed to register agent without overlays");
 
@@ -624,6 +704,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec!["git".to_string()],
+            Some(0),
         )
         .expect("Failed to register agent");
 
@@ -647,6 +728,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         )
         .expect("Failed to register agent");
 
@@ -670,6 +752,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         )
         .expect("Failed to register agent");
 
@@ -710,6 +793,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec!["git".to_string()],
+            Some(0),
         )
         .expect("Failed to register agent");
 
@@ -752,6 +836,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec!["git".to_string()],
+                Some(0),
             )
             .expect("Failed to register agent initially");
         assert_eq!(agent1.overlays, vec!["git".to_string()]);
@@ -765,6 +850,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec!["troubleshooting".to_string(), "user-request".to_string()],
+                Some(0),
             )
             .expect("Failed to force reconnect");
 
@@ -798,6 +884,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec!["git".to_string(), "troubleshooting".to_string()],
+                Some(0),
             )
             .expect("Failed to register agent");
         assert_eq!(agent1.overlays.len(), 2);
@@ -811,6 +898,7 @@ mod agent_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .expect("Failed to force reconnect");
 
@@ -835,6 +923,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec!["git".to_string()],
+            Some(0),
         )
         .expect("Failed to register first worker");
 
@@ -845,6 +934,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec!["git".to_string(), "troubleshooting".to_string()],
+            Some(0),
         )
         .expect("Failed to register second worker");
 
@@ -855,6 +945,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![], // No overlays
+            Some(0),
         )
         .expect("Failed to register third worker");
 
@@ -889,6 +980,7 @@ mod agent_tests {
             &default_ids_config(),
             Some("swarm".to_string()),
             vec![],
+            Some(0),
         )
         .expect("Failed to register agent");
 
@@ -919,6 +1011,7 @@ mod agent_tests {
             &default_ids_config(),
             None,
             vec![],
+            Some(0),
         )
         .expect("Failed to register agent");
 
@@ -2224,6 +2317,7 @@ mod task_tests {
                 &ids_config,
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
 
@@ -2436,7 +2530,15 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2469,10 +2571,26 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2510,6 +2628,7 @@ mod task_claiming_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
         let task = db
@@ -2547,6 +2666,7 @@ mod task_claiming_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
         let task = db
@@ -2584,6 +2704,7 @@ mod task_claiming_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
         let task = db
@@ -2614,7 +2735,15 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2648,10 +2777,26 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2682,7 +2827,15 @@ mod task_claiming_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2717,7 +2870,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2774,7 +2935,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2853,10 +3022,26 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2913,10 +3098,26 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -2978,6 +3179,7 @@ mod task_claiming_tests {
                 &default_ids_config(),
                 None,
                 vec![],
+                Some(0),
             )
             .unwrap();
         let task = db
@@ -3030,7 +3232,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -3157,7 +3367,15 @@ mod task_claiming_tests {
         };
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -3266,7 +3484,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -3339,7 +3565,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -3448,7 +3682,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create two tasks: A blocks B
@@ -3532,7 +3774,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create chain: A blocks B, B blocks C
@@ -3635,7 +3885,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create two tasks: A blocks B
@@ -3741,7 +3999,15 @@ mod task_claiming_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create two tasks: A blocks B
@@ -4342,7 +4608,15 @@ mod file_lock_tests {
     fn lock_file_creates_lock() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let warning = db
@@ -4360,10 +4634,26 @@ mod file_lock_tests {
     fn lock_file_returns_warning_if_locked_by_another() {
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         db.lock_file("src/main.rs".to_string(), &agent1.id, None, None)
@@ -4380,7 +4670,15 @@ mod file_lock_tests {
     fn lock_file_updates_timestamp_if_same_agent() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         db.lock_file("src/main.rs".to_string(), &agent.id, None, None)
@@ -4397,7 +4695,15 @@ mod file_lock_tests {
     fn unlock_file_removes_lock() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         db.lock_file("src/main.rs".to_string(), &agent.id, None, None)
             .unwrap();
@@ -4413,10 +4719,26 @@ mod file_lock_tests {
     fn unlock_file_fails_for_wrong_agent() {
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         db.lock_file("src/main.rs".to_string(), &agent1.id, None, None)
             .unwrap();
@@ -4430,10 +4752,26 @@ mod file_lock_tests {
     fn get_file_locks_filters_by_agent() {
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         db.lock_file("file1.rs".to_string(), &agent1.id, None, None)
             .unwrap();
@@ -4450,7 +4788,15 @@ mod file_lock_tests {
     fn release_worker_locks_removes_all_agent_locks() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         db.lock_file("file1.rs".to_string(), &agent.id, None, None)
             .unwrap();
@@ -4468,7 +4814,15 @@ mod file_lock_tests {
     fn claim_updates_returns_immediately() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let start = std::time::Instant::now();
@@ -4485,10 +4839,26 @@ mod file_lock_tests {
     fn claim_updates_returns_new_claims() {
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 claims a file
@@ -4516,7 +4886,15 @@ mod file_lock_tests {
         // claims that happened before they registered.
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 claims a file
@@ -4525,7 +4903,15 @@ mod file_lock_tests {
 
         // Agent2 registers AFTER the claim
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 releases the file
@@ -4554,10 +4940,26 @@ mod file_lock_tests {
         // Verify that after an agent polls and sees a claim, they DO see the release
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 claims a file
@@ -4588,10 +4990,26 @@ mod file_lock_tests {
         // When claim and release both happen before a poll, both should be visible
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 claims and releases a file before agent2 polls
@@ -4617,7 +5035,15 @@ mod file_lock_tests {
         // New agents should only see events that happen after they register
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 claims and releases a file
@@ -4627,7 +5053,15 @@ mod file_lock_tests {
 
         // Agent2 registers AFTER the claim+release cycle
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 claims a new file AFTER agent2 registered
@@ -4652,7 +5086,15 @@ mod file_lock_tests {
     fn regression_unmark_file_after_mark_file() {
         let db = setup_db();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Mark (lock) a file
@@ -4680,10 +5122,26 @@ mod file_lock_tests {
     fn regression_mark_updates_after_mark_file() {
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 marks a file
@@ -4712,10 +5170,26 @@ mod file_lock_tests {
     fn regression_end_timestamp_populated_on_unlock() {
         let db = setup_db();
         let agent1 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let agent2 = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Agent1 marks and unmarks a file
@@ -4747,7 +5221,15 @@ mod tracking_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -4926,7 +5408,15 @@ mod stats_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -5071,7 +5561,15 @@ mod state_transition_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -5106,7 +5604,15 @@ mod state_transition_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -5144,7 +5650,15 @@ mod state_transition_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -5191,7 +5705,15 @@ mod state_transition_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -5225,7 +5747,15 @@ mod state_transition_tests {
         let db = setup_db();
         let states_config = default_states_config();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
         let task = db
             .create_task(
@@ -5309,7 +5839,15 @@ mod state_transition_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance();
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create and complete a task
@@ -5405,7 +5943,15 @@ mod auto_advance_tests {
         let deps_config = default_deps_config();
         let auto_advance = default_auto_advance(); // disabled by default
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create two tasks where task1 blocks task2
@@ -5511,7 +6057,15 @@ mod auto_advance_tests {
         // by using cancelled as target (since pending -> cancelled is valid)
         let auto_advance = auto_advance_enabled("cancelled");
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create two tasks where task1 blocks task2
@@ -5597,7 +6151,15 @@ mod auto_advance_tests {
         let deps_config = default_deps_config();
         let auto_advance = auto_advance_enabled("cancelled");
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create three tasks: task1 and task3 both block task2
@@ -5725,7 +6287,15 @@ mod auto_advance_tests {
         let deps_config = default_deps_config();
         let auto_advance = auto_advance_enabled("cancelled");
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create two tasks where task1 blocks task2
@@ -5808,7 +6378,15 @@ mod auto_advance_tests {
         let deps_config = default_deps_config();
         let auto_advance = auto_advance_enabled("cancelled");
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create a chain: task1 -> task2 -> task3

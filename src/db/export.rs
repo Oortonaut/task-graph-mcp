@@ -236,7 +236,7 @@ impl Database {
     fn export_task_sequence(&self) -> Result<Vec<TaskSequenceEvent>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp
+                "SELECT id, task_id, worker_id, status, phase, reason, timestamp, end_timestamp, concurrency
                  FROM task_sequence
                  ORDER BY task_id, id",
             )?;
@@ -252,6 +252,7 @@ impl Database {
                         reason: row.get(5)?,
                         timestamp: row.get(6)?,
                         end_timestamp: row.get(7)?,
+                        concurrency: row.get(8)?,
                     })
                 })?
                 .filter_map(|r| r.ok())

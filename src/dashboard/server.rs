@@ -198,7 +198,10 @@ fn format_time_ago(ms_ago: i64) -> (String, &'static str) {
 
 /// Workers list API endpoint for htmx - returns HTML fragment with full worker details.
 async fn api_workers_list(State(state): State<DashboardServer>) -> Html<String> {
-    let workers = state.db().list_workers_info().unwrap_or_default();
+    let workers = state
+        .db()
+        .list_workers_info(&state.states_config)
+        .unwrap_or_default();
 
     if workers.is_empty() {
         return Html(r#"<div class="empty-state">No workers registered</div>"#.to_string());
@@ -390,7 +393,10 @@ async fn api_worker_disconnect(
     match state.db().unregister_worker(&worker_id, final_status) {
         Ok(summary) => {
             // Return updated workers list
-            let workers = state.db().list_workers_info().unwrap_or_default();
+            let workers = state
+                .db()
+                .list_workers_info(&state.states_config)
+                .unwrap_or_default();
             if workers.is_empty() {
                 return Html(format!(
                     r#"<div class="empty-state">Worker '{}' disconnected. {} tasks released as {}. No workers remaining.</div>"#,

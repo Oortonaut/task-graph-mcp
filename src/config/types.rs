@@ -1077,6 +1077,15 @@ impl StatesConfig {
             .unwrap_or_default()
     }
 
+    /// Get all timed state names.
+    pub fn timed_state_names(&self) -> Vec<&str> {
+        self.definitions
+            .iter()
+            .filter(|(_, def)| def.timed)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
     /// Get all untimed state names (valid for disconnect final_state).
     pub fn untimed_state_names(&self) -> Vec<&str> {
         self.definitions

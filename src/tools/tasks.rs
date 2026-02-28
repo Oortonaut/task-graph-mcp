@@ -1385,7 +1385,12 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
     // We update the worker's last seen state and get any matching prompts
     let mut transition_prompt_list: Vec<String> = {
         // Update worker state and get old state for prompt calculation
-        match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
+        match db.update_worker_state(
+            &worker_id,
+            Some(&task.status),
+            task.phase.as_deref(),
+            Some(&task.id),
+        ) {
             Ok((old_status, old_phase)) => {
                 // Create context with task and agent info for rich template expansion
                 let mut ctx = PromptContext::new(

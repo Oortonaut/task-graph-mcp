@@ -36,7 +36,7 @@ fn parse_overlays(overlays_json: &Option<String>) -> Vec<String> {
 /// Internal helper to get a worker using an existing connection (avoids deadlock).
 fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Worker>> {
     let mut stmt = conn.prepare(
-        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
+        "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, last_task_id, workflow, overlays
          FROM workers WHERE id = ?1",
     )?;
 
@@ -48,8 +48,9 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
         let last_heartbeat: i64 = row.get(4)?;
         let last_status: Option<String> = row.get(5)?;
         let last_phase: Option<String> = row.get(6)?;
-        let workflow: Option<String> = row.get(7)?;
-        let overlays_json: Option<String> = row.get(8)?;
+        let last_task_id: Option<String> = row.get(7)?;
+        let workflow: Option<String> = row.get(8)?;
+        let overlays_json: Option<String> = row.get(9)?;
 
         Ok((
             id,
@@ -59,6 +60,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_heartbeat,
             last_status,
             last_phase,
+            last_task_id,
             workflow,
             overlays_json,
         ))
@@ -73,6 +75,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
             last_heartbeat,
             last_status,
             last_phase,
+            last_task_id,
             workflow,
             overlays_json,
         )) => {
@@ -86,6 +89,7 @@ fn get_worker_internal(conn: &Connection, worker_id: &str) -> Result<Option<Work
                 last_heartbeat,
                 last_status,
                 last_phase,
+                last_task_id,
                 workflow,
                 overlays,
             }))
@@ -112,6 +116,7 @@ impl Database {
         ids_config: &IdsConfig,
         workflow: Option<String>,
         overlays: Vec<String>,
+        max_claims: Option<i32>,
     ) -> Result<Worker> {
         // Validate user-provided ID upfront (before acquiring connection)
         let provided_id = match worker_id {
@@ -131,7 +136,11 @@ impl Database {
             None => None,
         };
         let now = now_ms();
-        let max_claims = i32::MAX; // Effectively unlimited until overclaiming becomes a problem
+        let max_claims = match max_claims {
+            Some(0) => i32::MAX, // 0 means unlimited
+            Some(n) => n,
+            None => 1, // Default to 1 concurrent claim
+        };
         let tags_json = serde_json::to_string(&tags)?;
         let overlays_json = if overlays.is_empty() {
             None
@@ -185,6 +194,7 @@ impl Database {
                 last_heartbeat: now,
                 last_status: None,
                 last_phase: None,
+                last_task_id: None,
                 workflow,
                 overlays,
             })
@@ -230,6 +240,7 @@ impl Database {
                 last_heartbeat: worker.last_heartbeat,
                 last_status: worker.last_status,
                 last_phase: worker.last_phase,
+                last_task_id: worker.last_task_id,
                 workflow: worker.workflow,
                 overlays: worker.overlays,
             })
@@ -266,6 +277,7 @@ impl Database {
         worker_id: &str,
         new_status: Option<&str>,
         new_phase: Option<&str>,
+        task_id: Option<&str>,
     ) -> Result<(Option<String>, Option<String>)> {
         self.with_conn(|conn| {
             // Get current state
@@ -280,10 +292,10 @@ impl Database {
                     e => e.into(),
                 })?;
 
-            // Update to new state
+            // Update to new state (including last_task_id for per-task tracking)
             conn.execute(
-                "UPDATE workers SET last_status = ?1, last_phase = ?2 WHERE id = ?3",
-                params![new_status, new_phase, worker_id],
+                "UPDATE workers SET last_status = ?1, last_phase = ?2, last_task_id = ?3 WHERE id = ?4",
+                params![new_status, new_phase, task_id, worker_id],
             )?;
 
             Ok((old_status, old_phase))
@@ -291,7 +303,11 @@ impl Database {
     }
 
     /// Update worker heartbeat.
-    pub fn heartbeat(&self, worker_id: &str) -> Result<i32> {
+    pub fn heartbeat(
+        &self,
+        worker_id: &str,
+        states_config: &crate::config::StatesConfig,
+    ) -> Result<i32> {
         let now = now_ms();
 
         self.with_conn(|conn| {
@@ -304,14 +320,8 @@ impl Database {
                 return Err(anyhow!("Worker not found"));
             }
 
-            // Return current claim count
-            let count: i32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'working'",
-                params![worker_id],
-                |row| row.get(0),
-            )?;
-
-            Ok(count)
+            // Return current claim count (all timed states)
+            get_claim_count_internal(conn, worker_id, states_config)
         })
     }
 
@@ -354,7 +364,7 @@ impl Database {
     pub fn list_workers(&self) -> Result<Vec<Worker>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
+                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, last_task_id, workflow, overlays
                  FROM workers ORDER BY registered_at DESC",
             )?;
 
@@ -367,8 +377,9 @@ impl Database {
                     let last_heartbeat: i64 = row.get(4)?;
                     let last_status: Option<String> = row.get(5)?;
                     let last_phase: Option<String> = row.get(6)?;
-                    let workflow: Option<String> = row.get(7)?;
-                    let overlays_json: Option<String> = row.get(8)?;
+                    let last_task_id: Option<String> = row.get(7)?;
+                    let workflow: Option<String> = row.get(8)?;
+                    let overlays_json: Option<String> = row.get(9)?;
 
                     Ok((
                         id,
@@ -378,6 +389,7 @@ impl Database {
                         last_heartbeat,
                         last_status,
                         last_phase,
+                        last_task_id,
                         workflow,
                         overlays_json,
                     ))
@@ -392,6 +404,7 @@ impl Database {
                         last_heartbeat,
                         last_status,
                         last_phase,
+                        last_task_id,
                         workflow,
                         overlays_json,
                     )| {
@@ -406,6 +419,7 @@ impl Database {
                             last_heartbeat,
                             last_status,
                             last_phase,
+                            last_task_id,
                             workflow,
                             overlays,
                         }
@@ -418,15 +432,30 @@ impl Database {
     }
 
     /// List all workers with extended info (claim count, current thought).
-    pub fn list_workers_info(&self) -> Result<Vec<crate::types::WorkerInfo>> {
+    pub fn list_workers_info(
+        &self,
+        states_config: &crate::config::StatesConfig,
+    ) -> Result<Vec<crate::types::WorkerInfo>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
+            let timed_states = states_config.timed_state_names();
+            let (status_in, status_in_thought) = if timed_states.is_empty() {
+                ("status = '__none__'".to_string(), "status = '__none__'".to_string())
+            } else {
+                let quoted: Vec<String> = timed_states.iter().map(|s| format!("'{}'", s)).collect();
+                let clause = format!("status IN ({})", quoted.join(", "));
+                (clause.clone(), clause)
+            };
+
+            let sql = format!(
                 "SELECT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
-                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working') as claim_count,
-                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1) as current_thought,
-                        w.last_status, w.last_phase, w.workflow, w.overlays
+                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND {}) as claim_count,
+                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND {} AND current_thought IS NOT NULL LIMIT 1) as current_thought,
+                        w.last_status, w.last_phase, w.last_task_id, w.workflow, w.overlays
                  FROM workers w ORDER BY w.registered_at DESC",
-            )?;
+                status_in, status_in_thought
+            );
+
+            let mut stmt = conn.prepare(&sql)?;
 
             let workers = stmt.query_map([], |row| {
                 let id: String = row.get(0)?;
@@ -438,13 +467,14 @@ impl Database {
                 let current_thought: Option<String> = row.get(6)?;
                 let last_status: Option<String> = row.get(7)?;
                 let last_phase: Option<String> = row.get(8)?;
-                let workflow: Option<String> = row.get(9)?;
-                let overlays_json: Option<String> = row.get(10)?;
+                let last_task_id: Option<String> = row.get(9)?;
+                let workflow: Option<String> = row.get(10)?;
+                let overlays_json: Option<String> = row.get(11)?;
 
-                Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json))
+                Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, last_task_id, workflow, overlays_json))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json)| {
+            .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, last_task_id, workflow, overlays_json)| {
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                 let overlays = parse_overlays(&overlays_json);
                 crate::types::WorkerInfo {
@@ -457,6 +487,7 @@ impl Database {
                     last_heartbeat,
                     last_status,
                     last_phase,
+                    last_task_id,
                     workflow,
                     overlays,
                 }
@@ -479,15 +510,25 @@ impl Database {
         file: Option<&str>,
         task_id: Option<&str>,
         depth: i32,
+        states_config: &crate::config::StatesConfig,
     ) -> Result<Vec<crate::types::WorkerInfo>> {
         self.with_conn(|conn| {
+            let timed_states = states_config.timed_state_names();
+            let status_clause = if timed_states.is_empty() {
+                "status = '__none__'".to_string()
+            } else {
+                let quoted: Vec<String> = timed_states.iter().map(|s| format!("'{}'", s)).collect();
+                format!("status IN ({})", quoted.join(", "))
+            };
+
             // Start with base query
-            let mut sql = String::from(
+            let mut sql = format!(
                 "SELECT DISTINCT w.id, w.tags, w.max_claims, w.registered_at, w.last_heartbeat,
-                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND status = 'working') as claim_count,
-                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND status = 'working' AND current_thought IS NOT NULL LIMIT 1) as current_thought,
-                        w.last_status, w.last_phase, w.workflow, w.overlays
+                        (SELECT COUNT(*) FROM tasks WHERE worker_id = w.id AND {}) as claim_count,
+                        (SELECT current_thought FROM tasks WHERE worker_id = w.id AND {} AND current_thought IS NOT NULL LIMIT 1) as current_thought,
+                        w.last_status, w.last_phase, w.last_task_id, w.workflow, w.overlays
                  FROM workers w WHERE 1=1",
+                status_clause, status_clause
             );
             let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -533,13 +574,14 @@ impl Database {
                     let current_thought: Option<String> = row.get(6)?;
                     let last_status: Option<String> = row.get(7)?;
                     let last_phase: Option<String> = row.get(8)?;
-                    let workflow: Option<String> = row.get(9)?;
-                    let overlays_json: Option<String> = row.get(10)?;
+                    let last_task_id: Option<String> = row.get(9)?;
+                    let workflow: Option<String> = row.get(10)?;
+                    let overlays_json: Option<String> = row.get(11)?;
 
-                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json))
+                    Ok((id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, last_task_id, workflow, overlays_json))
                 })?
                 .filter_map(|r| r.ok())
-                .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, workflow, overlays_json)| {
+                .map(|(id, tags_json, max_claims, registered_at, last_heartbeat, claim_count, current_thought, last_status, last_phase, last_task_id, workflow, overlays_json)| {
                     let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                     let overlays = parse_overlays(&overlays_json);
                     crate::types::WorkerInfo {
@@ -552,6 +594,7 @@ impl Database {
                         last_heartbeat,
                         last_status,
                         last_phase,
+                        last_task_id,
                         workflow,
                         overlays,
                     }
@@ -635,7 +678,7 @@ impl Database {
 
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, workflow, overlays
+                "SELECT id, tags, max_claims, registered_at, last_heartbeat, last_status, last_phase, last_task_id, workflow, overlays
                  FROM workers WHERE last_heartbeat < ?1",
             )?;
 
@@ -648,8 +691,9 @@ impl Database {
                     let last_heartbeat: i64 = row.get(4)?;
                     let last_status: Option<String> = row.get(5)?;
                     let last_phase: Option<String> = row.get(6)?;
-                    let workflow: Option<String> = row.get(7)?;
-                    let overlays_json: Option<String> = row.get(8)?;
+                    let last_task_id: Option<String> = row.get(7)?;
+                    let workflow: Option<String> = row.get(8)?;
+                    let overlays_json: Option<String> = row.get(9)?;
 
                     Ok((
                         id,
@@ -659,6 +703,7 @@ impl Database {
                         last_heartbeat,
                         last_status,
                         last_phase,
+                        last_task_id,
                         workflow,
                         overlays_json,
                     ))
@@ -673,6 +718,7 @@ impl Database {
                         last_heartbeat,
                         last_status,
                         last_phase,
+                        last_task_id,
                         workflow,
                         overlays_json,
                     )| {
@@ -687,6 +733,7 @@ impl Database {
                             last_heartbeat,
                             last_status,
                             last_phase,
+                            last_task_id,
                             workflow,
                             overlays,
                         }
@@ -699,6 +746,13 @@ impl Database {
     }
 
     /// Cleanup stale workers by evicting them and releasing their claims.
+    ///
+    /// For each stale worker, individual `task_sequence` entries are inserted
+    /// for every released task before calling `unregister_worker()`. This allows
+    /// polling agents to discover released tasks gradually via the sequence table
+    /// rather than all tasks becoming available simultaneously (which would cause
+    /// scheduling storms when an agent holding many tasks times out).
+    ///
     /// Returns a summary of the cleanup operation.
     pub fn cleanup_stale_workers(
         &self,
@@ -712,10 +766,23 @@ impl Database {
         let mut evicted_worker_ids = Vec::new();
 
         for worker in &stale_workers {
+            // Record individual task_sequence entries BEFORE bulk-releasing
+            let released_task_ids =
+                self.record_stale_release_transitions(&worker.id, final_status)?;
+
+            if released_task_ids.len() > 5 {
+                eprintln!(
+                    "[cleanup] Bulk-releasing {} task claims from stale agent '{}' (last heartbeat: {})",
+                    released_task_ids.len(),
+                    worker.id,
+                    worker.last_heartbeat,
+                );
+            }
+
             // Release file locks first
             let _ = self.release_worker_locks(&worker.id);
 
-            // Unregister the worker
+            // Unregister the worker (releases task claims and removes worker)
             if let Ok(summary) = self.unregister_worker(&worker.id, final_status) {
                 total_tasks_released += summary.tasks_released;
                 total_files_released += summary.files_released;
@@ -732,15 +799,77 @@ impl Database {
         })
     }
 
-    /// Get claim count for a worker.
-    pub fn get_claim_count(&self, worker_id: &str) -> Result<i32> {
+    /// Record individual task_sequence entries for each task claimed by a stale
+    /// worker before it is unregistered. Provides gradual discovery and audit trail.
+    fn record_stale_release_transitions(
+        &self,
+        worker_id: &str,
+        final_status: &str,
+    ) -> Result<Vec<String>> {
         self.with_conn(|conn| {
-            let count: i32 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status = 'working'",
-                params![worker_id],
-                |row| row.get(0),
-            )?;
-            Ok(count)
+            let now = now_ms();
+
+            let mut stmt = conn.prepare("SELECT id FROM tasks WHERE worker_id = ?1")?;
+            let released_task_ids: Vec<String> = stmt
+                .query_map(params![worker_id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            for task_id in &released_task_ids {
+                // Close any open status transition
+                conn.execute(
+                    "UPDATE task_sequence SET end_timestamp = ?1
+                     WHERE task_id = ?2 AND end_timestamp IS NULL AND status IS NOT NULL",
+                    params![now, task_id],
+                )?;
+
+                // Insert stale_release transition
+                conn.execute(
+                    "INSERT INTO task_sequence (task_id, worker_id, status, reason, timestamp)
+                     VALUES (?1, ?2, ?3, 'stale_release', ?4)",
+                    params![task_id, worker_id, final_status, now],
+                )?;
+            }
+
+            Ok(released_task_ids)
         })
     }
+
+    /// Get claim count for a worker (counts tasks in any timed state).
+    pub fn get_claim_count(
+        &self,
+        worker_id: &str,
+        states_config: &crate::config::StatesConfig,
+    ) -> Result<i32> {
+        self.with_conn(|conn| get_claim_count_internal(conn, worker_id, states_config))
+    }
+}
+
+/// Internal helper to get claim count using an existing connection (avoids deadlock in transactions).
+/// Counts tasks in any timed state, not just 'working'.
+pub(crate) fn get_claim_count_internal(
+    conn: &Connection,
+    worker_id: &str,
+    states_config: &crate::config::StatesConfig,
+) -> Result<i32> {
+    let timed_states = states_config.timed_state_names();
+    if timed_states.is_empty() {
+        return Ok(0);
+    }
+    let placeholders: Vec<String> = (0..timed_states.len())
+        .map(|i| format!("?{}", i + 2))
+        .collect();
+    let sql = format!(
+        "SELECT COUNT(*) FROM tasks WHERE worker_id = ?1 AND status IN ({})",
+        placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    param_values.push(Box::new(worker_id.to_string()));
+    for state in &timed_states {
+        param_values.push(Box::new(state.to_string()));
+    }
+    let param_refs: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+    let count: i32 = stmt.query_row(param_refs.as_slice(), |row| row.get(0))?;
+    Ok(count)
 }
