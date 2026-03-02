@@ -274,9 +274,11 @@ pub fn format_attachments_markdown(attachments: &[crate::types::AttachmentMeta])
             md.push_str(&format!("- **file**: `{}`\n", fp));
         }
 
-        // Format created_at as relative time if possible
-        let created_secs = attachment.created_at / 1000;
-        md.push_str(&format!("- **created**: {}\n", created_secs));
+        // Format created_at as ISO 8601
+        md.push_str(&format!(
+            "- **created**: {}\n",
+            crate::types::ms_to_iso(attachment.created_at)
+        ));
 
         md.push('\n');
     }

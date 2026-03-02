@@ -1461,7 +1461,7 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
                     deps_config,
                     auto_advance,
                 ) {
-                    Ok((cancelled_task, _, _)) => {
+                    Ok((cancelled_task, _, _, _)) => {
                         cascaded.push(json!({
                             "id": cancelled_task.id,
                             "title": cancelled_task.title,

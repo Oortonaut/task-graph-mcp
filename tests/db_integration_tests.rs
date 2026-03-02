@@ -6516,7 +6516,15 @@ mod auto_rollup_tests {
         let auto_advance = rollup_config();
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let parent = db
@@ -6647,7 +6655,15 @@ mod auto_rollup_tests {
         let auto_advance = AutoAdvanceConfig::default(); // rollup disabled
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let parent = db
@@ -6724,7 +6740,15 @@ mod auto_rollup_tests {
         let auto_advance = rollup_config();
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         // Create grandparent -> parent -> child
@@ -6825,7 +6849,15 @@ mod auto_rollup_tests {
         let auto_advance = rollup_config();
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let parent = db
@@ -6943,7 +6975,15 @@ mod auto_rollup_tests {
         let auto_advance = rollup_config();
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let parent = db
@@ -7043,7 +7083,15 @@ mod auto_rollup_tests {
         let auto_advance = rollup_config();
 
         let agent = db
-            .register_worker(None, vec![], false, &default_ids_config(), None, vec![])
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
             .unwrap();
 
         let parent = db

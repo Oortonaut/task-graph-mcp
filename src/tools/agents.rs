@@ -284,7 +284,7 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
         "worker_id": &worker.id,
         "tags": worker.tags,
         "max_claims": worker.max_claims,
-        "registered_at": worker.registered_at,
+        "registered_at": crate::types::ms_to_iso(worker.registered_at),
         "workflow": worker.workflow,
         "paths": {
             "db_path": server_paths.db_path.to_string_lossy(),
@@ -451,8 +451,8 @@ pub fn list_agents(
                     "max_claims": w.max_claims,
                     "claim_count": w.claim_count,
                     "current_thought": w.current_thought,
-                    "registered_at": w.registered_at,
-                    "last_heartbeat": w.last_heartbeat,
+                    "registered_at": crate::types::ms_to_iso(w.registered_at),
+                    "last_heartbeat": crate::types::ms_to_iso(w.last_heartbeat),
                     "heartbeat_age_ms": now - w.last_heartbeat,
                     "workflow": w.workflow
                 })).collect::<Vec<_>>()

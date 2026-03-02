@@ -437,7 +437,7 @@ pub fn attachments(
                         "sequence": a.sequence,
                         "name": &a.name,
                         "mime_type": &a.mime_type,
-                        "created_at": a.created_at
+                        "created_at": crate::types::ms_to_iso(a.created_at)
                     });
 
                     if let Some(ref fp) = a.file_path {

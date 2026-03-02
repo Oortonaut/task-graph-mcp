@@ -443,7 +443,7 @@ pub fn list_marks(db: &Database, default_format: OutputFormat, args: Value) -> R
                         "agent": mark.worker_id,
                         "task_id": mark.task_id,
                         "reason": mark.reason,
-                        "marked_at": mark.locked_at,
+                        "marked_at": crate::types::ms_to_iso(mark.locked_at),
                         "mark_age_ms": age_ms
                     })
                 })
@@ -468,13 +468,13 @@ pub async fn mark_updates_async(db: std::sync::Arc<Database>, args: Value) -> Re
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "marked_at": e.timestamp
+            "marked_at": crate::types::ms_to_iso(e.timestamp)
         })).collect::<Vec<_>>(),
         "removed_marks": updates.dropped_claims.iter().map(|e| json!({
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "removed_at": e.timestamp
+            "removed_at": crate::types::ms_to_iso(e.timestamp)
         })).collect::<Vec<_>>(),
         "sequence": updates.sequence
     }))
@@ -491,13 +491,13 @@ pub fn mark_updates(db: &Database, args: Value) -> Result<Value> {
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "marked_at": e.timestamp
+            "marked_at": crate::types::ms_to_iso(e.timestamp)
         })).collect::<Vec<_>>(),
         "removed_marks": updates.dropped_claims.iter().map(|e| json!({
             "file": e.file_path,
             "agent": e.worker_id,
             "reason": e.reason,
-            "removed_at": e.timestamp
+            "removed_at": crate::types::ms_to_iso(e.timestamp)
         })).collect::<Vec<_>>(),
         "sequence": updates.sequence
     }))

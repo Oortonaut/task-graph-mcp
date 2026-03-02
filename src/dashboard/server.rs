@@ -697,29 +697,10 @@ async fn api_activity_list(
     Html(html)
 }
 
-/// Format a timestamp in milliseconds to a human-readable date string.
+/// Format a timestamp in milliseconds to ISO 8601.
 fn format_timestamp(ms: Option<i64>) -> String {
     match ms {
-        Some(ts) => {
-            use std::time::{Duration, UNIX_EPOCH};
-            let datetime = UNIX_EPOCH + Duration::from_millis(ts as u64);
-            // Format as ISO 8601
-            let secs = datetime.duration_since(UNIX_EPOCH).unwrap().as_secs();
-            let days = secs / 86400;
-            let remaining = secs % 86400;
-            let hours = remaining / 3600;
-            let minutes = (remaining % 3600) / 60;
-            let seconds = remaining % 60;
-            // Approximate date from epoch days (not accounting for leap years precisely)
-            let year = 1970 + (days / 365);
-            let day_of_year = days % 365;
-            let month = (day_of_year / 30).min(11) + 1;
-            let day = (day_of_year % 30) + 1;
-            format!(
-                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                year, month, day, hours, minutes, seconds
-            )
-        }
+        Some(ts) => crate::types::ms_to_iso(ts),
         None => "-".to_string(),
     }
 }

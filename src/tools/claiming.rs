@@ -160,7 +160,7 @@ pub fn claim(
             "title": task.title,
             "status": task.status,
             "worker_id": task.worker_id,
-            "claimed_at": task.claimed_at
+            "claimed_at": task.claimed_at.map(crate::types::ms_to_iso)
         }
     });
 

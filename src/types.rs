@@ -1,7 +1,84 @@
 //! Core types for the Task Graph MCP Server.
 
+use chrono::SecondsFormat;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
+
+/// Convert epoch milliseconds to ISO 8601 string (e.g., "2025-03-01T14:00:00Z").
+pub fn ms_to_iso(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap())
+        .to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+/// Custom serde for required i64 timestamp fields: serializes as ISO 8601, deserializes both i64 and ISO string.
+pub mod timestamp_serde {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(ms: &i64, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&super::ms_to_iso(*ms))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+        let v: serde_json::Value = Deserialize::deserialize(d)?;
+        match v {
+            serde_json::Value::Number(n) => n
+                .as_i64()
+                .ok_or_else(|| serde::de::Error::custom("invalid timestamp number")),
+            serde_json::Value::String(s) => {
+                // Try integer string first
+                if let Ok(ms) = s.parse::<i64>() {
+                    return Ok(ms);
+                }
+                // Try RFC 3339 / ISO 8601
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .map(|dt| dt.timestamp_millis())
+                    .map_err(|e| {
+                        serde::de::Error::custom(format!("invalid timestamp string: {}", e))
+                    })
+            }
+            _ => Err(serde::de::Error::custom(
+                "expected number or string for timestamp",
+            )),
+        }
+    }
+}
+
+/// Custom serde for Option<i64> timestamp fields: serializes as ISO 8601, deserializes both i64 and ISO string.
+pub mod timestamp_opt_serde {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(ms: &Option<i64>, s: S) -> Result<S::Ok, S::Error> {
+        match ms {
+            Some(v) => s.serialize_str(&super::ms_to_iso(*v)),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+        let v: Option<serde_json::Value> = Option::deserialize(d)?;
+        match v {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(serde_json::Value::Number(n)) => n
+                .as_i64()
+                .map(Some)
+                .ok_or_else(|| serde::de::Error::custom("invalid timestamp number")),
+            Some(serde_json::Value::String(s)) => {
+                if let Ok(ms) = s.parse::<i64>() {
+                    return Ok(Some(ms));
+                }
+                chrono::DateTime::parse_from_rfc3339(&s)
+                    .map(|dt| Some(dt.timestamp_millis()))
+                    .map_err(|e| {
+                        serde::de::Error::custom(format!("invalid timestamp string: {}", e))
+                    })
+            }
+            _ => Err(serde::de::Error::custom(
+                "expected number or string for timestamp",
+            )),
+        }
+    }
+}
 
 // Skip-if helpers (serde requires function paths, not closures)
 fn is_zero<T: Default + PartialEq>(v: &T) -> bool {
@@ -47,7 +124,9 @@ pub struct Worker {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     pub max_claims: i32,
+    #[serde(with = "timestamp_serde")]
     pub registered_at: i64,
+    #[serde(with = "timestamp_serde")]
     pub last_heartbeat: i64,
     /// Last status the worker transitioned to (for prompts/dashboard)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,7 +156,9 @@ pub struct WorkerInfo {
     pub claim_count: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_thought: Option<String>,
+    #[serde(with = "timestamp_serde")]
     pub registered_at: i64,
+    #[serde(with = "timestamp_serde")]
     pub last_heartbeat: i64,
     /// Last status the worker transitioned to (for prompts/dashboard)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -127,7 +208,11 @@ pub struct Task {
     pub priority: Priority,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        with = "timestamp_opt_serde"
+    )]
     pub claimed_at: Option<i64>,
 
     // Affinity (tag-based claiming requirements)
@@ -147,9 +232,17 @@ pub struct Task {
     pub time_estimate_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_actual_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        with = "timestamp_opt_serde"
+    )]
     pub started_at: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        with = "timestamp_opt_serde"
+    )]
     pub completed_at: Option<i64>,
 
     // Live status
@@ -167,7 +260,9 @@ pub struct Task {
     )]
     pub metrics: [i64; 8],
 
+    #[serde(with = "timestamp_serde")]
     pub created_at: i64,
+    #[serde(with = "timestamp_serde")]
     pub updated_at: i64,
 }
 
@@ -248,6 +343,7 @@ pub struct FileLock {
     pub worker_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(with = "timestamp_serde")]
     pub locked_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
@@ -262,8 +358,13 @@ pub struct ClaimEvent {
     pub event: ClaimEventType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(with = "timestamp_serde")]
     pub timestamp: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        with = "timestamp_opt_serde"
+    )]
     pub end_timestamp: Option<i64>,
     /// For release events: the ID of the corresponding claim event.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,8 +386,13 @@ pub struct TaskSequenceEvent {
     pub phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(with = "timestamp_serde")]
     pub timestamp: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        with = "timestamp_opt_serde"
+    )]
     pub end_timestamp: Option<i64>,
     /// How many timed tasks the same worker had open simultaneously.
     /// Used to normalize time_actual_ms for parallel work.
@@ -303,7 +409,9 @@ pub struct TaskStateEvent {
     pub worker_id: Option<String>,
     pub event: String,
     pub reason: Option<String>,
+    #[serde(with = "timestamp_serde")]
     pub timestamp: i64,
+    #[serde(default, with = "timestamp_opt_serde")]
     pub end_timestamp: Option<i64>,
 }
 
@@ -355,6 +463,7 @@ pub struct Attachment {
     /// If set, content is read from this file; if None, content is stored inline.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
+    #[serde(with = "timestamp_serde")]
     pub created_at: i64,
 }
 
@@ -370,6 +479,7 @@ pub struct AttachmentMeta {
     /// Path to the file containing the content (if stored as file).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
+    #[serde(with = "timestamp_serde")]
     pub created_at: i64,
 }
 

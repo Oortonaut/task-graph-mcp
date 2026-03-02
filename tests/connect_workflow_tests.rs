@@ -315,7 +315,10 @@ fn connect_response_includes_all_expected_fields() {
     assert_eq!(result["worker_id"], "full-response-worker");
     assert_eq!(result["workflow"], "test-workflow");
     assert!(result["version"].is_string());
-    assert!(result["registered_at"].is_number());
+    assert!(
+        result["registered_at"].is_string(),
+        "registered_at should be ISO 8601 string"
+    );
     assert!(result["max_claims"].is_number());
     assert!(result["paths"].is_object());
     assert!(result["config"].is_object());

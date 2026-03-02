@@ -141,7 +141,7 @@ pub fn give_feedback(db_dir: &Path, config: &FeedbackConfig, args: Value) -> Res
     }
 
     // Build the entry
-    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     writeln!(file, "---\n")?;
     writeln!(file, "### {} | {} | {}\n", timestamp, category, sentiment)?;
 

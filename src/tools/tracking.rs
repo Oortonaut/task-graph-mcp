@@ -29,12 +29,9 @@ fn format_duration_ms(ms: i64) -> String {
     }
 }
 
-/// Format a timestamp (ms since epoch) to ISO-like string.
+/// Format a timestamp (ms since epoch) to ISO 8601 string.
 fn format_timestamp(ts: i64) -> String {
-    let secs = ts / 1000;
-    let datetime = chrono::DateTime::from_timestamp(secs, 0)
-        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
-    datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+    crate::types::ms_to_iso(ts)
 }
 
 pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
@@ -469,8 +466,8 @@ pub fn project_history(
         }
         OutputFormat::Json => Ok(ToolResult::Json(json!({
             "time_range": {
-                "from_ms": from_timestamp,
-                "to_ms": to_timestamp
+                "from": from_timestamp.map(crate::types::ms_to_iso),
+                "to": to_timestamp.map(crate::types::ms_to_iso)
             },
             "summary": {
                 "total_transitions": stats.total_transitions,
