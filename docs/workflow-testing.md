@@ -2,20 +2,45 @@
 
 ## Status
 
-Only **hierarchical** has been tested in production (12 workers, 28 tasks, ~114 pts, 2 rounds).
-The other 5 workflows (solo, swarm, push, relay, sprint, kanban) need practical testing.
+**Hierarchical** is the only workflow tested in production (12 workers, 28 tasks, ~114 pts, 2 rounds).
+A second round of fixes is being applied based on that test. The other 6 workflows
+(solo, swarm, push, relay, sprint, kanban) need practical testing.
+
+## Available Workflows
+
+| Workflow | Topology | Claiming | Coordination | Best for |
+|----------|----------|----------|--------------|----------|
+| **solo** | Single agent | Self-claim | None | Simple tasks, one worker |
+| **swarm** | Flat peers | Self-claim (race) | File marks, advisory | Parallel independent tasks |
+| **push** | Lead → workers | Assigned by lead | Lead dispatches, workers execute | Small teams, clear task ownership |
+| **hierarchical** | Lead + sub-leads | Assigned top-down | Multi-level delegation | Large teams, complex decomposition |
+| **relay** | Sequential handoff | Claim on completion of predecessor | Chain-based | Pipeline workflows, staged processing |
+| **sprint** | Time-boxed swarm | Self-claim within sprint | Sprint boundaries | Iterative development cycles |
+| **kanban** | Pull-based | Self-claim from backlog | WIP limits, flow metrics | Continuous delivery, maintenance |
+
+## Available Overlays
+
+Overlays augment any workflow non-destructively. They add prompts, gates, and advisories.
+
+| Overlay | Purpose | Key additions |
+|---------|---------|---------------|
+| **git** | Basic git workflow | Commit reminders, `mark_file` guidance, `thinking()` usage |
+| **git-worktree** | Multi-agent git isolation | Patch-based workflow, commit gate on completed, layered-worktree advisory |
+| **reasoning** | Decision documentation | Attach reasoning notes before completing, record alternatives considered |
+| **governance** | Approval gates | Review/approval gates at state transitions |
+| **troubleshooting** | Diagnostic workflow | Structured problem diagnosis, root cause analysis |
 
 ## Known Issues from Hierarchical Test
 
 ### Prompt delivery gap in coordinator-assigned workflows
 
-In hierarchical/push workflows, the coordinator calls `update(assignee="worker-id")` and
-receives the transition prompts (including overlay contributions) in **their** response.
-The assigned worker never sees these prompts unless they independently call
-`get_prompts(status="working", task="...", worker_id="...")`.
+**Status:** Fix in progress (Round 2 tasks `prompt-delivery-assigned` + `update-prompts-param`)
 
-**Impact:** Overlays had zero behavioral effect on 12 workers across 2 rounds. Workers
-never generated patches (git-worktree), never attached reasoning notes (reasoning).
+In hierarchical/push workflows, the coordinator calls `update(assignee="worker-id")` and
+receives the transition prompts in **their** response. The assigned worker never sees
+overlay-prescribed behaviors unless they call `get_prompts` independently.
+
+**Impact:** Overlays had zero behavioral effect on 12 workers across 2 rounds.
 
 **Root cause chain:**
 1. `claim` returns prompts to the caller — works when workers self-claim
@@ -23,34 +48,60 @@ never generated patches (git-worktree), never attached reasoning notes (reasonin
 3. Workers don't know to call `get_prompts` after being assigned
 4. No push mechanism delivers prompts to workers on assignment
 
-**Two-sided fix needed:**
+**Fixes applied (Round 1):**
+- Prompt attribution added — `get_prompts` now returns `[{"text": "...", "source": "workflow:enter~working"}]`
+  so agents can see which overlay/workflow contributed each prompt
+- Overlay discovery resources added — `docs://overlays/{name}`, `docs://overlays/list`
+- Active overlays surfaced in `config://current`
+- Overlays included in `docs://workflows/list` response
 
-Worker side (task #18):
-- Add "call get_prompts after claiming" instruction to worker role prompts
-- Or: store pending prompts on the task, delivered when worker next interacts
-- Or: ensure `claim` returns full prompts even when pre-assigned
+**Fixes in progress (Round 2):**
+- Worker-side: ensure `claim()` delivers full prompts for pre-assigned tasks, add
+  "review prompts after claiming" to workflow role prompts
+- Coordinator-side (Round 3): add `prompts` parameter to `update` (none/all/caller)
 
-Coordinator side (task #19):
-- Add `prompts` parameter to `update`: `none | all | caller`
-- `none` — suppress prompts (coordinator doesn't want worker-targeted guidance)
-- `all` — current behavior (default, backward compat)
-- `caller` — return only prompts relevant to the caller's own role/state
-- Without this, coordinators receive worker-targeted prompts that pollute their
-  own context and shift them out of "lead" mode
+### Overlay discovery — FIXED
 
-### Overlay discovery is broken
+Previously agents could not discover what overlays do or that they're active. All gaps resolved:
+- `docs://overlays/{name}` resource — detailed per-overlay documentation
+- `docs://overlays/list` resource — lists all available overlays
+- `docs://workflows/list` now includes overlays
+- `config://current` shows `active_overlays` when non-empty
+- `get_prompts` returns source attribution per prompt
 
-Agents cannot discover what overlays do or that they're active. See feedback.md for full
-details. Key gaps:
-- No `docs://overlays/{name}` resource
-- `docs://workflows/list` omits overlays
-- `config://current` doesn't show active overlays
-- `get_prompts` has no source attribution
+### File contention — PARTIALLY FIXED
 
-### File contention
+- `claim(files=[...])` now auto-marks files on claim (Round 1)
+- File contention detection on claim is in progress (Round 2)
+- Still needed: coordinator-facing contention report, integration into workflow prompts
 
-`mark_file` exists but wasn't used. Multiple workers touched the same files without
-coordination. Need to integrate file marking into the claim workflow.
+### Feedback tool improvements — FIXED
+
+- `give_feedback` now records workflow name and active overlays from the worker's
+  registration, providing context for feedback entries
+
+## Lessons from Hierarchical Test
+
+### What worked
+- Task decomposition and dependency chains functioned correctly
+- Parent auto-rollup (parent completes when all children finish)
+- Cascading cancellation (cancelling parent cancels children)
+- Worker connect/claim/update lifecycle
+- Worktree isolation prevented most direct file conflicts
+
+### What didn't work
+- **Overlays were invisible** — workers never learned what overlays expected of them
+- **File contention was unmanaged** — `mark_file` existed but no workflow prompted its use
+- **Coordinator context pollution** — lead received worker-targeted prompts, shifting behavior
+- **Manual merge was error-prone** — integrating 6 worktrees required careful conflict resolution
+- **Workers escaped worktrees** — some agents modified main repo files instead of worktree copies
+
+### Coordinator best practices discovered
+1. **Analyze file contention before dispatch** — batch tasks touching the same files to one worker
+2. **Merge in dependency order** — merge leaf tasks first, work up to tasks with more dependencies
+3. **Stash valid changes before restoring** — when main repo gets contaminated, stash good changes first
+4. **Use python for batch conflict resolution** — regex-based fixes faster than manual editing
+5. **Re-run full test suite after each merge** — catch interaction bugs between independent changes
 
 ## Benchmark Requirements
 
@@ -66,17 +117,17 @@ A good workflow benchmark needs:
 ### Measurable outcomes
 - **Wall-clock time** — total time from first claim to all tasks completed
 - **Merge conflict count** — how many conflicts during integration
-- **Prompt compliance** — did workers follow overlay-prescribed behaviors (patches, reasoning, commits)
+- **Prompt compliance** — did workers follow overlay-prescribed behaviors
 - **Coordination overhead** — time spent on task management vs. actual work
 - **Rework rate** — tasks that needed re-doing after integration
 
 ### Candidate benchmark approaches
 
-1. **Synthetic codebase task** — generate a multi-file project with known structure,
-   create a task graph that requires coordinated changes across files. Advantage:
-   fully reproducible, no external deps. Disadvantage: artificial.
+1. **Self-hosting** — use task-graph-mcp's own codebase as the benchmark target.
+   Define a feature set, run it through each workflow, measure outcomes.
+   Advantage: dogfooding, realistic. Disadvantage: moving target.
 
-2. **Replay a real session** — export the task graph from the acp-unreal session,
+2. **Replay a real session** — export the task graph from the hierarchical test,
    strip implementation details, reuse the structure with a different codebase.
    Advantage: realistic dependency patterns. Disadvantage: codebase-specific.
 
@@ -84,28 +135,38 @@ A good workflow benchmark needs:
    multi-agent refactoring (e.g., rename a module, split a god class, migrate an API).
    Advantage: realistic + reproducible. Disadvantage: setup effort.
 
-4. **Self-hosting** — use task-graph-mcp's own codebase as the benchmark target.
-   Define a feature set, run it through each workflow, measure outcomes.
-   Advantage: dogfooding. Disadvantage: moving target.
+4. **Synthetic codebase task** — generate a multi-file project with known structure,
+   create a task graph that requires coordinated changes across files.
+   Advantage: fully reproducible, no external deps. Disadvantage: artificial.
 
 ### Workflow comparison matrix
 
 | Metric | Solo | Swarm | Push | Relay | Hierarchical | Sprint |
 |--------|------|-------|------|-------|--------------|--------|
 | Wall-clock time | | | | | baseline | |
-| Merge conflicts | | | | | baseline | |
-| Prompt compliance | | | | | 0% (broken) | |
+| Merge conflicts | | | | | ~3 (2 files) | |
+| Prompt compliance | | | | | 0% → fixing | |
 | Coord. overhead | | | | | high (manual merge) | |
-| Rework rate | | | | | ? | |
+| Rework rate | | | | | 0% (clean merges) | |
 
 ## Test Plan
 
-### Phase 1: Fix overlay delivery
-Before benchmarking, fix the prompt delivery gap so overlays actually affect behavior.
-Tasks: #13-17 (overlay discovery), prompt delivery fix.
+### Phase 1: Fix overlay delivery ← IN PROGRESS
+Fix the prompt delivery gap so overlays actually affect behavior.
+
+**Round 1 (DONE):** overlay-resources, overlays-in-workflow-list, active-overlays-config,
+prompt-attribution, claim-files-param, feedback-workflow-metadata, commit-gate,
+layered-worktree-advisory, mark-file-prompts
+
+**Round 2 (IN PROGRESS):** prompt-delivery-assigned, file-contention-detection,
+audit-overlay-prompts
+
+**Round 3 (BLOCKED):** update-prompts-param (blocked by prompt-delivery-assigned)
 
 ### Phase 2: Choose benchmark
 Select one of the approaches above and build the task graph template.
+Self-hosting (option 1) is the current front-runner — already dogfooding with the
+hierarchical test that produced these improvements.
 
 ### Phase 3: Run each workflow
 Execute the same benchmark with solo, swarm, hierarchical (minimum).
