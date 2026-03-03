@@ -577,6 +577,57 @@ impl Database {
         })
     }
 
+    /// Get unsatisfied blockers for a given task.
+    /// Returns only blocker task IDs whose status is still in a blocking state
+    /// (i.e., the dependency is not yet satisfied). Blockers in terminal states
+    /// like completed/cancelled/failed are excluded.
+    pub fn get_unsatisfied_blockers(
+        &self,
+        task_id: &str,
+        states_config: &StatesConfig,
+    ) -> Result<Vec<String>> {
+        self.with_conn(|conn| {
+            // Build IN clause for blocking states
+            let state_placeholders: Vec<String> = states_config
+                .blocking_states
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect();
+            let state_clause = state_placeholders.join(", ");
+
+            let sql = format!(
+                "SELECT d.from_task_id FROM dependencies d
+                 INNER JOIN tasks t ON d.from_task_id = t.id
+                 WHERE d.to_task_id = ?1
+                 AND d.dep_type IN ('blocks', 'follows')
+                 AND t.status IN ({})",
+                state_clause
+            );
+
+            let mut stmt = conn.prepare(&sql)?;
+
+            // Build params: task_id + blocking states
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            params_vec.push(Box::new(task_id.to_string()));
+            for state in &states_config.blocking_states {
+                params_vec.push(Box::new(state.clone()));
+            }
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|b| b.as_ref()).collect();
+
+            let blockers = stmt
+                .query_map(params_refs.as_slice(), |row| {
+                    let id: String = row.get(0)?;
+                    Ok(id)
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(blockers)
+        })
+    }
+
     /// Get tasks that a given task blocks.
     #[allow(dead_code)]
     pub fn get_blocking(&self, task_id: &str) -> Result<Vec<String>> {
