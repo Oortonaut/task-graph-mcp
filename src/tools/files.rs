@@ -37,7 +37,7 @@ const LOCK_PREFIX: &str = "lock:";
 /// - `src/main.rs` -> `/project/src/main.rs`
 /// - `./src/../src/main.rs` -> `/project/src/main.rs`
 /// - `/absolute/path.rs` -> `/absolute/path.rs`
-fn normalize_file_path(path: &str) -> String {
+pub(crate) fn normalize_file_path(path: &str) -> String {
     let path = Path::new(path);
 
     // Get absolute path

@@ -4,7 +4,7 @@
 //! a task to the first timed state. For releasing tasks, use `update` with
 //! a non-timed state (ownership clears automatically).
 
-use super::{get_bool, get_string, make_tool_with_prompts};
+use super::{get_bool, get_string, get_string_or_array, make_tool_with_prompts};
 use crate::config::{AppConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
@@ -29,6 +29,13 @@ pub fn get_tools(prompts: &Prompts, _states_config: &StatesConfig) -> Vec<Tool> 
             "force": {
                 "type": "boolean",
                 "description": "Force claim even if owned by another agent (default: false)"
+            },
+            "files": {
+                "oneOf": [
+                    { "type": "string" },
+                    { "type": "array", "items": { "type": "string" } }
+                ],
+                "description": "File paths to mark as being worked on (auto-marks with task ID for cleanup on completion)"
             }
         }),
         vec!["worker_id", "task"],
@@ -98,6 +105,25 @@ pub fn claim(
             }
             return Err(e);
         }
+    };
+
+    // Auto-mark files if provided
+    let files_marked: Vec<String> = if let Some(file_paths) = get_string_or_array(&args, "files") {
+        let mut marked = Vec::new();
+        for path in file_paths {
+            let normalized = super::files::normalize_file_path(&path);
+            // Advisory mark with task_id for auto-cleanup on task completion
+            let _warning = db.lock_file(
+                normalized.clone(),
+                &worker_id,
+                None,                  // no reason
+                Some(task_id.clone()), // associate with task
+            )?;
+            marked.push(normalized);
+        }
+        marked
+    } else {
+        Vec::new()
     };
 
     // Pre-fetch worker info for context-sensitive prompts (must outlive ctx)
@@ -178,6 +204,11 @@ pub fn claim(
     }
 
     if let Value::Object(ref mut map) = response {
+        // Add files_marked if any files were auto-marked
+        if !files_marked.is_empty() {
+            map.insert("files_marked".to_string(), json!(files_marked));
+        }
+
         // Add prompts if any
         if !transition_prompt_list.is_empty() {
             map.insert("prompts".to_string(), json!(transition_prompt_list));
