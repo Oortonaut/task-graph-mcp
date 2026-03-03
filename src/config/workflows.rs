@@ -231,7 +231,7 @@ pub struct WorkflowsConfig {
     pub named_overlays: HashMap<String, Arc<WorkflowsConfig>>,
 
     /// Active overlay names applied to this config (for tracking).
-    #[serde(skip)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_overlays: Vec<String>,
 }
 
