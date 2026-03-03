@@ -2404,6 +2404,7 @@ mod task_tests {
                 &ids_config,
                 None,
                 vec![],
+                None,
             )
             .unwrap();
         db.claim_task(&blocker_a.id, &worker.id, &states_config)
@@ -2591,6 +2592,7 @@ mod task_tests {
                 &ids_config,
                 None,
                 vec![],
+                None,
             )
             .unwrap();
         db.claim_task(&blocker.id, &worker.id, &states_config)
