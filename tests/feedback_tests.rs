@@ -25,6 +25,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "The search tool is great!"
             }),
@@ -62,6 +63,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "Workflow needs improvement",
                 "category": "workflow",
@@ -92,6 +94,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "Config is easy to understand",
                 "category": "config",
@@ -113,6 +116,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "It would be nice to have auto-complete",
                 "sentiment": "suggestion"
@@ -134,7 +138,7 @@ mod give_feedback_tests {
     fn missing_message_returns_error() {
         let dir = setup_dir();
 
-        let result = feedback::give_feedback(dir.path(), json!({}));
+        let result = feedback::give_feedback(dir.path(), None, json!({}));
 
         assert!(result.is_err(), "missing message should fail");
         let err_msg = result.unwrap_err().to_string();
@@ -151,6 +155,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": ""
             }),
@@ -171,6 +176,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "   \t\n  "
             }),
@@ -185,6 +191,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "some feedback",
                 "category": "nonexistent"
@@ -206,6 +213,7 @@ mod give_feedback_tests {
 
         let result = feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "some feedback",
                 "sentiment": "angry"
@@ -229,6 +237,7 @@ mod give_feedback_tests {
         for cat in &categories {
             let result = feedback::give_feedback(
                 dir.path(),
+                None,
                 json!({
                     "message": format!("testing {}", cat),
                     "category": cat
@@ -251,6 +260,7 @@ mod give_feedback_tests {
         for s in &sentiments {
             let result = feedback::give_feedback(
                 dir.path(),
+                None,
                 json!({
                     "message": format!("testing {}", s),
                     "sentiment": s
@@ -294,6 +304,7 @@ mod list_feedback_tests {
         // Give some feedback first
         feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "This is my feedback"
             }),
@@ -327,6 +338,7 @@ mod append_tests {
         // First entry
         feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "First feedback entry",
                 "category": "tool",
@@ -338,6 +350,7 @@ mod append_tests {
         // Second entry
         feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "Second feedback entry",
                 "category": "ux",
@@ -349,6 +362,7 @@ mod append_tests {
         // Third entry with optional metadata
         feedback::give_feedback(
             dir.path(),
+            None,
             json!({
                 "message": "Third entry with metadata",
                 "agent_id": "worker-1",
@@ -401,6 +415,7 @@ mod append_tests {
         for i in 0..5 {
             feedback::give_feedback(
                 dir.path(),
+                None,
                 json!({
                     "message": format!("entry {}", i)
                 }),

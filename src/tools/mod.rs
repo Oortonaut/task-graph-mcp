@@ -396,7 +396,7 @@ impl ToolHandler {
                     .db_path
                     .parent()
                     .unwrap_or(std::path::Path::new("."));
-                json(feedback::give_feedback(db_dir, arguments))
+                json(feedback::give_feedback(db_dir, Some(&self.db), arguments))
             }
             "list_feedback" => {
                 let db_dir = self
