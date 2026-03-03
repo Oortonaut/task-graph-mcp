@@ -15,7 +15,7 @@ use crate::format::{
     format_tasks_markdown,
 };
 use crate::gates::evaluate_gates;
-use crate::prompts::PromptContext;
+use crate::prompts::{AttributedPrompt, PromptContext};
 use crate::types::{ScanResult, TaskTreeInput, parse_priority};
 use anyhow::Result;
 use rmcp::model::Tool;
@@ -1490,7 +1490,7 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
 
     // Get transition prompts if status or phase may have changed
     // We update the worker's last seen state and get any matching prompts
-    let mut transition_prompt_list: Vec<String> = {
+    let mut transition_prompt_list: Vec<AttributedPrompt> = {
         // Update worker state and get old state for prompt calculation
         match db.update_worker_state(
             &worker_id,
@@ -1528,8 +1528,8 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
                     );
                 }
 
-                // Get prompts for this transition with context-sensitive template expansion
-                crate::prompts::get_transition_prompts_with_context(
+                // Get prompts for this transition with context-sensitive template expansion + attribution
+                crate::prompts::get_transition_prompts_attributed(
                     old_status.as_deref().unwrap_or(""),
                     old_phase.as_deref(),
                     &task.status,
@@ -1599,13 +1599,20 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
             if let Some(key) = prompt_key
                 && let Some(prompt) = workflows.get_role_prompt(role_name, key)
             {
-                transition_prompt_list.push(prompt.to_string());
+                transition_prompt_list.push(AttributedPrompt {
+                    text: prompt.to_string(),
+                    source: format!("role:{}", role_name),
+                });
             }
         }
 
-        // Include transition prompts if any
+        // Include transition prompts if any (with source attribution)
         if !transition_prompt_list.is_empty() {
-            map.insert("prompts".to_string(), json!(transition_prompt_list));
+            let prompt_objects: Vec<Value> = transition_prompt_list
+                .iter()
+                .map(|p| json!({"text": p.text, "source": p.source}))
+                .collect();
+            map.insert("prompts".to_string(), json!(prompt_objects));
         }
 
         // Include relevant advisory hints based on task tags, phase, and worker role

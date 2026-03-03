@@ -8,7 +8,7 @@ use super::{get_bool, get_string, get_string_or_array, make_tool_with_prompts};
 use crate::config::{AppConfig, Prompts, StatesConfig};
 use crate::db::Database;
 use crate::error::ToolError;
-use crate::prompts::PromptContext;
+use crate::prompts::{AttributedPrompt, PromptContext};
 use anyhow::Result;
 use rmcp::model::Tool;
 use serde_json::{Value, json};
@@ -133,8 +133,8 @@ pub fn claim(
         .map(|w| workflows.match_role(&w.tags))
         .unwrap_or(None);
 
-    // Get transition prompts for claiming (with context-sensitive template expansion)
-    let mut transition_prompt_list: Vec<String> = {
+    // Get transition prompts for claiming (with context-sensitive template expansion + attribution)
+    let mut transition_prompt_list: Vec<AttributedPrompt> = {
         match db.update_worker_state(
             &worker_id,
             Some(&task.status),
@@ -166,7 +166,7 @@ pub fn claim(
                     ctx = ctx.with_agent(&worker_id, worker_role.as_deref(), &worker.tags);
                 }
 
-                crate::prompts::get_transition_prompts_with_context(
+                crate::prompts::get_transition_prompts_attributed(
                     old_status.as_deref().unwrap_or(""),
                     old_phase.as_deref(),
                     &task.status,
@@ -194,12 +194,18 @@ pub fn claim(
     // This gives the agent full context on how to work and communicate from the start
     if let Some(ref role_name) = worker_role {
         if let Some(claiming_prompt) = workflows.get_role_prompt(role_name, "claiming") {
-            transition_prompt_list.push(claiming_prompt.to_string());
+            transition_prompt_list.push(AttributedPrompt {
+                text: claiming_prompt.to_string(),
+                source: format!("role:{}", role_name),
+            });
         }
         // Also deliver the "reporting" prompt so the agent knows how to communicate
         // progress from the moment they start working
         if let Some(reporting_prompt) = workflows.get_role_prompt(role_name, "reporting") {
-            transition_prompt_list.push(reporting_prompt.to_string());
+            transition_prompt_list.push(AttributedPrompt {
+                text: reporting_prompt.to_string(),
+                source: format!("role:{}", role_name),
+            });
         }
     }
 
@@ -209,9 +215,13 @@ pub fn claim(
             map.insert("files_marked".to_string(), json!(files_marked));
         }
 
-        // Add prompts if any
+        // Add prompts if any (with source attribution)
         if !transition_prompt_list.is_empty() {
-            map.insert("prompts".to_string(), json!(transition_prompt_list));
+            let prompt_objects: Vec<Value> = transition_prompt_list
+                .iter()
+                .map(|p| json!({"text": p.text, "source": p.source}))
+                .collect();
+            map.insert("prompts".to_string(), json!(prompt_objects));
         }
 
         // Include relevant advisory hints based on task tags, phase, and worker role
