@@ -255,6 +255,28 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResourceTemplate {
+                    uri_template: "docs://overlays/list".into(),
+                    name: "Available Overlays".into(),
+                    title: None,
+                    description: Some("List all available overlay configurations with descriptions".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
+                    uri_template: "docs://overlays/{name}".into(),
+                    name: "Overlay Details".into(),
+                    title: None,
+                    description: Some("Get detailed information about a specific overlay (states, phases, gates, roles, advisories, prompts)".into()),
+                    mime_type: Some("application/json".into()),
+                    icons: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResourceTemplate {
                     uri_template: "docs://index".into(),
                     name: "Documentation Index".into(),
                     title: None,
@@ -490,6 +512,21 @@ impl ResourceHandler {
             ),
             Annotated::new(
                 RawResource {
+                    uri: "docs://overlays/list".into(),
+                    name: "Available Overlays".into(),
+                    title: None,
+                    description: Some(
+                        "List all available overlay configurations with descriptions".into(),
+                    ),
+                    mime_type: Some("application/json".into()),
+                    size: None,
+                    icons: None,
+                    meta: None,
+                },
+                None,
+            ),
+            Annotated::new(
+                RawResource {
                     uri: "docs://index".into(),
                     name: "Documentation Index".into(),
                     title: None,
@@ -559,12 +596,20 @@ impl ResourceHandler {
                 let dependencies = config::get_dependencies_config(&self.config.deps)?;
                 let tags = config::get_tags_config(&self.config.tags)?;
 
-                Ok(serde_json::json!({
+                let mut result = serde_json::json!({
                     "states": states,
                     "phases": phases,
                     "dependencies": dependencies,
                     "tags": tags,
-                }))
+                });
+
+                // Include active overlays if any are applied
+                if !self.config.workflows.active_overlays.is_empty() {
+                    result["active_overlays"] =
+                        serde_json::json!(self.config.workflows.active_overlays);
+                }
+
+                Ok(result)
             }
             "states" => config::get_states_config(&self.config.states),
             "phases" => config::get_phases_config(&self.config.phases),
@@ -591,6 +636,12 @@ impl ResourceHandler {
             _ if path.starts_with("workflows/") => {
                 let name = path.strip_prefix("workflows/").unwrap();
                 workflows::get_workflow(&self.config.workflows, name)
+            }
+            // Overlays
+            "overlays/list" => workflows::list_overlays(&self.config.workflows),
+            _ if path.starts_with("overlays/") => {
+                let name = path.strip_prefix("overlays/").unwrap();
+                workflows::get_overlay(&self.config.workflows, name)
             }
             // Documentation files
             "index" => docs::list_docs(docs_dir),
