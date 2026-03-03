@@ -3,6 +3,7 @@
 //! Feedback is stored as a simple, human-readable, append-only markdown file.
 
 use crate::config::FeedbackConfig;
+use crate::db::Database;
 use crate::error::ToolError;
 use crate::tools::{get_string, make_tool};
 use anyhow::Result;
@@ -76,7 +77,15 @@ fn feedback_path(db_dir: &Path) -> std::path::PathBuf {
 }
 
 /// Handle the give_feedback tool call.
-pub fn give_feedback(db_dir: &Path, config: &FeedbackConfig, args: Value) -> Result<Value> {
+///
+/// When `db` is provided and the caller supplies an `agent_id`, the worker's
+/// workflow and overlays are looked up and recorded in the feedback entry.
+pub fn give_feedback(
+    db_dir: &Path,
+    config: &FeedbackConfig,
+    db: Option<&Database>,
+    args: Value,
+) -> Result<Value> {
     let message =
         get_string(&args, "message").ok_or_else(|| ToolError::missing_field("message"))?;
 
@@ -155,7 +164,23 @@ pub fn give_feedback(db_dir: &Path, config: &FeedbackConfig, args: Value) -> Res
     if let Some(ref task) = task_id {
         writeln!(file, "- **Task:** {}", task)?;
     }
-    if agent_id.is_some() || tool_name.is_some() || task_id.is_some() {
+
+    // Look up workflow/overlay metadata from the worker record
+    let mut has_workflow_meta = false;
+    if let (Some(agent), Some(db)) = (&agent_id, db) {
+        if let Ok(Some(worker)) = db.get_worker(agent) {
+            if let Some(ref wf) = worker.workflow {
+                writeln!(file, "- **Workflow:** {}", wf)?;
+                has_workflow_meta = true;
+            }
+            if !worker.overlays.is_empty() {
+                writeln!(file, "- **Overlays:** {}", worker.overlays.join(", "))?;
+                has_workflow_meta = true;
+            }
+        }
+    }
+
+    if agent_id.is_some() || tool_name.is_some() || task_id.is_some() || has_workflow_meta {
         writeln!(file)?;
     }
 

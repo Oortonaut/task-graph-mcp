@@ -27,6 +27,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "The search tool is great!"
             }),
@@ -65,6 +66,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "Workflow needs improvement",
                 "category": "workflow",
@@ -96,6 +98,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "Config is easy to understand",
                 "category": "config",
@@ -118,6 +121,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "It would be nice to have auto-complete",
                 "sentiment": "suggestion"
@@ -139,7 +143,8 @@ mod give_feedback_tests {
     fn missing_message_returns_error() {
         let dir = setup_dir();
 
-        let result = feedback::give_feedback(dir.path(), &FeedbackConfig::default(), json!({}));
+        let result =
+            feedback::give_feedback(dir.path(), &FeedbackConfig::default(), None, json!({}));
 
         assert!(result.is_err(), "missing message should fail");
         let err_msg = result.unwrap_err().to_string();
@@ -157,6 +162,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": ""
             }),
@@ -178,6 +184,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "   \t\n  "
             }),
@@ -193,6 +200,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "some feedback",
                 "category": "nonexistent"
@@ -215,6 +223,7 @@ mod give_feedback_tests {
         let result = feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "some feedback",
                 "sentiment": "angry"
@@ -239,6 +248,7 @@ mod give_feedback_tests {
             let result = feedback::give_feedback(
                 dir.path(),
                 &FeedbackConfig::default(),
+                None,
                 json!({
                     "message": format!("testing {}", cat),
                     "category": cat
@@ -262,6 +272,7 @@ mod give_feedback_tests {
             let result = feedback::give_feedback(
                 dir.path(),
                 &FeedbackConfig::default(),
+                None,
                 json!({
                     "message": format!("testing {}", s),
                     "sentiment": s
@@ -306,6 +317,7 @@ mod list_feedback_tests {
         feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "This is my feedback"
             }),
@@ -340,6 +352,7 @@ mod append_tests {
         feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "First feedback entry",
                 "category": "tool",
@@ -352,6 +365,7 @@ mod append_tests {
         feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "Second feedback entry",
                 "category": "ux",
@@ -364,6 +378,7 @@ mod append_tests {
         feedback::give_feedback(
             dir.path(),
             &FeedbackConfig::default(),
+            None,
             json!({
                 "message": "Third entry with metadata",
                 "agent_id": "worker-1",
@@ -417,6 +432,7 @@ mod append_tests {
             feedback::give_feedback(
                 dir.path(),
                 &FeedbackConfig::default(),
+                None,
                 json!({
                     "message": format!("entry {}", i)
                 }),

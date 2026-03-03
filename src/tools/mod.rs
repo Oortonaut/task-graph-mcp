@@ -420,6 +420,7 @@ impl ToolHandler {
                 json(feedback::give_feedback(
                     db_dir,
                     &self.config.feedback,
+                    Some(&self.db),
                     arguments,
                 ))
             }
