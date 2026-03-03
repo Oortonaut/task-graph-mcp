@@ -621,7 +621,16 @@ fn format_prompts_section(value: &Value, out: &mut String) {
     {
         out.push_str("\n### Guidance\n");
         for (i, prompt) in prompts.iter().enumerate() {
-            if let Some(text) = prompt.as_str() {
+            // Support both attributed prompt objects and plain strings (backward compat)
+            let text = prompt
+                .get("text")
+                .and_then(|v| v.as_str())
+                .or_else(|| prompt.as_str());
+            if let Some(text) = text {
+                // Show source attribution if available
+                if let Some(source) = prompt.get("source").and_then(|v| v.as_str()) {
+                    out.push_str(&format!("*[{}]*\n", source));
+                }
                 for line in text.lines() {
                     out.push_str(&format!("> {}\n", line));
                 }
@@ -1150,8 +1159,8 @@ fn run_prompts(handler: &ToolHandler, args: &AgentArgs, cmd_args: &PromptsArgs) 
             &phases_config,
         );
 
-        // Get enter prompts: simulate transition from empty to the target
-        let prompts_list = prompt_system::get_transition_prompts_with_context(
+        // Get enter prompts with attribution: simulate transition from empty to the target
+        let attributed_list = prompt_system::get_transition_prompts_attributed(
             "",
             None,
             target_status,
@@ -1161,10 +1170,19 @@ fn run_prompts(handler: &ToolHandler, args: &AgentArgs, cmd_args: &PromptsArgs) 
         );
 
         if args.format == CliOutputFormat::Json {
-            return Ok(serde_json::to_string_pretty(&json!({
+            let prompt_objects: Vec<serde_json::Value> = attributed_list
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "text": p.text,
+                        "source": p.source,
+                    })
+                })
+                .collect();
+            return Ok(serde_json::to_string_pretty(&serde_json::json!({
                 "status": target_status,
                 "phase": target_phase,
-                "prompts": prompts_list,
+                "prompts": prompt_objects,
             }))?);
         }
 
@@ -1174,14 +1192,14 @@ fn run_prompts(handler: &ToolHandler, args: &AgentArgs, cmd_args: &PromptsArgs) 
         }
         out.push_str("\n\n");
 
-        if prompts_list.is_empty() {
+        if attributed_list.is_empty() {
             out.push_str("_(no prompts configured for this transition)_\n");
         } else {
-            for (i, prompt) in prompts_list.iter().enumerate() {
-                for line in prompt.lines() {
+            for (i, prompt) in attributed_list.iter().enumerate() {
+                for line in prompt.text.lines() {
                     out.push_str(&format!("> {}\n", line));
                 }
-                if i + 1 < prompts_list.len() {
+                if i + 1 < attributed_list.len() {
                     out.push_str("\n---\n\n");
                 }
             }

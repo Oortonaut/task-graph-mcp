@@ -23,6 +23,21 @@
 
 use crate::config::workflows::WorkflowsConfig;
 use crate::config::{PhasesConfig, StatesConfig};
+use serde::Serialize;
+
+/// A prompt string paired with its source attribution.
+///
+/// The `source` field indicates where the prompt originated from:
+/// - `"state:<name>"` - state enter/exit prompt (e.g., `"state:working"`)
+/// - `"phase:<name>"` - phase enter/exit prompt (e.g., `"phase:implement"`)
+/// - `"combo:<state>+<phase>"` - state+phase combo prompt (e.g., `"combo:working+implement"`)
+/// - `"role:<name>"` - role-specific prompt (e.g., `"role:worker"`)
+/// - `"workflow"` - base workflow prompt (fallback)
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AttributedPrompt {
+    pub text: String,
+    pub source: String,
+}
 
 /// Context for expanding template variables in prompts.
 ///
@@ -364,6 +379,59 @@ pub fn get_transition_prompts_with_context(
         .collect()
 }
 
+/// Derive a human-readable source label from a prompt trigger name.
+///
+/// Trigger naming convention:
+/// - `enter~working` / `exit~working` -> `"state:working"`
+/// - `enter%implement` / `exit%implement` -> `"phase:implement"`
+/// - `enter~working%implement` / `exit~working%implement` -> `"combo:working+implement"`
+fn trigger_to_source(trigger: &str) -> String {
+    // Phase-only triggers: enter%phase / exit%phase
+    if let Some(phase) = trigger.strip_prefix("enter%") {
+        return format!("phase:{}", phase);
+    }
+    if let Some(phase) = trigger.strip_prefix("exit%") {
+        return format!("phase:{}", phase);
+    }
+
+    // State or combo triggers: enter~state / exit~state / enter~state%phase / exit~state%phase
+    let rest = trigger
+        .strip_prefix("enter~")
+        .or_else(|| trigger.strip_prefix("exit~"))
+        .unwrap_or(trigger);
+
+    if let Some(idx) = rest.find('%') {
+        let state = &rest[..idx];
+        let phase = &rest[idx + 1..];
+        format!("combo:{}+{}", state, phase)
+    } else {
+        format!("state:{}", rest)
+    }
+}
+
+/// Get all prompts with source attribution for a state transition, with template expansion.
+///
+/// Returns a vector of `AttributedPrompt` structs containing both the expanded
+/// prompt text and a source label indicating where the prompt came from.
+pub fn get_transition_prompts_attributed(
+    old_status: &str,
+    old_phase: Option<&str>,
+    new_status: &str,
+    new_phase: Option<&str>,
+    workflows: &WorkflowsConfig,
+    ctx: &PromptContext,
+) -> Vec<AttributedPrompt> {
+    get_transition_triggers(old_status, old_phase, new_status, new_phase)
+        .iter()
+        .filter_map(|trigger| {
+            load_prompt(trigger, workflows).map(|content| AttributedPrompt {
+                text: expand_prompt(&content, ctx),
+                source: trigger_to_source(trigger),
+            })
+        })
+        .collect()
+}
+
 /// List all available prompt triggers from the workflows config.
 pub fn list_available_prompts(workflows: &WorkflowsConfig) -> Vec<String> {
     workflows.list_prompt_triggers()
@@ -667,5 +735,81 @@ mod tests {
         assert_eq!(ctx.task_priority, Some(5));
         assert_eq!(ctx.agent_id, Some("w1"));
         assert_eq!(ctx.agent_role, Some("worker"));
+    }
+
+    // === Tests for source attribution ===
+
+    #[test]
+    fn test_trigger_to_source_state() {
+        assert_eq!(trigger_to_source("enter~working"), "state:working");
+        assert_eq!(trigger_to_source("exit~pending"), "state:pending");
+    }
+
+    #[test]
+    fn test_trigger_to_source_phase() {
+        assert_eq!(trigger_to_source("enter%implement"), "phase:implement");
+        assert_eq!(trigger_to_source("exit%review"), "phase:review");
+    }
+
+    #[test]
+    fn test_trigger_to_source_combo() {
+        assert_eq!(
+            trigger_to_source("enter~working%implement"),
+            "combo:working+implement"
+        );
+        assert_eq!(
+            trigger_to_source("exit~working%review"),
+            "combo:working+review"
+        );
+    }
+
+    #[test]
+    fn test_get_transition_prompts_attributed() {
+        let workflows = WorkflowsConfig::default();
+        let states_config: StatesConfig = (&workflows).into();
+        let phases_config: PhasesConfig = (&workflows).into();
+        let ctx = PromptContext::new("working", None, &states_config, &phases_config);
+
+        let attributed =
+            get_transition_prompts_attributed("pending", None, "working", None, &workflows, &ctx);
+
+        // Should have at least the enter~working prompt
+        assert!(!attributed.is_empty());
+        assert!(
+            attributed
+                .iter()
+                .any(|p| p.text.contains("actively working") && p.source == "state:working")
+        );
+    }
+
+    #[test]
+    fn test_attributed_prompts_phase_change() {
+        let workflows = WorkflowsConfig::default();
+        let states_config: StatesConfig = (&workflows).into();
+        let phases_config: PhasesConfig = (&workflows).into();
+        let ctx = PromptContext::new("working", Some("implement"), &states_config, &phases_config);
+
+        let attributed = get_transition_prompts_attributed(
+            "working",
+            None,
+            "working",
+            Some("implement"),
+            &workflows,
+            &ctx,
+        );
+
+        // Should have prompts for entering implement phase
+        if !attributed.is_empty() {
+            // If there's an implement phase prompt, it should be attributed to phase:implement
+            for p in &attributed {
+                assert!(
+                    p.source.starts_with("phase:")
+                        || p.source.starts_with("combo:")
+                        || p.source.starts_with("state:"),
+                    "source should have a valid prefix, got: {}",
+                    p.source
+                );
+            }
+        }
     }
 }

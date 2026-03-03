@@ -93,8 +93,8 @@ pub fn get_prompts(db: &Database, workflows: &WorkflowsConfig, args: Value) -> R
         ctx = ctx.with_agent(&w.id, worker_role.as_deref(), &w.tags);
     }
 
-    // Get prompts: simulate transition from empty to target
-    let expanded = prompts::get_transition_prompts_with_context(
+    // Get prompts with source attribution: simulate transition from empty to target
+    let attributed = prompts::get_transition_prompts_attributed(
         "",
         None,
         target_status,
@@ -103,10 +103,21 @@ pub fn get_prompts(db: &Database, workflows: &WorkflowsConfig, args: Value) -> R
         &ctx,
     );
 
+    // Build attributed prompt objects for JSON output
+    let prompt_objects: Vec<Value> = attributed
+        .iter()
+        .map(|p| {
+            json!({
+                "text": p.text,
+                "source": p.source,
+            })
+        })
+        .collect();
+
     Ok(json!({
         "status": target_status,
         "phase": target_phase,
-        "prompts": expanded,
-        "count": expanded.len(),
+        "prompts": prompt_objects,
+        "count": prompt_objects.len(),
     }))
 }
