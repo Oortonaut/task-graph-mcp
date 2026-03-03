@@ -4,12 +4,22 @@ description: "Git-aware transitions: branch creation, commit gates, PR guidance"
 states:
   working:
     prompts:
-      enter: "Create a feature branch for this task: git checkout -b task/{id}"
-      exit: "Ensure all changes are staged and committed before transitioning."
+      enter: "Create a feature branch for this task: git checkout -b task/{{task_id}}"
+      exit: >
+        Before transitioning, stage and commit all changes:
+          git add -A
+          git status                 # Verify only intended files are staged
+          git commit -m "{{task_id}}: {{task_title}}"
+        Verify nothing is left uncommitted: git status should show 'working tree clean'.
+        Then satisfy the commit gate:
+          attach(task="{{task_id}}", type="gate/commit", content="Changes committed on branch task/{{task_id}}")
 
   completed:
     prompts:
-      enter: "Push your branch. Open a PR if applicable."
+      enter: >
+        Push your branch and open a PR:
+          git push -u origin task/{{task_id}}
+        If a PR is appropriate, create one targeting the main branch.
 
 gates:
   status:completed:

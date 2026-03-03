@@ -9,37 +9,90 @@ states:
   working:
     prompts:
       enter: >
-        Set up an isolated git worktree for this task:
+        Set up an isolated git worktree for this task by running these commands:
+
           git worktree add ../worktree-{{task_id}} -b worktree/{{task_id}}
-        Work exclusively within the worktree directory. Do not modify the main working tree.
-      exit: >
-        Before leaving working state, generate a patch from your worktree:
           cd ../worktree-{{task_id}}
-          git add -A && git commit -m "{{task_id}}: {{task_title}}"
-          git format-patch $INTEGRATION --stdout > {{task_id}}.patch
-        Attach the patch: attach(task="{{task_id}}", type="patch", content="<patch content>")
-        Then mark gate satisfaction: attach(task="{{task_id}}", type="gate/patch", content="Patch submitted for integration")
+
+        Verify your setup:
+
+          git worktree list                # Confirm worktree exists
+          pwd                              # Confirm you are in the worktree directory
+          git branch --show-current        # Confirm branch is worktree/{{task_id}}
+
+        IMPORTANT RULES:
+        - Work EXCLUSIVELY in the worktree directory. Do NOT modify files in the main working tree.
+        - Do NOT push your branch to the remote or directly to the integration branch.
+        - All changes go through the patch workflow — you generate a patch, the integrator applies it.
+      exit: >
+        STOP — before transitioning out of working state, generate and submit a patch:
+
+        1. Stage and commit all changes in your worktree:
+           cd ../worktree-{{task_id}}
+           git add -A && git commit -m "{{task_id}}: {{task_title}}"
+
+        2. Generate the patch against the integration branch:
+           git format-patch $INTEGRATION --stdout > {{task_id}}.patch
+
+        3. Verify the patch is valid:
+           git apply --check {{task_id}}.patch
+
+        4. Attach the patch to the task:
+           attach(task="{{task_id}}", type="patch", content="<paste full patch content here>")
+
+        5. Satisfy the patch gate:
+           attach(task="{{task_id}}", type="gate/patch", content="Patch submitted for integration")
+
+        Do NOT push your branch directly. Do NOT merge into the integration branch yourself.
+        The integrator role handles patch application.
 
   patching:
     timed: true
     exits: [working, completed, failed]
     prompts:
       enter: >
-        Patch submitted and awaiting integration. The integrator will apply your patch
-        to the integration branch. If conflicts arise, you may be moved back to working
-        state to rebase your worktree and regenerate the patch.
+        Your patch has been submitted. While in patching state, do the following:
+
+        1. Do NOT make further code changes or push any branches.
+        2. Monitor for conflict feedback — check periodically:
+           attachments(task="{{task_id}}")
+           If you see a note about conflicts, the integrator has moved you back to working.
+        3. Keep your worktree intact — do NOT delete it yet. You may need to rebase
+           if the integrator reports conflicts.
+
+        Wait for the integrator to apply your patch. You will be moved to:
+        - completed: if the patch applied cleanly
+        - working: if conflicts arose and you need to rebase and regenerate
+        - failed: if the patch is fundamentally incompatible
       exit: >
-        Leaving patching state. If returning to working, rebase your worktree first:
+        You are leaving patching state. If returning to working (due to conflicts), rebase immediately:
+
           cd ../worktree-{{task_id}}
-          git fetch origin && git rebase $INTEGRATION
-        Then regenerate and resubmit your patch.
+          git fetch origin
+          git rebase $INTEGRATION
+
+        If rebase has conflicts, resolve them:
+          git status                       # See conflicted files
+          # Edit each conflicted file
+          git add <resolved_files>
+          git rebase --continue
+
+        Then regenerate your patch and resubmit (follow the exit~working instructions).
 
   completed:
     prompts:
       enter: >
-        Task complete. Clean up your worktree:
+        Task is complete. Clean up your worktree NOW by running:
+
           git worktree remove ../worktree-{{task_id}}
           git branch -d worktree/{{task_id}}
+
+        If removal fails with "worktree is dirty", first commit or discard changes:
+          cd ../worktree-{{task_id}} && git checkout -- .
+        Then retry the removal.
+
+        If branch deletion fails with "not fully merged", use:
+          git branch -D worktree/{{task_id}}
 
 # =============================================================================
 # GATES
