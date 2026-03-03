@@ -12,6 +12,8 @@ states:
         Set up an isolated git worktree for this task:
           git worktree add ../worktree-{{task_id}} -b worktree/{{task_id}}
         Work exclusively within the worktree directory. Do not modify the main working tree.
+        File coordination: call mark_file(file=[paths], task="{{task_id}}") for files you intend to modify.
+        Progress: call thinking(thought="what you're doing") periodically to broadcast status.
       exit: >
         Before leaving working state, generate a patch from your worktree:
           cd ../worktree-{{task_id}}
@@ -19,6 +21,7 @@ states:
           git format-patch $INTEGRATION --stdout > {{task_id}}.patch
         Attach the patch: attach(task="{{task_id}}", type="patch", content="<patch content>")
         Then mark gate satisfaction: attach(task="{{task_id}}", type="gate/patch", content="Patch submitted for integration")
+        Before completing: ensure all changes are committed. `git add -A && git commit -m '{{task_id}}: {{task_title}}'`
 
   patching:
     timed: true
@@ -50,6 +53,9 @@ gates:
     - type: gate/patch
       enforcement: warn
       description: "Patches should be submitted for integration before completing. Attach gate/patch or use force=true for non-code tasks."
+    - type: gate/commit
+      enforcement: warn
+      description: "Commit all changes before marking task complete"
 
   tag:worktree-isolated:
     - type: gate/patch
@@ -333,3 +339,19 @@ advisories:
       - **"worktree is dirty"**: Commit or stash changes first, or use `--force`
       - **"branch is not fully merged"**: Use `git branch -D` (capital D) if you're sure the patch was applied
       - **Stale references**: Run `git worktree prune` to clean up
+
+  layered-worktree:
+    title: "Layered worktree strategy for multi-round coordination"
+    roles: [lead, coordinator, integrator]
+    content: |
+      For round N+1, create worktrees from the merged round N integration branch,
+      NOT from the original master/main. This eliminates duplicate-creation conflicts
+      where workers recreate code already produced in earlier rounds.
+
+      Example workflow:
+        # After merging Round 1 patches into integration branch:
+        git checkout integration
+        # Create Round 2 worktrees from integration (not master):
+        git worktree add ../worktree-{{task_id}} -b worktree/{{task_id}}
+
+      This ensures Round 2 workers see all Round 1 changes as their starting point.

@@ -4,8 +4,13 @@ description: "Git-aware transitions: branch creation, commit gates, PR guidance"
 states:
   working:
     prompts:
-      enter: "Create a feature branch for this task: git checkout -b task/{id}"
-      exit: "Ensure all changes are staged and committed before transitioning."
+      enter: >
+        Create a feature branch for this task: git checkout -b task/{id}
+        File coordination: call mark_file(file=[paths], task="{{task_id}}") for files you intend to modify.
+        Progress: call thinking(thought="what you're doing") periodically to broadcast status.
+      exit: >
+        Ensure all changes are staged and committed before transitioning.
+        Before completing: ensure all changes are committed. `git add -A && git commit -m '{{task_id}}: {{task_title}}'`
 
   completed:
     prompts:
