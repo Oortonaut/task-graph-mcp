@@ -803,11 +803,13 @@ pub fn list_tasks(
         tasks.truncate(l as usize);
     }
 
-    // Get blockers for each task
+    // Get unsatisfied blockers for each task (only blockers still in a blocking state)
     let tasks_with_blockers: Vec<_> = tasks
         .into_iter()
         .map(|task| {
-            let blockers = db.get_blockers(&task.id).unwrap_or_default();
+            let blockers = db
+                .get_unsatisfied_blockers(&task.id, states_config)
+                .unwrap_or_default();
             (task, blockers)
         })
         .collect();
@@ -829,6 +831,7 @@ pub fn list_tasks(
                 let mut task_json = serde_json::to_value(task).unwrap();
                 if let Some(obj) = task_json.as_object_mut() {
                     obj.insert("blocked_by".to_string(), json!(blockers));
+                    obj.insert("blocked".to_string(), json!(!blockers.is_empty()));
                 }
                 task_json
             }).collect::<Vec<_>>(),

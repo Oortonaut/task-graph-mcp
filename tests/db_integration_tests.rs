@@ -2295,6 +2295,353 @@ mod task_tests {
         assert_eq!(result["has_more"], json!(true));
     }
 
+    /// Test that list_tasks only shows unsatisfied blockers (blockers still in blocking states).
+    /// When a blocker task is completed, it should no longer appear in blocked_by.
+    #[test]
+    fn list_tasks_filters_satisfied_blockers() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let ids_config = default_ids_config();
+        let auto_advance = default_auto_advance();
+
+        // Create two blocker tasks
+        let blocker_a = db
+            .create_task(
+                Some("blocker-a".to_string()),
+                "Blocker A".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+
+        let blocker_b = db
+            .create_task(
+                Some("blocker-b".to_string()),
+                "Blocker B".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+
+        // Create a task that is blocked by both
+        let blocked_task = db
+            .create_task(
+                Some("blocked-task".to_string()),
+                "Blocked Task".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+
+        // Add blocking dependencies
+        db.add_dependency(&blocker_a.id, &blocked_task.id, "blocks", &deps_config)
+            .unwrap();
+        db.add_dependency(&blocker_b.id, &blocked_task.id, "blocks", &deps_config)
+            .unwrap();
+
+        // Both blockers are pending (blocking state) - list_tasks should show both
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "status": "pending",
+                "format": "json"
+            }),
+        )
+        .unwrap()
+        .into_json();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        let blocked = tasks
+            .iter()
+            .find(|t| t["id"].as_str().unwrap() == "blocked-task")
+            .unwrap();
+        let blocked_by = blocked["blocked_by"].as_array().unwrap();
+        assert_eq!(blocked_by.len(), 2, "Should show 2 unsatisfied blockers");
+        assert_eq!(blocked["blocked"].as_bool().unwrap(), true);
+
+        // Now complete blocker-a by transitioning through working -> completed
+        // Register a worker to claim and complete the blocker
+        let worker = db
+            .register_worker(
+                Some("test-worker".to_string()),
+                vec![],
+                false,
+                &ids_config,
+                None,
+                vec![],
+            )
+            .unwrap();
+        db.claim_task(&blocker_a.id, &worker.id, &states_config)
+            .unwrap();
+        db.update_task_unified(
+            &blocker_a.id,
+            &worker.id,
+            None,                          // assignee
+            None,                          // title
+            None,                          // description
+            Some("completed".to_string()), // status
+            None,                          // phase
+            None,                          // priority
+            None,                          // points
+            None,                          // tags
+            None,                          // needed_tags
+            None,                          // wanted_tags
+            None,                          // time_estimate_ms
+            None,                          // reason
+            false,                         // force
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Now list_tasks should only show blocker-b as unsatisfied
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "status": "pending",
+                "format": "json"
+            }),
+        )
+        .unwrap()
+        .into_json();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        let blocked = tasks
+            .iter()
+            .find(|t| t["id"].as_str().unwrap() == "blocked-task")
+            .unwrap();
+        let blocked_by = blocked["blocked_by"].as_array().unwrap();
+        assert_eq!(
+            blocked_by.len(),
+            1,
+            "Should only show 1 unsatisfied blocker after completing blocker-a"
+        );
+        assert_eq!(blocked_by[0].as_str().unwrap(), "blocker-b");
+        assert_eq!(blocked["blocked"].as_bool().unwrap(), true);
+
+        // Now complete blocker-b too
+        db.claim_task(&blocker_b.id, &worker.id, &states_config)
+            .unwrap();
+        db.update_task_unified(
+            &blocker_b.id,
+            &worker.id,
+            None,                          // assignee
+            None,                          // title
+            None,                          // description
+            Some("completed".to_string()), // status
+            None,                          // phase
+            None,                          // priority
+            None,                          // points
+            None,                          // tags
+            None,                          // needed_tags
+            None,                          // wanted_tags
+            None,                          // time_estimate_ms
+            None,                          // reason
+            false,                         // force
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Now list_tasks should show no blockers and blocked=false
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Json,
+            json!({
+                "status": "pending",
+                "format": "json"
+            }),
+        )
+        .unwrap()
+        .into_json();
+
+        let tasks = result["tasks"].as_array().unwrap();
+        let blocked = tasks
+            .iter()
+            .find(|t| t["id"].as_str().unwrap() == "blocked-task")
+            .unwrap();
+        let blocked_by = blocked["blocked_by"].as_array().unwrap();
+        assert_eq!(
+            blocked_by.len(),
+            0,
+            "Should show no blockers after all blockers are completed"
+        );
+        assert_eq!(blocked["blocked"].as_bool().unwrap(), false);
+    }
+
+    /// Test that list_tasks markdown output hides satisfied blockers.
+    /// When all blockers are completed, the [blocked by ...] annotation should not appear.
+    #[test]
+    fn list_tasks_markdown_hides_satisfied_blockers() {
+        use serde_json::json;
+        use task_graph_mcp::format::OutputFormat;
+        use task_graph_mcp::tools::tasks::list_tasks;
+
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let ids_config = default_ids_config();
+        let auto_advance = default_auto_advance();
+
+        // Create blocker and blocked task
+        let blocker = db
+            .create_task(
+                Some("md-blocker".to_string()),
+                "MD Blocker".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+
+        db.create_task(
+            Some("md-blocked".to_string()),
+            "MD Blocked Task".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &states_config,
+            &ids_config,
+        )
+        .unwrap();
+
+        db.add_dependency(&blocker.id, "md-blocked", "blocks", &deps_config)
+            .unwrap();
+
+        // Markdown should show blocker while it's pending
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Markdown,
+            json!({
+                "status": "pending",
+                "format": "markdown"
+            }),
+        )
+        .unwrap()
+        .into_raw();
+        assert!(
+            result.contains("[blocked by"),
+            "Should show blocked annotation when blocker is pending"
+        );
+
+        // Complete the blocker
+        let worker = db
+            .register_worker(
+                Some("md-worker".to_string()),
+                vec![],
+                false,
+                &ids_config,
+                None,
+                vec![],
+            )
+            .unwrap();
+        db.claim_task(&blocker.id, &worker.id, &states_config)
+            .unwrap();
+        db.update_task_unified(
+            &blocker.id,
+            &worker.id,
+            None,                          // assignee
+            None,                          // title
+            None,                          // description
+            Some("completed".to_string()), // status
+            None,                          // phase
+            None,                          // priority
+            None,                          // points
+            None,                          // tags
+            None,                          // needed_tags
+            None,                          // wanted_tags
+            None,                          // time_estimate_ms
+            None,                          // reason
+            false,                         // force
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Now markdown should NOT show blocked annotation for md-blocked
+        let result = list_tasks(
+            &db,
+            &states_config,
+            &deps_config,
+            OutputFormat::Markdown,
+            json!({
+                "status": "pending",
+                "format": "markdown"
+            }),
+        )
+        .unwrap()
+        .into_raw();
+
+        // The md-blocked task should exist but without blocked annotation
+        assert!(
+            result.contains("MD Blocked Task"),
+            "Should still show the blocked task"
+        );
+        assert!(
+            !result.contains("[blocked by"),
+            "Should NOT show blocked annotation after blocker is completed"
+        );
+    }
+
     /// Test that offset works correctly with the claimed=true path.
     /// Claim tasks so they appear in the claimed path, then paginate with offset.
     #[test]
