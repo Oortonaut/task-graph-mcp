@@ -216,8 +216,9 @@ role_prompts:
       1. Check your current WIP -- only pull if under limit
       2. `list_tasks(ready=true)` to see the todo column
       3. Pull highest priority item: `claim(task="id")`
-      4. **Finish before starting.** Move to review or blocked before pulling again.
-      5. Blocked items free your WIP slot.
+      4. After claiming, review any prompts returned in the response -- they contain workflow-specific guidance for this task.
+      5. **Finish before starting.** Move to review or blocked before pulling again.
+      6. Blocked items free your WIP slot.
 
     wip_discipline: |
       **WIP limits are the core kanban mechanism.**

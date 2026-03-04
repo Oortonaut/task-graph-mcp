@@ -6244,3 +6244,1126 @@ mod rename_tests {
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
 }
+
+mod claim_prompt_delivery_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Helper to load a workflow config with assigned state (like hierarchical/push)
+    fn hierarchical_workflows() -> WorkflowsConfig {
+        let yaml = r#"
+name: test-hierarchical
+settings:
+  initial_state: pending
+  blocking_states: [pending, assigned, working]
+states:
+  pending:
+    exits: [assigned, working, cancelled]
+    timed: false
+  assigned:
+    exits: [working, pending, cancelled]
+    timed: false
+    prompts:
+      enter: "Task assigned by coordinator. Review context before claiming."
+  working:
+    exits: [completed, failed, pending]
+    timed: true
+    prompts:
+      enter: "Now working. Follow the workflow guidance."
+      exit: "Unmark files and attach results."
+  completed:
+    exits: [pending]
+    timed: false
+    prompts:
+      enter: "Task completed."
+  failed:
+    exits: [pending]
+    timed: false
+  cancelled:
+    exits: []
+    timed: false
+phases:
+  implement:
+    prompts:
+      enter: "Implement phase."
+combos:
+  assigned+implement:
+    enter: "Implementation assigned. Read design spec before claiming."
+  working+implement:
+    enter: "Working on implementation."
+roles:
+  coordinator:
+    tags: [coordinator, lead]
+    can_assign: true
+  worker:
+    tags: [worker]
+role_prompts:
+  worker:
+    claiming: "After claiming, review prompts for workflow guidance."
+    reporting: "Use thinking() for visibility."
+"#;
+        serde_yaml::from_str(yaml).expect("Failed to parse test workflow YAML")
+    }
+
+    #[test]
+    fn claim_from_assigned_delivers_exit_assigned_and_enter_working_prompts() {
+        let db = setup_db();
+        let workflows = hierarchical_workflows();
+        let states_config: StatesConfig = (&workflows).into();
+        let config = default_app_config();
+
+        // Register coordinator and worker
+        let coordinator = db
+            .register_worker(
+                Some("coordinator-1".to_string()),
+                vec!["coordinator".to_string(), "lead".to_string()],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let worker = db
+            .register_worker(
+                Some("worker-1".to_string()),
+                vec!["worker".to_string()],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        // Create a task
+        let task = db
+            .create_task(
+                Some("test-task-1".to_string()),
+                "Test prompt delivery".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Coordinator assigns the task to the worker (pending -> assigned)
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        db.update_task_unified(
+            &task.id,
+            &coordinator.id,
+            Some(&worker.id), // assignee
+            None,
+            None,
+            None, // status defaults to "assigned"
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Verify task is now in "assigned" state
+        let assigned_task = db.get_task("test-task-1").unwrap().unwrap();
+        assert_eq!(assigned_task.status, "assigned");
+        assert_eq!(assigned_task.worker_id, Some("worker-1".to_string()));
+
+        // Worker claims the task
+        let result = task_graph_mcp::tools::claiming::claim(
+            &db,
+            &config,
+            &workflows,
+            json!({
+                "worker_id": "worker-1",
+                "task": "test-task-1"
+            }),
+        )
+        .unwrap();
+
+        // Verify the response includes prompts
+        let prompts = result
+            .get("prompts")
+            .expect("claim response should have prompts");
+        let prompts_arr = prompts.as_array().expect("prompts should be an array");
+
+        // Should include exit~assigned and enter~working transition prompts
+        let all_prompts_text: String = prompts_arr
+            .iter()
+            .filter_map(|p| p.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // The enter~working prompt should be present
+        assert!(
+            all_prompts_text.contains("Now working"),
+            "Should include enter~working prompt. Got: {}",
+            all_prompts_text
+        );
+
+        // Verify the pre-claim status is included in the response
+        assert_eq!(
+            result.get("pre_claim_status").and_then(|v| v.as_str()),
+            Some("assigned"),
+            "Response should include pre_claim_status"
+        );
+    }
+
+    #[test]
+    fn claim_from_assigned_with_phase_delivers_combo_prompts() {
+        let db = setup_db();
+        let workflows = hierarchical_workflows();
+        let states_config: StatesConfig = (&workflows).into();
+        let config = default_app_config();
+
+        let coordinator = db
+            .register_worker(
+                Some("coord-2".to_string()),
+                vec!["coordinator".to_string(), "lead".to_string()],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let worker = db
+            .register_worker(
+                Some("worker-2".to_string()),
+                vec!["worker".to_string()],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let task = db
+            .create_task(
+                Some("phase-task".to_string()),
+                "Phase combo test".to_string(),
+                None,
+                None,
+                Some("implement".to_string()), // Set phase at creation
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Coordinator assigns the task
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        db.update_task_unified(
+            &task.id,
+            &coordinator.id,
+            Some(&worker.id),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Worker claims the task
+        let result = task_graph_mcp::tools::claiming::claim(
+            &db,
+            &config,
+            &workflows,
+            json!({
+                "worker_id": "worker-2",
+                "task": "phase-task"
+            }),
+        )
+        .unwrap();
+
+        let prompts = result.get("prompts").expect("should have prompts");
+        let prompts_arr = prompts.as_array().expect("prompts should be an array");
+        let all_prompts_text: String = prompts_arr
+            .iter()
+            .filter_map(|p| p.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Should include the working+implement combo prompt
+        assert!(
+            all_prompts_text.contains("Working on implementation"),
+            "Should include working+implement combo prompt. Got: {}",
+            all_prompts_text
+        );
+
+        // Should include role-specific claiming prompt
+        assert!(
+            all_prompts_text.contains("After claiming, review prompts"),
+            "Should include role claiming prompt. Got: {}",
+            all_prompts_text
+        );
+
+        // Verify pre_claim_phase is included
+        assert_eq!(
+            result.get("pre_claim_phase").and_then(|v| v.as_str()),
+            Some("implement"),
+            "Response should include pre_claim_phase"
+        );
+    }
+
+    #[test]
+    fn claim_from_pending_still_delivers_working_prompts() {
+        let db = setup_db();
+        let workflows = hierarchical_workflows();
+        let states_config: StatesConfig = (&workflows).into();
+        let config = default_app_config();
+
+        let _worker = db
+            .register_worker(
+                Some("worker-3".to_string()),
+                vec!["worker".to_string()],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let _task = db
+            .create_task(
+                Some("pending-task".to_string()),
+                "Direct claim test".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Worker claims directly from pending (no assignment)
+        let result = task_graph_mcp::tools::claiming::claim(
+            &db,
+            &config,
+            &workflows,
+            json!({
+                "worker_id": "worker-3",
+                "task": "pending-task"
+            }),
+        )
+        .unwrap();
+
+        let prompts = result.get("prompts").expect("should have prompts");
+        let prompts_arr = prompts.as_array().expect("prompts should be an array");
+        let all_prompts_text: String = prompts_arr
+            .iter()
+            .filter_map(|p| p.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Should include enter~working prompt
+        assert!(
+            all_prompts_text.contains("Now working"),
+            "Should include enter~working prompt for pending->working. Got: {}",
+            all_prompts_text
+        );
+
+        // Pre-claim status should be "pending"
+        assert_eq!(
+            result.get("pre_claim_status").and_then(|v| v.as_str()),
+            Some("pending"),
+            "pre_claim_status should be 'pending'"
+        );
+    }
+}
+
+mod file_contention_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Helper to create a parent task with two child tasks (siblings) for contention testing.
+    fn setup_sibling_tasks(
+        db: &Database,
+        states_config: &StatesConfig,
+    ) -> (String, String, String) {
+        // Create parent task
+        let parent = db
+            .create_task(
+                Some("parent-task".to_string()),
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Create child task 1
+        let child1 = db
+            .create_task(
+                Some("child-1".to_string()),
+                "Child 1".to_string(),
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Create child task 2
+        let child2 = db
+            .create_task(
+                Some("child-2".to_string()),
+                "Child 2".to_string(),
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        (parent.id, child1.id, child2.id)
+    }
+
+    #[test]
+    fn claim_detects_file_contention_with_sibling_task() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        // Register two workers
+        let _worker1 = db
+            .register_worker(
+                Some("worker-a".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let _worker2 = db
+            .register_worker(
+                Some("worker-b".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        // Create parent with two child tasks (siblings)
+        let (_parent_id, child1_id, child2_id) = setup_sibling_tasks(&db, &states_config);
+
+        // Worker 1 claims child 1 and marks files
+        db.update_task_unified(
+            &child1_id,
+            "worker-a",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Worker 1 marks files
+        db.lock_file(
+            "/project/src/main.rs".to_string(),
+            "worker-a",
+            Some("editing".to_string()),
+            Some(child1_id.clone()),
+        )
+        .unwrap();
+        db.lock_file(
+            "/project/src/lib.rs".to_string(),
+            "worker-a",
+            Some("editing".to_string()),
+            Some(child1_id.clone()),
+        )
+        .unwrap();
+
+        // Worker 2 claims sibling child 2
+        let result = task_graph_mcp::tools::claiming::claim(
+            &db,
+            &config,
+            &workflows,
+            json!({
+                "worker_id": "worker-b",
+                "task": child2_id
+            }),
+        )
+        .unwrap();
+
+        // Verify file_contention is present in the response
+        let contention = result
+            .get("file_contention")
+            .expect("claim response should include file_contention for sibling tasks");
+        let contention_arr = contention
+            .as_array()
+            .expect("file_contention should be an array");
+
+        // Should detect both files marked by the sibling worker
+        assert_eq!(
+            contention_arr.len(),
+            2,
+            "Should detect 2 file contentions (sibling marks), got: {:?}",
+            contention_arr
+        );
+
+        // Verify the files are the ones worker-a marked
+        let files: Vec<&str> = contention_arr
+            .iter()
+            .filter_map(|e| e.get("file").and_then(|v| v.as_str()))
+            .collect();
+        assert!(files.contains(&"/project/src/lib.rs"));
+        assert!(files.contains(&"/project/src/main.rs"));
+
+        // Verify the other worker is worker-a
+        for entry in contention_arr {
+            assert_eq!(
+                entry.get("other_worker").and_then(|v| v.as_str()),
+                Some("worker-a")
+            );
+        }
+    }
+
+    #[test]
+    fn claim_returns_no_contention_when_no_sibling_marks() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        let _worker1 = db
+            .register_worker(
+                Some("worker-c".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let _worker2 = db
+            .register_worker(
+                Some("worker-d".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let (_parent_id, child1_id, child2_id) = setup_sibling_tasks(&db, &states_config);
+
+        // Worker 1 claims child 1 but does NOT mark any files
+        db.update_task_unified(
+            &child1_id,
+            "worker-c",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Worker 2 claims child 2
+        let result = task_graph_mcp::tools::claiming::claim(
+            &db,
+            &config,
+            &workflows,
+            json!({
+                "worker_id": "worker-d",
+                "task": child2_id
+            }),
+        )
+        .unwrap();
+
+        // No file_contention because no files are marked
+        assert!(
+            result.get("file_contention").is_none(),
+            "Should not have file_contention when sibling has no file marks"
+        );
+    }
+
+    #[test]
+    fn claim_ignores_contention_from_completed_tasks() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        let _worker1 = db
+            .register_worker(
+                Some("worker-e".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let _worker2 = db
+            .register_worker(
+                Some("worker-f".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let (_parent_id, child1_id, child2_id) = setup_sibling_tasks(&db, &states_config);
+
+        // Worker 1 claims child 1, marks files, then completes
+        db.update_task_unified(
+            &child1_id,
+            "worker-e",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        db.lock_file(
+            "/project/src/shared.rs".to_string(),
+            "worker-e",
+            None,
+            Some(child1_id.clone()),
+        )
+        .unwrap();
+
+        // Complete child 1 (releases file locks)
+        db.update_task_unified(
+            &child1_id,
+            "worker-e",
+            None,
+            None,
+            None,
+            Some("completed".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            true, // force to skip gate checks
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Worker 2 claims child 2
+        let result = task_graph_mcp::tools::claiming::claim(
+            &db,
+            &config,
+            &workflows,
+            json!({
+                "worker_id": "worker-f",
+                "task": child2_id
+            }),
+        )
+        .unwrap();
+
+        // No contention because sibling task is completed (file marks auto-cleaned)
+        assert!(
+            result.get("file_contention").is_none(),
+            "Should not detect contention from completed sibling tasks"
+        );
+    }
+
+    #[test]
+    fn find_file_contention_db_method_with_siblings() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+
+        let _worker1 = db
+            .register_worker(
+                Some("w1".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let _worker2 = db
+            .register_worker(
+                Some("w2".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let (_parent_id, child1_id, child2_id) = setup_sibling_tasks(&db, &states_config);
+
+        // Both workers working on sibling tasks
+        db.update_task_unified(
+            &child1_id,
+            "w1",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        db.update_task_unified(
+            &child2_id,
+            "w2",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Worker 1 marks files
+        db.lock_file(
+            "/shared.rs".to_string(),
+            "w1",
+            None,
+            Some(child1_id.clone()),
+        )
+        .unwrap();
+        db.lock_file(
+            "/unique1.rs".to_string(),
+            "w1",
+            None,
+            Some(child1_id.clone()),
+        )
+        .unwrap();
+
+        // Worker 2 marks different files
+        db.lock_file(
+            "/unique2.rs".to_string(),
+            "w2",
+            None,
+            Some(child2_id.clone()),
+        )
+        .unwrap();
+
+        // Find contention from child2's perspective
+        let contention = db.find_file_contention(&child2_id, "w2").unwrap();
+
+        // Should find worker 1's marks as contention (sibling task)
+        assert_eq!(
+            contention.len(),
+            2,
+            "Should find 2 contentions (sibling's marks): {:?}",
+            contention
+        );
+
+        let files: Vec<&str> = contention.iter().map(|(f, _, _)| f.as_str()).collect();
+        assert!(files.contains(&"/shared.rs"));
+        assert!(files.contains(&"/unique1.rs"));
+
+        // Find contention from child1's perspective
+        let contention = db.find_file_contention(&child1_id, "w1").unwrap();
+        assert_eq!(
+            contention.len(),
+            1,
+            "Should find 1 contention from child1's perspective"
+        );
+        assert_eq!(contention[0].0, "/unique2.rs");
+        assert_eq!(contention[0].2, "w2");
+    }
+
+    #[test]
+    fn find_file_contention_no_parent_checks_all_active_workers() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+
+        let _worker1 = db
+            .register_worker(
+                Some("nw1".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let _worker2 = db
+            .register_worker(
+                Some("nw2".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        // Create two independent tasks (no parent)
+        let task1 = db
+            .create_task(
+                Some("ind-t1".to_string()),
+                "Independent 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        let task2 = db
+            .create_task(
+                Some("ind-t2".to_string()),
+                "Independent 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Both workers working
+        db.update_task_unified(
+            &task1.id,
+            "nw1",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        db.update_task_unified(
+            &task2.id,
+            "nw2",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Worker 1 marks a file
+        db.lock_file(
+            "/global.rs".to_string(),
+            "nw1",
+            None,
+            Some("ind-t1".to_string()),
+        )
+        .unwrap();
+
+        // Find contention from task2's perspective (no parent, so checks all active workers)
+        let contention = db.find_file_contention("ind-t2", "nw2").unwrap();
+
+        assert_eq!(
+            contention.len(),
+            1,
+            "Should find 1 contention from all active workers: {:?}",
+            contention
+        );
+        assert_eq!(contention[0].0, "/global.rs");
+        assert_eq!(contention[0].2, "nw1");
+    }
+
+    #[test]
+    fn find_file_contention_ignores_lock_prefixed_entries() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let deps_config = default_deps_config();
+        let auto_advance = default_auto_advance();
+
+        let _worker1 = db
+            .register_worker(
+                Some("lw1".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let _worker2 = db
+            .register_worker(
+                Some("lw2".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let task1 = db
+            .create_task(
+                Some("lt1".to_string()),
+                "Lock Test 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        let task2 = db
+            .create_task(
+                Some("lt2".to_string()),
+                "Lock Test 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Both workers working
+        db.update_task_unified(
+            &task1.id,
+            "lw1",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        db.update_task_unified(
+            &task2.id,
+            "lw2",
+            None,
+            None,
+            None,
+            Some("working".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &states_config,
+            &deps_config,
+            &auto_advance,
+        )
+        .unwrap();
+
+        // Worker 1 holds an exclusive lock
+        db.lock_file(
+            "lock:git-commit".to_string(),
+            "lw1",
+            None,
+            Some("lt1".to_string()),
+        )
+        .unwrap();
+
+        // Find contention from lt2's perspective -- lock: entries should be excluded
+        let contention = db.find_file_contention("lt2", "lw2").unwrap();
+        assert!(
+            contention.is_empty(),
+            "lock: prefixed entries should not appear in file contention: {:?}",
+            contention
+        );
+    }
+}

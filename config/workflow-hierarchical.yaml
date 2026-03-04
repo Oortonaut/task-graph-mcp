@@ -253,8 +253,9 @@ role_prompts:
     claiming: |
       1. `list_tasks(ready=true, agent="your-id")` - find qualified tasks by priority
       2. `claim(task="id", worker_id="your-id")`
-      3. `mark_file()` before editing
-      4. Never revert unfamiliar changes - check `mark_updates()` first
+      3. After claiming, review any prompts returned in the response -- they contain workflow-specific guidance for this task, including any overlay-prescribed behaviors, patches, or reasoning notes.
+      4. `mark_file()` before editing
+      5. Never revert unfamiliar changes - check `mark_updates()` first
       Claim one at a time. Check attachments for lead context.
 
     completing: |

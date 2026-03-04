@@ -298,10 +298,11 @@ role_prompts:
       **Pure push model -- do NOT self-select tasks.**
       1. Wait for task assignment (status transitions to "assigned")
       2. `claim(task="id")` to begin working
-      3. `mark_file()` before editing
-      4. Work, `thinking()` regularly
-      5. `attach(type="result", ...)` + `unmark_file()` + `update(status="completed")`
-      6. **Wait** for coordinator to assign the next task
+      3. After claiming, review any prompts returned in the response -- they contain workflow-specific guidance for this task, including any overlay-prescribed behaviors, patches, or reasoning notes.
+      4. `mark_file()` before editing
+      5. Work, `thinking()` regularly
+      6. `attach(type="result", ...)` + `unmark_file()` + `update(status="completed")`
+      7. **Wait** for coordinator to assign the next task
 
     completing: |
       Before completing:

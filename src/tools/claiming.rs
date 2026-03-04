@@ -53,6 +53,12 @@ pub fn claim(
     let task_id = get_string(&args, "task").ok_or_else(|| ToolError::missing_field("task"))?;
     let force = get_bool(&args, "force").unwrap_or(false);
 
+    // Capture the task's pre-claim status so we can deliver the correct transition prompts.
+    // When a coordinator assigns a task (pending -> assigned), the assigned-state prompts
+    // go to the coordinator. The worker never sees them. By recording the pre-claim status
+    // here, we can include assigned->working transition prompts in the claim response.
+    let pre_claim_status = db.get_task(&task_id)?.map(|t| (t.status, t.phase));
+
     // Find the first timed state to use for claiming
     let claim_status = states_config
         .definitions
@@ -107,45 +113,55 @@ pub fn claim(
         .map(|w| workflows.match_role(&w.tags))
         .unwrap_or(None);
 
-    // Get transition prompts for claiming (with context-sensitive template expansion)
+    // Get transition prompts for claiming (with context-sensitive template expansion).
+    //
+    // Use the task's actual pre-claim status (e.g., "assigned") as the from-state,
+    // not the worker's last_status. This ensures the worker receives the full set of
+    // transition prompts including any overlay contributions for the assigned->working
+    // transition. Previously, prompts were based on the worker's last_status which
+    // might be unrelated (e.g., "completed" from a prior task or None if just connected).
     let mut transition_prompt_list: Vec<String> = {
-        match db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref()) {
-            Ok((old_status, old_phase)) => {
-                // Create context with task and agent info for rich template expansion
-                let mut ctx = PromptContext::new(
-                    &task.status,
-                    task.phase.as_deref(),
-                    states_config,
-                    phases_config,
-                )
-                .with_task(&task.id, &task.title, task.priority, &task.tags);
+        // Still update the worker's tracked state for consistency
+        let _ = db.update_worker_state(&worker_id, Some(&task.status), task.phase.as_deref());
 
-                // Add hierarchy level context from level:* tags
-                let task_level_str: Option<String> = task
-                    .tags
-                    .iter()
-                    .find(|t| t.starts_with("level:"))
-                    .map(|t| t.strip_prefix("level:").unwrap_or(t).to_string());
-                let child_count = db.get_children_ids(&task.id).ok().map(|ids| ids.len());
-                let task_level_ref = task_level_str.as_deref();
-                ctx = ctx.with_level(task_level_ref, child_count);
+        // Use the task's pre-claim status for prompt computation
+        let (from_status, from_phase) = match &pre_claim_status {
+            Some((status, phase)) => (status.as_str(), phase.as_deref()),
+            None => ("", None),
+        };
 
-                // Add agent context if worker info is available
-                if let Some(ref worker) = worker_info {
-                    ctx = ctx.with_agent(&worker_id, worker_role.as_deref(), &worker.tags);
-                }
+        // Create context with task and agent info for rich template expansion
+        let mut ctx = PromptContext::new(
+            &task.status,
+            task.phase.as_deref(),
+            states_config,
+            phases_config,
+        )
+        .with_task(&task.id, &task.title, task.priority, &task.tags);
 
-                crate::prompts::get_transition_prompts_with_context(
-                    old_status.as_deref().unwrap_or(""),
-                    old_phase.as_deref(),
-                    &task.status,
-                    task.phase.as_deref(),
-                    workflows,
-                    &ctx,
-                )
-            }
-            Err(_) => vec![],
+        // Add hierarchy level context from level:* tags
+        let task_level_str: Option<String> = task
+            .tags
+            .iter()
+            .find(|t| t.starts_with("level:"))
+            .map(|t| t.strip_prefix("level:").unwrap_or(t).to_string());
+        let child_count = db.get_children_ids(&task.id).ok().map(|ids| ids.len());
+        let task_level_ref = task_level_str.as_deref();
+        ctx = ctx.with_level(task_level_ref, child_count);
+
+        // Add agent context if worker info is available
+        if let Some(ref worker) = worker_info {
+            ctx = ctx.with_agent(&worker_id, worker_role.as_deref(), &worker.tags);
         }
+
+        crate::prompts::get_transition_prompts_with_context(
+            from_status,
+            from_phase,
+            &task.status,
+            task.phase.as_deref(),
+            workflows,
+            &ctx,
+        )
     };
 
     let mut response = json!({
@@ -159,6 +175,17 @@ pub fn claim(
         }
     });
 
+    // Include the pre-claim status so the worker knows the task's prior state
+    // (e.g., "assigned" indicates it was push-assigned by a coordinator)
+    if let Some((pre_status, pre_phase)) = &pre_claim_status {
+        if let Value::Object(ref mut map) = response {
+            map.insert("pre_claim_status".to_string(), json!(pre_status));
+            if let Some(phase) = pre_phase {
+                map.insert("pre_claim_phase".to_string(), json!(phase));
+            }
+        }
+    }
+
     // Add role-specific prompts: both "claiming" guidance and "reporting" guidance
     // This gives the agent full context on how to work and communicate from the start
     if let Some(ref role_name) = worker_role {
@@ -171,6 +198,11 @@ pub fn claim(
             transition_prompt_list.push(reporting_prompt.to_string());
         }
     }
+
+    // Check for file contention: warn if files marked for this task overlap
+    // with files marked by other currently-active tasks/workers.
+    // This is advisory -- it does not block the claim.
+    let file_contention = db.find_file_contention(&task.id, &worker_id);
 
     if let Value::Object(ref mut map) = response {
         // Add prompts if any
@@ -187,6 +219,23 @@ pub fn claim(
         );
         if !advisory_hints.is_empty() {
             map.insert("advisory_hints".to_string(), json!(advisory_hints));
+        }
+
+        // Include file contention warnings if any overlapping marks found
+        if let Ok(ref contentions) = file_contention {
+            if !contentions.is_empty() {
+                let contention_entries: Vec<Value> = contentions
+                    .iter()
+                    .map(|(file_path, other_task_id, other_worker_id)| {
+                        json!({
+                            "file": file_path,
+                            "other_task": other_task_id,
+                            "other_worker": other_worker_id
+                        })
+                    })
+                    .collect();
+                map.insert("file_contention".to_string(), json!(contention_entries));
+            }
         }
     }
 

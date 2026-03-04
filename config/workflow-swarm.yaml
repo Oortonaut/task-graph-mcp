@@ -191,6 +191,7 @@ role_prompts:
   swarm_agent:
     claim_guidance: |
       `list_tasks(ready=true)` -> pick ONE -> `claim()` -> work fast -> complete -> repeat.
+      After claiming, review any prompts returned in the response -- they contain workflow-specific guidance for this task.
       Throughput = fast cycles. Don't hoard tasks.
 
     file_coordination: |
