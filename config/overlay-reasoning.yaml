@@ -5,75 +5,90 @@ states:
   working:
     prompts:
       enter: >
-        Document your reasoning as you work. Use attach() to save:
-        - Initial understanding of the problem
-        - Key assumptions you're making
-        - Approach you're taking and why
+        IMMEDIATELY after claiming this task, record your initial analysis by running:
 
-        Example: attach(task=task_id, type="reasoning", content="## Initial Analysis\n...")
+        attach(task="{{task_id}}", type="reasoning", name="initial-analysis", content="""
+        ## Problem Understanding
+        [Restate the problem in your own words — what exactly needs to change and why]
+
+        ## Key Assumptions
+        [List assumptions you are making about scope, environment, or requirements]
+
+        ## Planned Approach
+        [Describe the approach you will take and why you chose it over alternatives]
+        """)
+
+        Do this BEFORE writing any code. As you work, record significant decisions
+        with additional attach() calls using type="reasoning" and name="decision-log".
       exit: >
-        Before transitioning, capture your reasoning so far with attach():
-        - Decisions made and their rationale
-        - Alternatives you considered but rejected (and why)
-        - Any uncertainties or risks identified
+        STOP — before transitioning out of working state, you MUST do both of the following:
 
-        When committing code changes, include reasoning in commit messages:
-        - First line: what changed (imperative mood)
-        - Body: WHY this approach was chosen, not just what
-        - Reference alternatives considered if non-obvious
-        - Link to task ID for full reasoning trail
+        1. Attach a reasoning summary of the work you did:
 
-        Example commit message:
-        ```
-        Refactor auth to use JWT instead of sessions
+           attach(task="{{task_id}}", type="reasoning", name="decision-log", content="""
+           ## Decisions Made
+           [List each significant decision and its rationale]
 
-        Sessions required sticky load balancing which complicated
-        our k8s deployment. JWT allows stateless scaling.
+           ## Alternatives Considered
+           [For each decision, what alternatives did you reject and why]
 
-        Considered: Redis session store (added infrastructure),
-        encrypted cookies (size limits). JWT best fits our
-        horizontal scaling requirements.
+           ## Uncertainties and Risks
+           [Anything you are unsure about or that could cause problems later]
+           """)
 
-        Task: abc123
-        ```
+        2. Write commit messages that explain WHY, not just WHAT. Use this format:
+
+           First line: imperative summary of what changed
+           Blank line
+           Body: WHY this approach was chosen over alternatives
+           Footer: Task: {{task_id}}
+
+        Do NOT transition until you have attached at least one reasoning document.
+        Check with: attachments(task="{{task_id}}") — verify a type="reasoning" entry exists.
 
   completed:
     prompts:
       enter: >
-        Attach a final reasoning summary before completing:
+        REQUIRED before this task can be considered done — run this attach() call now:
 
-        attach(task=task_id, type="reasoning", name="completion-summary", content="""
+        attach(task="{{task_id}}", type="reasoning", name="completion-summary", content="""
         ## Summary
-        [What was accomplished]
+        [What was accomplished — be specific about files changed and why]
 
         ## Key Decisions
-        [Major choices made and rationale]
+        [Major choices made and rationale for each]
 
         ## Alternatives Rejected
-        [Options considered but not taken, with reasoning]
+        [Options considered but not taken, with concrete reasoning for rejection]
 
         ## Learnings
-        [Insights that could help future work]
+        [Insights that could help future tasks in this codebase]
         """)
+
+        Then satisfy the reasoning gate:
+        attach(task="{{task_id}}", type="gate/reasoning", content="Reasoning documented — see completion-summary attachment")
 
   failed:
     prompts:
       enter: >
-        Attach a failure analysis:
+        REQUIRED — attach a failure analysis NOW so the next agent or retry has context:
 
-        attach(task=task_id, type="reasoning", name="failure-analysis", content="""
+        attach(task="{{task_id}}", type="reasoning", name="failure-analysis", content="""
         ## What Was Attempted
-        [Approaches tried]
+        [Concrete steps taken, in order]
 
         ## Why It Failed
-        [Root cause or blocking issue]
+        [Root cause or blocking issue — be specific, not 'it didn't work']
 
         ## Reasoning Gap
-        [What assumption or information was missing]
+        [What assumption was wrong or what information was missing]
 
         ## Recommended Next Steps
-        [What should be tried differently]
+        [Specific actions the next attempt should take differently]
         """)
+
+        Then satisfy the failure reasoning gate:
+        attach(task="{{task_id}}", type="gate/failure-reasoning", content="Failure analysis documented — see failure-analysis attachment")
 
 gates:
   status:completed:
