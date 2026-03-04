@@ -1429,6 +1429,80 @@ mod task_tests {
     }
 
     #[test]
+    fn delete_task_obliterate_cascade_with_file_locks() {
+        let db = setup_db();
+        let states_config = default_states_config();
+        let agent = db
+            .register_worker(
+                Some("test-worker".to_string()),
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
+            .unwrap();
+        let parent = db
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child = db
+            .create_task(
+                None,
+                "Child".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Add file locks referencing both tasks
+        db.lock_file(
+            "src/parent.rs".to_string(),
+            &agent.id,
+            Some(parent.id.clone()),
+            None,
+        )
+        .unwrap();
+        db.lock_file(
+            "src/child.rs".to_string(),
+            &agent.id,
+            Some(child.id.clone()),
+            None,
+        )
+        .unwrap();
+
+        // Obliterate cascade should succeed despite file_locks FK
+        db.delete_task(&parent.id, &agent.id, true, None, true, false)
+            .unwrap();
+
+        assert!(db.get_task(&parent.id).unwrap().is_none());
+        assert!(db.get_task(&child.id).unwrap().is_none());
+    }
+
+    #[test]
     fn get_children_returns_direct_children_in_order() {
         let db = setup_db();
         let states_config = default_states_config();

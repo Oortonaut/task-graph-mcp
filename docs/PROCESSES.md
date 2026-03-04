@@ -42,6 +42,10 @@ After all pre-release checks pass, push to origin and do hands-on testing before
 4. **Subagent coordination** — Spin up multiple agents (coordinator + workers). Verify claiming, prompt delivery, file contention warnings, and cascade cancel work across agents.
 5. **Timestamp display** — Confirm ISO 8601 format across `get`, `list_tasks`, `task_history`, `list_agents`.
 6. **Resource discovery** — Verify MCP resources return correct data (`docs://overlays/list`, `config://current`, `docs://search/{query}`).
+7. **Database error handling** — Test both expected errors and watch for unexpected ones:
+   - **Expected errors**: Verify that invalid operations return clear error messages (e.g., claiming a task already claimed, transitioning to an invalid state, deleting a parent without `cascade=true`). The test suite should cover these with assertions on error messages.
+   - **Unexpected errors**: Watch for FK constraint violations, SQL errors, or `INTERNAL_ERROR` codes during normal workflows. These indicate missing cleanup (e.g., tables with FKs lacking `ON DELETE CASCADE`) or ordering bugs. When found, fix the root cause, add a regression test, and document the scenario.
+   - **Destructive operations**: `obliterate` (hard delete) and `cascade` operations must clean up all referencing tables. Test with tasks that have file_locks, attachments, and state transitions.
 
 ### Publish to crates.io
 

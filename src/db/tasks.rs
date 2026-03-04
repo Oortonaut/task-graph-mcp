@@ -975,26 +975,6 @@ skipping directly to a terminal state is not permitted.",
                         return Err(anyhow!("Task is not owned by this agent"));
                     }
 
-                // Check for incomplete children (via 'contains' dependencies)
-                let incomplete_children: i32 = tx.query_row(
-                    "SELECT COUNT(*) FROM dependencies d
-                     INNER JOIN tasks child ON d.to_task_id = child.id
-                     WHERE d.from_task_id = ?1 AND d.dep_type = 'contains'
-                     AND child.status IN (SELECT value FROM json_each(?2))",
-                    params![
-                        task_id,
-                        serde_json::to_string(&states_config.blocking_states)?
-                    ],
-                    |row| row.get(0),
-                )?;
-
-                if incomplete_children > 0 {
-                    return Err(anyhow!(
-                        "Cannot complete task: {} child task(s) are not complete",
-                        incomplete_children
-                    ));
-                }
-
                 // Clear ownership
                 new_owner = None;
                 new_claimed_at = None;
@@ -1182,9 +1162,9 @@ skipping directly to a terminal state is not permitted.",
             if obliterate {
                 // Hard delete - permanently remove from database
                 if cascade {
-                    // Find all descendants using recursive CTE and delete them
-                    // The CTE finds all tasks reachable via 'contains' dependencies
-                    tx.execute(
+                    // Collect all descendant IDs via recursive CTE, then clean up
+                    // file_locks (FK without ON DELETE CASCADE) and delete tasks
+                    let mut stmt = tx.prepare(
                         "WITH RECURSIVE descendants AS (
                             SELECT ?1 AS id
                             UNION ALL
@@ -1192,9 +1172,29 @@ skipping directly to a terminal state is not permitted.",
                             INNER JOIN descendants d ON dep.from_task_id = d.id
                             WHERE dep.dep_type = 'contains'
                         )
-                        DELETE FROM tasks WHERE id IN (SELECT id FROM descendants)",
-                        params![task_id],
+                        SELECT id FROM descendants",
                     )?;
+                    let ids: Vec<String> = stmt
+                        .query_map(params![task_id], |row| row.get(0))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    drop(stmt);
+
+                    if !ids.is_empty() {
+                        let placeholders: String = ids.iter().enumerate()
+                            .map(|(i, _)| format!("?{}", i + 1))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let sql_locks = format!(
+                            "DELETE FROM file_locks WHERE task_id IN ({})", placeholders
+                        );
+                        let sql_tasks = format!(
+                            "DELETE FROM tasks WHERE id IN ({})", placeholders
+                        );
+                        let params: Vec<&dyn rusqlite::types::ToSql> =
+                            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+                        tx.execute(&sql_locks, params.as_slice())?;
+                        tx.execute(&sql_tasks, params.as_slice())?;
+                    }
                 } else {
                     // Check for children via dependencies
                     let child_count: i32 = tx.query_row(
@@ -1207,6 +1207,8 @@ skipping directly to a terminal state is not permitted.",
                         return Err(anyhow!("Task has children; use cascade=true to delete"));
                     }
 
+                    // Clean up file_locks first (FK without ON DELETE CASCADE)
+                    tx.execute("DELETE FROM file_locks WHERE task_id = ?1", params![task_id])?;
                     tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
                 }
             } else {
