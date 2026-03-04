@@ -54,6 +54,36 @@ impl Default for ConfigPaths {
     }
 }
 
+/// Walk up from CWD looking for an existing directory with the given name.
+/// Returns an absolute path if found, otherwise falls back to a relative path
+/// (creating it in CWD on first use). This lets agents running in
+/// subdirectories (e.g., git worktrees) share the project root's task-graph
+/// directory. Works regardless of source control system.
+fn find_project_dir(dir_name: &str) -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let mut search = cwd.as_path();
+    loop {
+        let candidate = search.join(dir_name);
+        if candidate.is_dir() {
+            if candidate != cwd.join(dir_name) {
+                tracing::info!(
+                    "Found '{}' at {} (resolved from {})",
+                    dir_name,
+                    candidate.display(),
+                    cwd.display()
+                );
+            }
+            return Some(candidate);
+        }
+        match search.parent() {
+            Some(parent) => search = parent,
+            None => break,
+        }
+    }
+    // Not found anywhere — fall back to relative (will be created in CWD)
+    Some(PathBuf::from(dir_name))
+}
+
 impl ConfigPaths {
     /// Discover configuration paths from environment and defaults.
     pub fn discover() -> Self {
@@ -63,20 +93,20 @@ impl ConfigPaths {
             .map(PathBuf::from)
             .or_else(|| dirs::home_dir().map(|h| h.join(".task-graph")));
 
-        // Project dir: TASK_GRAPH_PROJECT_DIR or $CWD/task-graph
+        // Project dir: TASK_GRAPH_PROJECT_DIR or walk up from CWD to find task-graph/
         let project_dir = std::env::var("TASK_GRAPH_PROJECT_DIR")
             .ok()
             .map(PathBuf::from)
-            .or_else(|| Some(PathBuf::from("task-graph")));
+            .or_else(|| find_project_dir("task-graph"));
 
-        // Deprecated project dir: $CWD/.task-graph
-        let project_dir_deprecated = Some(PathBuf::from(".task-graph"));
+        // Deprecated project dir: walk up for .task-graph/
+        let project_dir_deprecated = find_project_dir(".task-graph");
 
-        // Install dir: TASK_GRAPH_INSTALL_DIR or $CWD/config (for built-in workflows)
+        // Install dir: TASK_GRAPH_INSTALL_DIR or walk up for config/
         let install_dir = std::env::var("TASK_GRAPH_INSTALL_DIR")
             .ok()
             .map(PathBuf::from)
-            .or_else(|| Some(PathBuf::from("config")));
+            .or_else(|| find_project_dir("config"));
 
         Self {
             defaults_dir: None, // Defaults are embedded, not on disk
@@ -232,6 +262,17 @@ impl ConfigLoader {
         // Tier 4: Environment variable overrides
         Self::apply_env_overrides(&mut config);
 
+        // Resolve relative server paths against the discovered project root.
+        // This ensures agents running in subdirectories (e.g., git worktrees)
+        // share the project's database instead of creating a new one.
+        if let Some(ref project_dir) = paths.effective_project_dir() {
+            if project_dir.is_absolute() {
+                if let Some(project_root) = project_dir.parent() {
+                    Self::resolve_server_paths(&mut config, project_root);
+                }
+            }
+        }
+
         Ok(Self {
             paths,
             config,
@@ -241,6 +282,20 @@ impl ConfigLoader {
     }
 
     /// Apply environment variable overrides to config.
+    /// If server paths (db_path, media_dir, etc.) are relative, resolve them
+    /// against the given project root so agents in subdirectories use the same DB.
+    fn resolve_server_paths(config: &mut Config, project_root: &Path) {
+        let resolve = |p: &mut PathBuf| {
+            if p.is_relative() {
+                *p = project_root.join(&*p);
+            }
+        };
+        resolve(&mut config.server.db_path);
+        resolve(&mut config.server.media_dir);
+        resolve(&mut config.server.log_dir);
+        resolve(&mut config.server.skills_dir);
+    }
+
     fn apply_env_overrides(config: &mut Config) {
         if let Ok(db_path) = std::env::var("TASK_GRAPH_DB_PATH") {
             config.server.db_path = PathBuf::from(db_path);
