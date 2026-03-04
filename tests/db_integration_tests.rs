@@ -7071,11 +7071,11 @@ mod auto_rollup_tests {
     }
 
     #[test]
-    fn rollup_disabled_by_default() {
+    fn rollup_enabled_by_default() {
         let db = setup_db();
         let states_config = StatesConfig::default();
         let deps_config = DependenciesConfig::default();
-        let auto_advance = AutoAdvanceConfig::default(); // rollup disabled
+        let auto_advance = AutoAdvanceConfig::default(); // rollup enabled by default
 
         let agent = db
             .register_worker(
@@ -7149,7 +7149,93 @@ mod auto_rollup_tests {
             )
             .unwrap();
 
-        // Should NOT auto-complete since rollup is disabled
+        // Should auto-complete since rollup is enabled by default
+        assert_eq!(auto_completed.len(), 1);
+        let parent_check = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_check.status, "completed");
+    }
+
+    #[test]
+    fn rollup_can_be_explicitly_disabled() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = AutoAdvanceConfig {
+            auto_rollup: false,
+            ..Default::default()
+        };
+
+        let agent = db
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
+            .unwrap();
+
+        let parent = db
+            .create_task(
+                None,
+                "Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child = db
+            .create_task(
+                None,
+                "Child".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        db.claim_task(&child.id, &agent.id, &states_config).unwrap();
+        let (_, _, _, auto_completed) = db
+            .update_task_unified(
+                &child.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
         assert!(auto_completed.is_empty());
         let parent_check = db.get_task(&parent.id).unwrap().unwrap();
         assert_eq!(parent_check.status, "pending");

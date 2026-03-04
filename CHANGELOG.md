@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Cascading cancellation**: `update(status="cancelled", cascade=true)` cancels all non-terminal descendants
-- **Parent auto-rollup**: Parent tasks auto-complete when all children reach terminal states
+- **Parent auto-rollup**: Parent tasks auto-complete when all children reach terminal states (enabled by default)
 - **`bulk_update` tool**: Batch status transitions across multiple tasks in a single call
 - **`files` parameter on `claim`**: Auto-mark files being worked on at claim time
 - **`prompts` parameter on `update`**: Coordinator prompt filtering (`all`/`none`/`caller`) to control which prompts are returned

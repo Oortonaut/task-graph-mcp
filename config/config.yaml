@@ -91,7 +91,7 @@ auto_advance:
   target_state: null
   # Auto-rollup: when all children of a parent reach terminal states,
   # the parent auto-transitions through working -> completed
-  auto_rollup: false
+  auto_rollup: true
 
 # Agent feedback configuration
 feedback:

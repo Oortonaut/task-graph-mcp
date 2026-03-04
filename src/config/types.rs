@@ -177,7 +177,7 @@ fn default_retry_multiplier() -> f64 {
 }
 
 /// Auto-advance configuration for automatically transitioning tasks when dependencies are satisfied.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoAdvanceConfig {
     /// Enable auto-advance when dependencies are satisfied (default: false).
     #[serde(default)]
@@ -189,9 +189,19 @@ pub struct AutoAdvanceConfig {
     pub target_state: Option<String>,
 
     /// Enable auto-rollup: when all children of a parent reach terminal states,
-    /// the parent automatically transitions through working -> completed (default: false).
-    #[serde(default)]
+    /// the parent automatically transitions through working -> completed (default: true).
+    #[serde(default = "default_true")]
     pub auto_rollup: bool,
+}
+
+impl Default for AutoAdvanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            target_state: None,
+            auto_rollup: true,
+        }
+    }
 }
 
 /// Agent feedback configuration.
