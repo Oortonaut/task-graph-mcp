@@ -548,6 +548,93 @@ impl Database {
         })
     }
 
+    /// Find file marks held by other active workers that may conflict with a task being claimed.
+    ///
+    /// Since file_locks uses file_path as PK (only one mark per file), this method finds
+    /// files currently marked by workers OTHER than the claiming worker where those workers
+    /// have active tasks (status in working/assigned). This gives the claiming worker
+    /// awareness of which files are currently being worked on by others.
+    ///
+    /// Specifically checks for marks held by workers on sibling tasks (tasks sharing
+    /// the same parent as the claimed task), which represents the most likely source
+    /// of file contention in practice.
+    ///
+    /// Returns a list of (file_path, other_task_id, other_worker_id) tuples.
+    /// Excludes `lock:` prefixed entries (exclusive locks, not file marks).
+    pub fn find_file_contention(
+        &self,
+        task_id: &str,
+        worker_id: &str,
+    ) -> Result<Vec<(String, Option<String>, String)>> {
+        self.with_conn(|conn| {
+            // Find all file marks held by other workers who are currently working on
+            // sibling tasks (tasks that share a parent with the claimed task).
+            // If the claimed task has no parent, find marks from ALL other active workers
+            // (broader check when no parent context is available).
+            let parent_task_id: Option<String> = conn
+                .query_row(
+                    "SELECT from_task_id FROM dependencies
+                     WHERE to_task_id = ?1 AND dep_type = 'contains'
+                     LIMIT 1",
+                    params![task_id],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            let results = if let Some(parent_id) = parent_task_id {
+                // Has a parent: check siblings' file marks only (more targeted)
+                let mut stmt = conn.prepare(
+                    "SELECT fl.file_path, fl.task_id, fl.worker_id
+                     FROM file_locks fl
+                     WHERE fl.worker_id != ?1
+                       AND fl.file_path NOT LIKE 'lock:%'
+                       AND fl.worker_id IN (
+                           SELECT t.worker_id FROM tasks t
+                           INNER JOIN dependencies d ON d.to_task_id = t.id
+                           WHERE d.from_task_id = ?2 AND d.dep_type = 'contains'
+                             AND t.status IN ('working', 'assigned')
+                             AND t.worker_id IS NOT NULL
+                       )
+                     ORDER BY fl.file_path",
+                )?;
+                stmt.query_map(params![worker_id, &parent_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            } else {
+                // No parent: check ALL other active workers' file marks
+                let mut stmt = conn.prepare(
+                    "SELECT fl.file_path, fl.task_id, fl.worker_id
+                     FROM file_locks fl
+                     WHERE fl.worker_id != ?1
+                       AND fl.file_path NOT LIKE 'lock:%'
+                       AND EXISTS (
+                           SELECT 1 FROM tasks t
+                           WHERE t.worker_id = fl.worker_id
+                             AND t.status IN ('working', 'assigned')
+                       )
+                     ORDER BY fl.file_path",
+                )?;
+                stmt.query_map(params![worker_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            };
+
+            Ok(results)
+        })
+    }
+
     /// Release all locks held by a worker.
     pub fn release_worker_locks(&self, worker_id: &str) -> Result<i32> {
         let now = now_ms();
