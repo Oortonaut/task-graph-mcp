@@ -208,12 +208,12 @@ pub fn claim(
 
     // Include the pre-claim status so the worker knows the task's prior state
     // (e.g., "assigned" indicates it was push-assigned by a coordinator)
-    if let Some((pre_status, pre_phase)) = &pre_claim_status {
-        if let Value::Object(ref mut map) = response {
-            map.insert("pre_claim_status".to_string(), json!(pre_status));
-            if let Some(phase) = pre_phase {
-                map.insert("pre_claim_phase".to_string(), json!(phase));
-            }
+    if let Some((pre_status, pre_phase)) = &pre_claim_status
+        && let Value::Object(ref mut map) = response
+    {
+        map.insert("pre_claim_status".to_string(), json!(pre_status));
+        if let Some(phase) = pre_phase {
+            map.insert("pre_claim_phase".to_string(), json!(phase));
         }
     }
 
@@ -268,20 +268,20 @@ pub fn claim(
         }
 
         // Include file contention warnings if any overlapping marks found
-        if let Ok(ref contentions) = file_contention {
-            if !contentions.is_empty() {
-                let contention_entries: Vec<Value> = contentions
-                    .iter()
-                    .map(|(file_path, other_task_id, other_worker_id)| {
-                        json!({
-                            "file": file_path,
-                            "other_task": other_task_id,
-                            "other_worker": other_worker_id
-                        })
+        if let Ok(ref contentions) = file_contention
+            && !contentions.is_empty()
+        {
+            let contention_entries: Vec<Value> = contentions
+                .iter()
+                .map(|(file_path, other_task_id, other_worker_id)| {
+                    json!({
+                        "file": file_path,
+                        "other_task": other_task_id,
+                        "other_worker": other_worker_id
                     })
-                    .collect();
-                map.insert("file_contention".to_string(), json!(contention_entries));
-            }
+                })
+                .collect();
+            map.insert("file_contention".to_string(), json!(contention_entries));
         }
     }
 

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-04
+
+### Added
+
+- **Cascading cancellation**: `update(status="cancelled", cascade=true)` cancels all non-terminal descendants
+- **Parent auto-rollup**: Parent tasks auto-complete when all children reach terminal states
+- **`bulk_update` tool**: Batch status transitions across multiple tasks in a single call
+- **`files` parameter on `claim`**: Auto-mark files being worked on at claim time
+- **`prompts` parameter on `update`**: Coordinator prompt filtering (`all`/`none`/`caller`) to control which prompts are returned
+- **File contention detection**: `claim` warns when marked files overlap with other active tasks
+- **Source attribution on prompts**: `get_prompts` and transition prompts now return `{"text": "...", "source": "workflow:enter~working"}` with provenance
+- **Prompt delivery for pre-assigned tasks**: Workers receive full transition prompts when claiming coordinator-assigned tasks
+- **Overlay resource discovery**: `docs://overlays/list` and `docs://overlays/{name}` resources for exploring available overlays
+- **Workflow/overlay metadata in feedback**: `give_feedback` records workflow name and active overlays from worker registration
+- **Uptree project directory discovery**: Agents running in subdirectories or git worktrees find the parent project automatically
+- **Git worktree overlay advisories**: 6 new advisories (worktree-setup, patch-generate, patch-apply, patch-conflict, worktree-rebase, worktree-cleanup, layered-worktree)
+- **Commit gate** (`gate/commit`) in git overlay
+- **28 new integration tests** covering prompt delivery, file contention, and update prompts parameter
+
+### Changed
+
+- All timestamp display converted to ISO 8601 (RFC 3339) format
+- Overlay prompts rewritten for actionability (git, git-worktree, reasoning overlays)
+- Git overlay enter/exit prompts now include `mark_file` and `thinking()` guidance
+- Unsatisfied dependency blockers filtered from `list_tasks` display
+- Worker role prompts in all workflow topologies now include "review prompts after claiming" guidance
+
+### Fixed
+
+- Multi-claim accounting: enforce `max_claims` limits correctly, fix counting across timed states
+- `register_worker` test calls updated for `max_claims` parameter
+
 ## [0.4.0] - 2026-02-26
 
 ### Added

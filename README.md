@@ -391,6 +391,8 @@ Environment variables:
 | `docs://skills/{name}` | Get specific skill content |
 | `docs://workflows/list` | List available workflows |
 | `docs://workflows/{name}` | Get workflow details |
+| `docs://overlays/list` | List available overlays |
+| `docs://overlays/{name}` | Get overlay details |
 | `docs://{path}` | Specific documentation file content |
 
 ## Task Tree Structure

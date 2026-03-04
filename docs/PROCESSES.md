@@ -32,6 +32,17 @@ Run all quality gates before any release:
    cargo build --release
    ```
 
+### User Testing
+
+After all pre-release checks pass, push to origin and do hands-on testing before tagging. Do not proceed to publish until the user signs off.
+
+1. **Core workflow** — Connect to the MCP server, run through create → claim → update → complete lifecycle.
+2. **New features** — Exercise each feature added in this release (check CHANGELOG "Added" section).
+3. **Subdirectory discovery** — Run the server from a git worktree or project subdirectory to confirm uptree project discovery finds the correct config and database.
+4. **Subagent coordination** — Spin up multiple agents (coordinator + workers). Verify claiming, prompt delivery, file contention warnings, and cascade cancel work across agents.
+5. **Timestamp display** — Confirm ISO 8601 format across `get`, `list_tasks`, `task_history`, `list_agents`.
+6. **Resource discovery** — Verify MCP resources return correct data (`docs://overlays/list`, `config://current`, `docs://search/{query}`).
+
 ### Publish to crates.io
 
 ```bash

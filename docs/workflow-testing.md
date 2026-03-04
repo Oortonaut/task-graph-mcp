@@ -32,9 +32,9 @@ Overlays augment any workflow non-destructively. They add prompts, gates, and ad
 
 ## Known Issues from Hierarchical Test
 
-### Prompt delivery gap in coordinator-assigned workflows
+### Prompt delivery gap in coordinator-assigned workflows — FIXED
 
-**Status:** Fix in progress (Round 2 tasks `prompt-delivery-assigned` + `update-prompts-param`)
+**Status:** All rounds complete.
 
 In hierarchical/push workflows, the coordinator calls `update(assignee="worker-id")` and
 receives the transition prompts in **their** response. The assigned worker never sees
@@ -55,10 +55,12 @@ overlay-prescribed behaviors unless they call `get_prompts` independently.
 - Active overlays surfaced in `config://current`
 - Overlays included in `docs://workflows/list` response
 
-**Fixes in progress (Round 2):**
-- Worker-side: ensure `claim()` delivers full prompts for pre-assigned tasks, add
-  "review prompts after claiming" to workflow role prompts
-- Coordinator-side (Round 3): add `prompts` parameter to `update` (none/all/caller)
+**Fixes applied (Round 2):**
+- `claim()` now delivers full transition prompts for pre-assigned tasks (assigned→working)
+- "Review prompts after claiming" guidance added to all workflow role prompts
+
+**Fixes applied (Round 3):**
+- `prompts` parameter on `update` tool (`all`/`none`/`caller`) for coordinator prompt filtering
 
 ### Overlay discovery — FIXED
 
@@ -69,11 +71,11 @@ Previously agents could not discover what overlays do or that they're active. Al
 - `config://current` shows `active_overlays` when non-empty
 - `get_prompts` returns source attribution per prompt
 
-### File contention — PARTIALLY FIXED
+### File contention — FIXED
 
-- `claim(files=[...])` now auto-marks files on claim (Round 1)
-- File contention detection on claim is in progress (Round 2)
-- Still needed: coordinator-facing contention report, integration into workflow prompts
+- `claim(files=[...])` auto-marks files on claim (Round 1)
+- File contention detection on claim warns when files overlap with other active tasks (Round 2)
+- Still potential: coordinator-facing contention report, deeper integration into workflow prompts
 
 ### Feedback tool improvements — FIXED
 
@@ -151,17 +153,17 @@ A good workflow benchmark needs:
 
 ## Test Plan
 
-### Phase 1: Fix overlay delivery ← IN PROGRESS
+### Phase 1: Fix overlay delivery — DONE
 Fix the prompt delivery gap so overlays actually affect behavior.
 
 **Round 1 (DONE):** overlay-resources, overlays-in-workflow-list, active-overlays-config,
 prompt-attribution, claim-files-param, feedback-workflow-metadata, commit-gate,
 layered-worktree-advisory, mark-file-prompts
 
-**Round 2 (IN PROGRESS):** prompt-delivery-assigned, file-contention-detection,
+**Round 2 (DONE):** prompt-delivery-assigned, file-contention-detection,
 audit-overlay-prompts
 
-**Round 3 (BLOCKED):** update-prompts-param (blocked by prompt-delivery-assigned)
+**Round 3 (DONE):** update-prompts-param
 
 ### Phase 2: Choose benchmark
 Select one of the approaches above and build the task graph template.

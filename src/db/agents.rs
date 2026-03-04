@@ -108,6 +108,7 @@ impl Database {
     /// (useful for stuck worker recovery).
     /// If `workflow` is provided, the worker will use that named workflow (e.g., "swarm" for workflow-swarm.yaml).
     /// If `overlays` is provided, those overlays will be applied on top of the workflow.
+    #[allow(clippy::too_many_arguments)]
     pub fn register_worker(
         &self,
         worker_id: Option<String>,

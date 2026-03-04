@@ -251,12 +251,11 @@ pub fn connect(opts: ConnectOptions<'_>, args: Value) -> Result<Value> {
     let _ = db.cleanup_stale_workers(300, &disconnect_status);
 
     // If force-reconnecting, expire the old worker first to release its claimed tasks
-    if force {
-        if let Some(ref wid) = worker_id {
-            if db.get_worker(wid)?.is_some() {
-                let _ = db.expire_worker(wid, &disconnect_status);
-            }
-        }
+    if force
+        && let Some(ref wid) = worker_id
+        && db.get_worker(wid)?.is_some()
+    {
+        let _ = db.expire_worker(wid, &disconnect_status);
     }
 
     let overlays = get_string_array(&args, "overlays").unwrap_or_default();

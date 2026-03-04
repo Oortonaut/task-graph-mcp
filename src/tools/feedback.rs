@@ -167,16 +167,16 @@ pub fn give_feedback(
 
     // Look up workflow/overlay metadata from the worker record
     let mut has_workflow_meta = false;
-    if let (Some(agent), Some(db)) = (&agent_id, db) {
-        if let Ok(Some(worker)) = db.get_worker(agent) {
-            if let Some(ref wf) = worker.workflow {
-                writeln!(file, "- **Workflow:** {}", wf)?;
-                has_workflow_meta = true;
-            }
-            if !worker.overlays.is_empty() {
-                writeln!(file, "- **Overlays:** {}", worker.overlays.join(", "))?;
-                has_workflow_meta = true;
-            }
+    if let (Some(agent), Some(db)) = (&agent_id, db)
+        && let Ok(Some(worker)) = db.get_worker(agent)
+    {
+        if let Some(ref wf) = worker.workflow {
+            writeln!(file, "- **Workflow:** {}", wf)?;
+            has_workflow_meta = true;
+        }
+        if !worker.overlays.is_empty() {
+            writeln!(file, "- **Overlays:** {}", worker.overlays.join(", "))?;
+            has_workflow_meta = true;
         }
     }
 

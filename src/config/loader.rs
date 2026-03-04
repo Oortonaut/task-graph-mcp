@@ -265,12 +265,11 @@ impl ConfigLoader {
         // Resolve relative server paths against the discovered project root.
         // This ensures agents running in subdirectories (e.g., git worktrees)
         // share the project's database instead of creating a new one.
-        if let Some(ref project_dir) = paths.effective_project_dir() {
-            if project_dir.is_absolute() {
-                if let Some(project_root) = project_dir.parent() {
-                    Self::resolve_server_paths(&mut config, project_root);
-                }
-            }
+        if let Some(project_dir) = paths.effective_project_dir()
+            && project_dir.is_absolute()
+            && let Some(project_root) = project_dir.parent()
+        {
+            Self::resolve_server_paths(&mut config, project_root);
         }
 
         Ok(Self {
