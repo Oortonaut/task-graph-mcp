@@ -266,6 +266,11 @@ pub fn get_tools(prompts: &Prompts, states_config: &StatesConfig) -> Vec<Tool> {
                     "type": "boolean",
                     "description": "When true and status is being set to cancelled, also cancel all non-terminal descendants (default: false)"
                 },
+                "prompts": {
+                    "type": "string",
+                    "enum": ["all", "none", "caller"],
+                    "description": "Control which transition prompts are returned. 'all' (default): all prompts. 'none': suppress all prompts. 'caller': only prompts relevant to the caller, suppressing assignee-targeted prompts when using push coordination."
+                },
                 "attachments": {
                     "type": "array",
                     "description": "List of attachments to add to the task (e.g., commit hashes, changelists, notes)",
@@ -897,6 +902,7 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
     let reason = get_string(&args, "reason");
     let force = get_bool(&args, "force").unwrap_or(false);
     let cascade = get_bool(&args, "cascade").unwrap_or(false);
+    let prompts_mode = get_string(&args, "prompts").unwrap_or_else(|| "all".to_string());
 
     // Process attachments first (before the update)
     let mut attachment_results: Vec<Value> = Vec::new();
@@ -1588,31 +1594,44 @@ pub fn update(opts: UpdateOptions<'_>, args: Value) -> Result<Value> {
         if !gate_warnings.is_empty() {
             map.insert("gate_warnings".to_string(), json!(gate_warnings));
         }
-        // Add role-specific prompt based on the new status
-        // Uses pre-fetched worker info to avoid redundant DB lookups
-        if let Some(ref role_name) = worker_role_for_prompts {
-            // Map status transitions to role prompt keys
-            let prompt_key = match task.status.as_str() {
-                "completed" => Some("completing"),
-                _ => None,
-            };
-            if let Some(key) = prompt_key
-                && let Some(prompt) = workflows.get_role_prompt(role_name, key)
-            {
-                transition_prompt_list.push(AttributedPrompt {
-                    text: prompt.to_string(),
-                    source: format!("role:{}", role_name),
-                });
-            }
-        }
+        // Apply prompts filter based on the `prompts` parameter.
+        // "none" — suppress all prompts.
+        // "caller" — suppress prompts when an assignee is set (push coordination),
+        //            since those prompts target the assignee, not the caller.
+        // "all" (default) — include all prompts.
+        let include_prompts = match prompts_mode.as_str() {
+            "none" => false,
+            "caller" => assignee.is_none(),
+            _ => true, // "all" or any unrecognized value
+        };
 
-        // Include transition prompts if any (with source attribution)
-        if !transition_prompt_list.is_empty() {
-            let prompt_objects: Vec<Value> = transition_prompt_list
-                .iter()
-                .map(|p| json!({"text": p.text, "source": p.source}))
-                .collect();
-            map.insert("prompts".to_string(), json!(prompt_objects));
+        if include_prompts {
+            // Add role-specific prompt based on the new status
+            // Uses pre-fetched worker info to avoid redundant DB lookups
+            if let Some(ref role_name) = worker_role_for_prompts {
+                // Map status transitions to role prompt keys
+                let prompt_key = match task.status.as_str() {
+                    "completed" => Some("completing"),
+                    _ => None,
+                };
+                if let Some(key) = prompt_key
+                    && let Some(prompt) = workflows.get_role_prompt(role_name, key)
+                {
+                    transition_prompt_list.push(AttributedPrompt {
+                        text: prompt.to_string(),
+                        source: format!("role:{}", role_name),
+                    });
+                }
+            }
+
+            // Include transition prompts if any (with source attribution)
+            if !transition_prompt_list.is_empty() {
+                let prompt_objects: Vec<Value> = transition_prompt_list
+                    .iter()
+                    .map(|p| json!({"text": p.text, "source": p.source}))
+                    .collect();
+                map.insert("prompts".to_string(), json!(prompt_objects));
+            }
         }
 
         // Include relevant advisory hints based on task tags, phase, and worker role

@@ -8984,3 +8984,236 @@ mod file_contention_tests {
         );
     }
 }
+
+mod update_prompts_param_tests {
+    use super::*;
+    use serde_json::json;
+    use task_graph_mcp::tools::tasks;
+
+    /// Helper: set up a DB with a registered worker and a task in "pending" status.
+    /// Returns (db, worker_id, task_id).
+    fn setup_worker_and_task() -> (Database, String, String) {
+        let db = setup_db();
+        let ids_config = default_ids_config();
+        let states_config = default_states_config();
+
+        let worker = db
+            .register_worker(None, vec![], false, &ids_config, None, vec![], None)
+            .expect("register worker");
+        let task = db
+            .create_task(
+                None,
+                "Test task".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &ids_config,
+            )
+            .unwrap();
+
+        (db, worker.id, task.id)
+    }
+
+    #[test]
+    fn update_prompts_all_returns_prompts() {
+        let (db, worker_id, task_id) = setup_worker_and_task();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        // Transition pending -> working should trigger "enter~working" prompt
+        let result = tasks::update(
+            tasks::UpdateOptions {
+                db: &db,
+                config: &config,
+                workflows: &workflows,
+            },
+            json!({
+                "worker_id": worker_id,
+                "task": task_id,
+                "status": "working",
+                "prompts": "all",
+            }),
+        )
+        .expect("update should succeed");
+
+        // With prompts="all", the response should contain prompts
+        assert!(
+            result.get("prompts").is_some(),
+            "prompts='all' should include prompts in response"
+        );
+        let prompts = result["prompts"].as_array().unwrap();
+        assert!(
+            !prompts.is_empty(),
+            "prompts='all' should return at least one prompt for pending->working"
+        );
+    }
+
+    #[test]
+    fn update_prompts_default_returns_prompts() {
+        let (db, worker_id, task_id) = setup_worker_and_task();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        // Omitting prompts param should default to "all"
+        let result = tasks::update(
+            tasks::UpdateOptions {
+                db: &db,
+                config: &config,
+                workflows: &workflows,
+            },
+            json!({
+                "worker_id": worker_id,
+                "task": task_id,
+                "status": "working",
+            }),
+        )
+        .expect("update should succeed");
+
+        // Default (no prompts param) should behave like "all"
+        assert!(
+            result.get("prompts").is_some(),
+            "default prompts mode should include prompts in response"
+        );
+    }
+
+    #[test]
+    fn update_prompts_none_suppresses_all_prompts() {
+        let (db, worker_id, task_id) = setup_worker_and_task();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        // Transition pending -> working with prompts="none"
+        let result = tasks::update(
+            tasks::UpdateOptions {
+                db: &db,
+                config: &config,
+                workflows: &workflows,
+            },
+            json!({
+                "worker_id": worker_id,
+                "task": task_id,
+                "status": "working",
+                "prompts": "none",
+            }),
+        )
+        .expect("update should succeed");
+
+        // With prompts="none", there should be NO prompts key in the response
+        assert!(
+            result.get("prompts").is_none(),
+            "prompts='none' should suppress all prompts (got: {:?})",
+            result.get("prompts")
+        );
+        // Verify the update still succeeded
+        assert_eq!(result["status"], "working");
+    }
+
+    #[test]
+    fn update_prompts_caller_without_assignee_returns_prompts() {
+        let (db, worker_id, task_id) = setup_worker_and_task();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        // Transition pending -> working with prompts="caller" but no assignee
+        // The caller IS the worker, so prompts should be included
+        let result = tasks::update(
+            tasks::UpdateOptions {
+                db: &db,
+                config: &config,
+                workflows: &workflows,
+            },
+            json!({
+                "worker_id": worker_id,
+                "task": task_id,
+                "status": "working",
+                "prompts": "caller",
+            }),
+        )
+        .expect("update should succeed");
+
+        // With prompts="caller" and no assignee, prompts should be returned
+        // because the caller is doing the work themselves
+        assert!(
+            result.get("prompts").is_some(),
+            "prompts='caller' without assignee should include prompts"
+        );
+    }
+
+    #[test]
+    fn update_prompts_caller_with_assignee_suppresses_prompts() {
+        let (db, worker_id, task_id) = setup_worker_and_task();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+        let ids_config = default_ids_config();
+
+        // Register a second worker to be the assignee
+        let assignee = db
+            .register_worker(None, vec![], false, &ids_config, None, vec![], None)
+            .expect("register assignee");
+
+        // Use prompts="caller" with an assignee (push coordination)
+        // The prompts target the assignee, not the caller
+        let result = tasks::update(
+            tasks::UpdateOptions {
+                db: &db,
+                config: &config,
+                workflows: &workflows,
+            },
+            json!({
+                "worker_id": worker_id,
+                "task": task_id,
+                "assignee": assignee.id,
+                "prompts": "caller",
+            }),
+        )
+        .expect("update should succeed");
+
+        // With prompts="caller" and an assignee, prompts should be suppressed
+        // because the transition prompts target the assignee, not the caller
+        assert!(
+            result.get("prompts").is_none(),
+            "prompts='caller' with assignee should suppress prompts (got: {:?})",
+            result.get("prompts")
+        );
+        // The task should still be assigned correctly
+        assert_eq!(result["status"], "assigned");
+    }
+
+    #[test]
+    fn update_prompts_none_does_not_affect_other_response_fields() {
+        let (db, worker_id, task_id) = setup_worker_and_task();
+        let config = default_app_config();
+        let workflows = WorkflowsConfig::default();
+
+        // Transition with prompts="none" should still return task data
+        let result = tasks::update(
+            tasks::UpdateOptions {
+                db: &db,
+                config: &config,
+                workflows: &workflows,
+            },
+            json!({
+                "worker_id": worker_id,
+                "task": task_id,
+                "status": "working",
+                "title": "Updated title",
+                "prompts": "none",
+            }),
+        )
+        .expect("update should succeed");
+
+        // Task data should still be present
+        assert_eq!(result["status"], "working");
+        assert_eq!(result["title"], "Updated title");
+        assert_eq!(result["id"], task_id);
+        // But no prompts
+        assert!(result.get("prompts").is_none());
+    }
+}
