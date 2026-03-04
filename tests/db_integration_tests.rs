@@ -7589,6 +7589,166 @@ mod auto_rollup_tests {
         let parent_final = db.get_task(&parent.id).unwrap().unwrap();
         assert_eq!(parent_final.status, "completed");
     }
+
+    /// Verifies the full auto-rollup lifecycle with auto_rollup enabled:
+    /// parent (pending) with two children, both children completed sequentially.
+    /// The parent should auto-transition pending→working→completed when the last
+    /// child completes. This covers the path that was missed in v0.5.0 user testing
+    /// where testers used auto_rollup=false (the default) and concluded the feature
+    /// was broken.
+    #[test]
+    fn pending_parent_auto_transitions_through_working_to_completed() {
+        let db = setup_db();
+        let states_config = StatesConfig::default();
+        let deps_config = DependenciesConfig::default();
+        let auto_advance = rollup_config(); // auto_rollup: true
+
+        let agent = db
+            .register_worker(
+                None,
+                vec![],
+                false,
+                &default_ids_config(),
+                None,
+                vec![],
+                Some(0),
+            )
+            .unwrap();
+
+        // Create parent with two children (mimicking create_tree)
+        let parent = db
+            .create_task(
+                None,
+                "Rollup Parent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child1 = db
+            .create_task(
+                None,
+                "Rollup Child 1".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+        let child2 = db
+            .create_task(
+                None,
+                "Rollup Child 2".to_string(),
+                None,
+                Some(parent.id.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &states_config,
+                &default_ids_config(),
+            )
+            .unwrap();
+
+        // Parent starts as pending (never claimed by any worker)
+        assert_eq!(db.get_task(&parent.id).unwrap().unwrap().status, "pending");
+
+        // Complete child1
+        db.claim_task(&child1.id, &agent.id, &states_config)
+            .unwrap();
+        let (_, _, _, auto_completed_1) = db
+            .update_task_unified(
+                &child1.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // After first child: parent should still be pending
+        assert!(auto_completed_1.is_empty());
+        assert_eq!(db.get_task(&parent.id).unwrap().unwrap().status, "pending");
+
+        // Complete child2
+        db.claim_task(&child2.id, &agent.id, &states_config)
+            .unwrap();
+        let (_, _, _, auto_completed_2) = db
+            .update_task_unified(
+                &child2.id,
+                &agent.id,
+                None,
+                None,
+                None,
+                Some("completed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                &states_config,
+                &deps_config,
+                &auto_advance,
+            )
+            .unwrap();
+
+        // Parent should have auto-completed via pending→working→completed
+        assert_eq!(auto_completed_2.len(), 1);
+        assert_eq!(auto_completed_2[0].0, parent.id);
+
+        let parent_final = db.get_task(&parent.id).unwrap().unwrap();
+        assert_eq!(parent_final.status, "completed");
+        assert!(parent_final.completed_at.is_some());
+        // started_at should also be set (from the working transition)
+        assert!(parent_final.started_at.is_some());
+
+        // Verify the history shows both transitions
+        let history = db.get_task_state_history(&parent.id).unwrap();
+        let statuses: Vec<String> = history.iter().filter_map(|h| h.status.clone()).collect();
+        assert!(
+            statuses.iter().any(|s| s == "working"),
+            "should have working transition"
+        );
+        assert!(
+            statuses.iter().any(|s| s == "completed"),
+            "should have completed transition"
+        );
+    }
 }
 
 mod attachment_tests {

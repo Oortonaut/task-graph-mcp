@@ -61,26 +61,44 @@ impl Default for ConfigPaths {
 /// directory. Works regardless of source control system.
 fn find_project_dir(dir_name: &str) -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    let mut search = cwd.as_path();
+    find_project_dir_from(dir_name, &cwd, None)
+}
+
+/// Walk up from `start_dir` looking for a directory named `dir_name`.
+/// Searches at most `max_depth` ancestor levels (None = unlimited).
+/// Returns the first match found, or falls back to a relative `dir_name` path.
+fn find_project_dir_from(
+    dir_name: &str,
+    start_dir: &Path,
+    max_depth: Option<usize>,
+) -> Option<PathBuf> {
+    let mut search = start_dir;
+    let mut depth = 0;
     loop {
+        if max_depth.is_some_and(|max| depth > max) {
+            break;
+        }
         let candidate = search.join(dir_name);
         if candidate.is_dir() {
-            if candidate != cwd.join(dir_name) {
+            if candidate != start_dir.join(dir_name) {
                 tracing::info!(
                     "Found '{}' at {} (resolved from {})",
                     dir_name,
                     candidate.display(),
-                    cwd.display()
+                    start_dir.display()
                 );
             }
             return Some(candidate);
         }
         match search.parent() {
-            Some(parent) => search = parent,
+            Some(parent) => {
+                search = parent;
+                depth += 1;
+            }
             None => break,
         }
     }
-    // Not found anywhere — fall back to relative (will be created in CWD)
+    // Not found anywhere — fall back to relative (will be created in start_dir)
     Some(PathBuf::from(dir_name))
 }
 
@@ -835,5 +853,90 @@ server:
         assert_eq!(config.server.claim_limit, 20);
         // stale_timeout_seconds should be from project
         assert_eq!(config.server.stale_timeout_seconds, 600);
+    }
+
+    /// Verifies that `find_project_dir_from` walks up from a subdirectory to find
+    /// a `task-graph/` directory in an ancestor. This is the core mechanism that
+    /// enables agents running in git worktrees or project subdirectories to share
+    /// the parent project's database and configuration.
+    #[test]
+    fn find_project_dir_from_subdirectory() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create project structure:
+        //   root/
+        //     task-graph/         ← the project config dir
+        //     src/
+        //       deep/
+        //         nested/        ← agent runs from here
+        let project_dir = root.join("task-graph");
+        let nested_dir = root.join("src").join("deep").join("nested");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::create_dir_all(&nested_dir).unwrap();
+
+        // Starting from nested subdir (3 levels deep), should find task-graph/ in root
+        let found = find_project_dir_from("task-graph", &nested_dir, Some(5));
+        assert_eq!(found, Some(project_dir));
+    }
+
+    /// Verifies that `find_project_dir_from` finds the nearest ancestor's directory,
+    /// not a more distant one. This matters for nested project structures.
+    #[test]
+    fn find_project_dir_from_finds_nearest_ancestor() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create nested project structure:
+        //   root/
+        //     task-graph/              ← outer (should NOT be found)
+        //     subproject/
+        //       task-graph/            ← inner (should be found)
+        //       src/                   ← agent runs from here
+        let outer = root.join("task-graph");
+        let inner_project = root.join("subproject");
+        let inner = inner_project.join("task-graph");
+        let working_dir = inner_project.join("src");
+        std::fs::create_dir_all(&outer).unwrap();
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::create_dir_all(&working_dir).unwrap();
+
+        let found = find_project_dir_from("task-graph", &working_dir, Some(3));
+        assert_eq!(found, Some(inner));
+    }
+
+    /// Verifies that when max_depth is too shallow to reach the target,
+    /// the function falls back to a relative path.
+    #[test]
+    fn find_project_dir_from_respects_max_depth() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create: root/task-graph/ and root/a/b/c/ (3 levels deep)
+        let project_dir = root.join("task-graph");
+        let deep_dir = root.join("a").join("b").join("c");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::create_dir_all(&deep_dir).unwrap();
+
+        // Depth 2 can't reach root from a/b/c (needs 3 hops)
+        let not_found = find_project_dir_from("task-graph", &deep_dir, Some(2));
+        assert_eq!(not_found, Some(PathBuf::from("task-graph")));
+
+        // Depth 3 can reach it
+        let found = find_project_dir_from("task-graph", &deep_dir, Some(3));
+        assert_eq!(found, Some(project_dir));
+    }
+
+    /// Verifies that when no ancestor has the target directory, the function
+    /// falls back to a relative path (for creation in the starting directory).
+    #[test]
+    fn find_project_dir_from_falls_back_when_not_found() {
+        let temp = TempDir::new().unwrap();
+        let empty_dir = temp.path().join("empty");
+        std::fs::create_dir_all(&empty_dir).unwrap();
+
+        // max_depth=0 means only check start_dir itself
+        let found = find_project_dir_from("task-graph", &empty_dir, Some(0));
+        assert_eq!(found, Some(PathBuf::from("task-graph")));
     }
 }
